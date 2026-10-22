@@ -1,0 +1,42 @@
+# Standalone development environment. Never combine with compose.production.yaml.
+name: setlist-sandbox
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: setlist
+      POSTGRES_PASSWORD: setlist
+      POSTGRES_DB: setlist_sandbox
+    volumes:
+      - sandbox_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U setlist -d setlist_sandbox"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  migrate:
+    image: setlist-sandbox-app
+    build: .
+    environment:
+      DATABASE_URL: postgresql+asyncpg://setlist:setlist@db:5432/setlist_sandbox
+    command: [".venv/bin/alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+  bot:
+    image: setlist-sandbox-app
+    build: .
+    environment:
+      # No BOT_TOKEN fallback and no production .env passed into this container.
+      BOT_TOKEN: ${SANDBOX_BOT_TOKEN:-}
+      DATABASE_URL: postgresql+asyncpg://setlist:setlist@db:5432/setlist_sandbox
+      BOT_COMMAND_LEGACY_LANGUAGES: "[]"
+      BOT_COMMAND_EXTRA_SCOPES: "[]"
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+volumes:
+  sandbox_data:
