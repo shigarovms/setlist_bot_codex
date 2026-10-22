@@ -1,0 +1,14 @@
+# Enable together with compose.yaml, using COMPOSE_FILE in the server's .env.
+# Generate POSTGRES_PASSWORD as hex so it is safe inside a PostgreSQL URL.
+services:
+  db:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    restart: unless-stopped
+    ports: !reset []
+  migrate:
+    environment:
+      DATABASE_URL: postgresql+asyncpg://setlist:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/setlist
+  bot:
+    environment:
+      DATABASE_URL: postgresql+asyncpg://setlist:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/setlist
