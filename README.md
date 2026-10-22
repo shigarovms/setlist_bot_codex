@@ -56,6 +56,8 @@ XLSX, обратного импорта ZIP, голосования и разб�
 Пароль PostgreSQL в Compose предназначен для локальной разработки, не для production.
 Для постоянного сервера используйте `compose.production.yaml` со случайным паролем
 и настройкой `COMPOSE_FILE` по [инструкции эксплуатации](docs/operations.md#постоянный-сервер-timeweb-cloud).
+Для чистого сервера Ubuntu есть [интерактивный установщик](scripts/setup-server.sh),
+который проверяет Telegram, подготавливает базу и настраивает ежедневные локальные копии.
 
 ```bash
 docker compose up --build -d
