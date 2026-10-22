@@ -1,0 +1,456 @@
+from typing import Any
+
+MESSAGES = {
+    "ru": {
+        "welcome": "Бот для репертуара и сет-листов. /help — команды.\nАдминистратор создаёт коллектив командой /group Название в общем чате. Участники: /register Ваша роль.",
+        "help": (
+            "В общем чате администратор Telegram создаёт коллектив: /group Название.\n"
+            "Участник подаёт заявку: /register гитарист. Администратор: /members.\n"
+            "В личном чате: /groups — выбор коллектива кнопками. Можно состоять в нескольких коллективах.\n"
+            "Язык: /language ru или en; язык коллектива: /group_language ru или en.\n\n"
+            "Каталог: /catalog [поиск], /archived.\n"
+            "Создать: /song Название | 03:38 | 110 | свет | комментарий\n"
+            "Последние три поля необязательны.\n"
+            "Таблица: /song на первой строке, затем вставьте ячейки из Sheets/Excel.\n"
+            "Без заголовков: название, время, свет, BPM, комментарий. Сохранение — после предпросмотра.\n"
+            "Изменить: /edit Название | Новое название | 03:38 | 110 | свет | комментарий\n"
+            "Копировать все параметры: /copy Название | Новое название | 05:00\n"
+            "Алиас: /alias Название | Альтернативное название\n"
+            "Архивирование и восстановление — кнопками карточки песни; заявки: /proposals.\n"
+            "Участники предлагают изменения каталога, администратор одобряет.\n\n"
+            "Концерты: /concert 2026-12-31 | Название, /concerts.\n"
+            "Выбирайте концерт кнопками /concerts.\n"
+            "Сет-лист: /setlist; общий вариант: /shared.\n"
+            "Добавить: /add — выбор песни кнопками; /add Комета | 2 — во второй блок.\n"
+            "Списком: /add на первой строке, затем названия песен по одному на строку.\n"
+            "Новый вариант целиком: /suggestion и список песен. Старый остаётся в истории.\n"
+            "/suggestion без списка спрашивает ваш вариант; ответьте списком на сообщение бота.\n"
+            "Можно ответить списком прямо на рабочий сет-лист — концерт определяется этим сообщением.\n"
+            "Удалить: /remove блок позиция.\n"
+            "Переместить: /move блок откуда куда.\n"
+            "Новый блок: /block Название; бис: /encore.\n"
+            "Песни в бис: /add_encore и список; удалить песню: /remove_encore_song [позиция].\n"
+            "Удалить бис: /remove_encore (с подтверждением).\n"
+            "Средняя пауза концерта: /pause 30 (по умолчанию 5 секунд в новых концертах).\n"
+            "Подводка перед песней: /pause позиция секунды; 0 — без подводки.\n"
+            "Для другого блока: /pause блок позиция секунды. Вернуть среднюю: default вместо секунд.\n"
+            "Для новых концертов коллектива: /group_pause секунды (администратор).\n"
+            "Перерыв после блока: /break блок секунды.\n"
+            "Средняя пауза учитывается только между песнями. Перед первой — только заданная подводка.\n"
+            "Стандартные паузы скрыты в списке; вручную заданные положительные подводки видны.\n"
+            "Утвердить: /approve; вернуть в работу: /reopen.\n"
+            "История, просмотр вариантов и восстановление: /history или /versions и кнопки.\n\n"
+            "«Предложить свой вариант» — только под текущим редактируемым списком, включая пустой.\n"
+            "Кнопка задаёт вопрос и даёт названия для копирования; ответьте своим списком на этот вопрос.\n"
+            "Администратор: /delete_concert, /delete_group (два подтверждения), /backup — ZIP общих данных.\n"
+            "Корзина и восстановление в течение 30 дней: /trash.\n\n"
+            "В личном чате /setlist и правки работают с вашим черновиком.\n"
+            "Предложить его группе: /publish. Применение — кнопкой опубликованного предложения.\n"
+            "Выбор песни и действия доступны через кнопки /catalog. /cancel — отмена подтверждений."
+        ),
+        "ok": "Готово.",
+        "empty": "Пока пусто.",
+        "choose_group": "Выберите коллектив:",
+        "choose_concert": "Выберите концерт:",
+        "selected": "Выбрано: {name}",
+        "created_group": "Создан коллектив «{name}». Вы — администратор.",
+        "invited": "Одноразовый код на 24 часа: {token}\nУчастник отправляет боту в личном чате /join {token}",
+        "confirm": "Проверьте и подтвердите:",
+        "confirm_button": "Подтвердить",
+        "cancel_button": "Отмена",
+        "proposed": "Предложение отправлено администратору.",
+        "saved_song": "Песня «{name}» сохранена.",
+        "approve_button": "Одобрить",
+        "reject_button": "Отклонить",
+        "draft": "Личный черновик",
+        "working": "Общий рабочий сет-лист",
+        "approved_title": "Утверждённый сет-лист",
+        "block_title": "Блок {number}",
+        "version": "Версия {version}",
+        "average_pause": "Средняя пауза: {time}.",
+        "inherited_pause": "пауза {time} (средняя)",
+        "custom_pause": "пауза {time} (индивидуальная)",
+        "lead_in": "Подводка: {time}",
+        "block_duration": "Длительность блока: {time}",
+        "block_break": "Перерыв: {time}",
+        "encore": "Бис",
+        "add_encore": "Добавить бис",
+        "copy_variant": "Предложить свой вариант",
+        "suggestion_prompt": "Какой вариант вы предлагаете? Ответьте на это сообщение списком песен — по одному названию на строку.",
+        "suggestion_private": "Это изменит только ваш личный черновик. Для публикации используйте /publish.",
+        "timing_net": "Чистое время: {time}",
+        "timing_breaks": "Перерывы: {time}",
+        "timing_total": "Итого: {time}",
+        "template_expired": "Срок действия кнопки истёк. Откройте вариант заново и нажмите новую кнопку.",
+        "in_trash": "Концерт или коллектив удалён. Администратор может восстановить его через /trash в течение 30 дней.",
+        "trash_expired": "Срок восстановления истёк: прошло 30 дней после удаления.",
+        "chat_taken": "Чат уже связан с другим коллективом. Сначала освободите чат, затем повторите восстановление.",
+        "delete_changed": "Данные изменились после предпросмотра. Начните удаление заново, чтобы проверить актуальный состав.",
+        "trash_title": "Корзина. Восстановление доступно администратору в течение 30 дней:",
+        "trash_empty": "В вашей корзине нет доступных для восстановления коллективов и концертов.",
+        "trash_group": "Коллектив «{name}» — восстановление до {until}.",
+        "trash_concert": "Концерт «{name}» — восстановление до {until}.",
+        "restore_group_button": "Восстановить коллектив: {name}",
+        "restore_concert_button": "Восстановить концерт: {name}",
+        "group_restored": "Коллектив «{name}» восстановлен. Выберите его через /groups в личном чате или продолжайте в общем чате.",
+        "concert_restored": "Концерт «{name}» восстановлен со всеми вариантами и черновиками. Выберите его через /concerts.",
+        "group_delete_preview": "Удалить коллектив «{name}» вместе с каталогом, концертами, всеми вариантами и личными черновиками?\nСначала можно скачать ZIP с общими данными. Личные черновики в ZIP не включаются. Восстановление через /trash доступно 30 дней, затем данные будут окончательно удалены.\nЭто первое из двух подтверждений.",
+        "group_delete_final": "Последнее подтверждение удаления коллектива «{name}» и всех его данных. Коллектив перейдёт в корзину на 30 дней; его чат освободится. Нажмите «Подтвердить», чтобы удалить.",
+        "group_deleted": "Коллектив «{name}» перемещён в корзину на 30 дней. Восстановление: /trash. Чат доступен для создания нового коллектива.",
+        "concert_delete_preview": "Удалить концерт «{name}» вместе со всеми версиями сет-листа, предложениями и личными черновиками участников? Каталог песен сохраняется. Восстановление через /trash доступно 30 дней, затем данные концерта будут окончательно удалены.",
+        "concert_deleted": "Концерт «{name}» перемещён в корзину на 30 дней. Восстановление: /trash.",
+        "delete_concert_button": "Удалить концерт",
+        "backup_button": "Скачать общие данные ZIP",
+        "backup_ready": "ZIP содержит каталог, концерты, общие версии и опубликованные предложения в JSON и CSV. Личные черновики и Telegram ID не включены. Восстановление из корзины: /trash; обратный импорт ZIP пока не реализован.",
+        "encore_exists": "Бис уже добавлен. Используйте /add_encore для песен или /remove_encore для удаления биса.",
+        "encore_missing": "Бис ещё не добавлен. Сначала выполните /encore.",
+        "encore_add_button": "Добавить песни в бис",
+        "encore_remove_song_button": "Удалить песню из биса",
+        "encore_drop_button": "Удалить бис",
+        "encore_add_prompt": "Выберите песню для биса или отправьте /add_encore и названия по одному на строку.",
+        "encore_remove_prompt": "Выберите песню, которую нужно убрать из биса:",
+        "encore_drop_preview": "Бис будет удалён вместе с его песнями из рабочего варианта. Прежний вариант останется в истории.",
+        "encore_song_drop_preview": "Выбранная песня будет убрана из биса. Каталог и прежние версии сохраняются.",
+        "encore_private_drop_preview": "Изменение будет применено только к вашему личному черновику.",
+        "remove_block": "удаление блока",
+        "variant_label": "{name} · вариант {number}",
+        "revision_label": "{name} · версия {number}",
+        "member_name": "Участник",
+        "song_list_input": "Отправьте /add или /suggestion, затем названия песен по одному на строку (от 1 до 200 песен).",
+        "song_list_errors": "Список не применён. Исправьте указанные строки и отправьте его целиком ещё раз:",
+        "song_list_missing": "песня не найдена в активном каталоге",
+        "song_list_ambiguous": "несколько совпадений: {names}. Уточните название",
+        "song_list_line": "Строка {number} «{title}»: {reason}.",
+        "add_list": "добавление списка песен",
+        "suggestion": "новый вариант сет-листа",
+        "group_pause_setting": "{name}\nПауза по умолчанию для новых концертов: {time}.\nТекущие концерты и черновики сохраняют свои настройки. Изменить: /group_pause секунды (администратор).",
+        "pause_usage": "Средняя пауза между песнями: /pause 30.\nПодводка: /pause 2 60 — 60 секунд перед второй песней первого блока; /pause 1 2 60 — с явным номером блока.\n0 — без подводки; default вместо секунд — вернуть среднюю.\nПеред первой песней учитывается только индивидуальная подводка. В личном чате меняется только ваш черновик.",
+        "pause_input": "Укажите целое число секунд от 0 до 86400. Например, /pause 30 или /pause 1 2 0.",
+        "timing": "Чистое время: {net}. Перерывы: {breaks}. Полное время: {total}.",
+        "block_timing": "Длительность блока: {time}; перерыв после: {break_time}",
+        "published": "Черновик опубликован в общем чате.",
+        "submission": "Участник предложил сет-лист. Откройте предложение кнопкой ниже.",
+        "restore_notice": "Будет восстановлен порядок выбранной версии. Параметры песен берутся из текущего каталога.",
+        "private_only": "Эта команда доступна только в личном чате с ботом.",
+        "group_only": "Эта команда доступна в привязанном общем чате. В личном чате редактируется только личный черновик.",
+        "forbidden": "Нет доступа к этому коллективу.",
+        "admin_only": "Нужны права администратора коллектива.",
+        "chat_admin": "Создать коллектив может администратор Telegram-чата.",
+        "not_found": "Объект не найден или недоступен.",
+        "select_group": "Сначала выберите коллектив: /groups.",
+        "select_concert": "Сначала выберите концерт: /concerts.",
+        "bind_first": "Сначала администратор должен создать в этом чате коллектив: /group Название.",
+        "view_first": "Сначала откройте /setlist, чтобы увидеть актуальную версию.",
+        "conflict": "Данные уже изменились. Откройте актуальный список и повторите действие.",
+        "approved": "Сет-лист утверждён. Администратор может выполнить /reopen.",
+        "not_approved": "Сет-лист ещё не утверждён.",
+        "empty_setlist": "Нельзя утвердить пустой сет-лист.",
+        "duration": "Длительность должна быть положительной в формате ММ:СС, например 00:05.",
+        "song_input": "Проверьте поля песни. /help — формат команды.",
+        "setlist_input": "Проверьте номера блоков, позиций и аргументы. /help — формат команды.",
+        "concert_input": "Формат: /concert ГГГГ-ММ-ДД | Название (необязательно).",
+        "group_name": "Укажите название коллектива от 1 до 200 символов.",
+        "invitation": "Приглашение не найдено, использовано или истекло.",
+        "already_member": "Вы уже участник или ваша заявка ожидает подтверждения.",
+        "already_bound": "В этом чате уже создан коллектив.",
+        "alias_collision": "Алиас совпадает с другим названием. Выберите уникальное название; разрешение неоднозначных алиасов появится позднее.",
+        "already_done": "Это действие уже выполнено.",
+        "archived": "Архивную песню нельзя добавить в новый вариант.",
+        "catalog_changed": "Каталог изменился после публикации. Автору нужно обновить и повторно опубликовать черновик.",
+        "confirmation": "Подтверждение истекло, отменено или относится к другому пользователю, чату либо концерту.",
+        "no_chat": "Общий чат коллектива недоступен.",
+        "musical_role": "Укажите роль в коллективе: например, /register гитарист.",
+        "registered": "Заявка принята и ожидает подтверждения администратора. /members — список заявок для администратора.",
+        "members": "Участники и заявки (имя · музыкальная роль · статус):",
+        "pending": "ожидает подтверждения",
+        "active": "участник",
+        "input": "Не удалось разобрать команду. /help — примеры.",
+        "internal": "Не удалось выполнить действие. Попробуйте позже.",
+        "history_line": "v{number} · {action} · {time} · автор {author}",
+        "song_choose": "Найдено несколько вариантов. Выберите песню через /catalog и используйте кнопки её карточки.",
+        "song_open": "Открыть: {name}",
+        "song_add": "Добавить в сет-лист",
+        "song_edit": "Изменить",
+        "song_copy": "Копировать",
+        "song_alias": "Добавить алиас",
+        "song_archive": "В архив",
+        "song_unarchive": "Восстановить песню",
+        "edit_hint": "Для выбранной песни отправьте изменённую карточку:\n/edit | {title} | {time} | {bpm} | {lights} | {comment}",
+        "copy_hint": "Для копии выбранной песни отправьте:\n/copy | Новое название | 05:00",
+        "alias_hint": "Для выбранной песни отправьте:\n/alias | Альтернативное название",
+        "add_choose": "Выберите песню для добавления:",
+        "revision_open": "Открыть версию {number}",
+        "revision_restore": "Восстановить этот порядок",
+        "submission_open": "Открыть предложение",
+        "submission_apply": "Применить к общему сет-листу",
+        "import_summary": "Импорт: новых — {new}, повторяющихся — {duplicates}, ошибочных строк — {errors}.",
+        "import_new": "Новая",
+        "import_duplicate": "Уже в каталоге или списке — пропуск",
+        "import_row_error": "Строка {number} «{title}»: {error}",
+        "import_note": "Существующие песни останутся без изменений. Ошибочные строки нужно исправить перед импортом.",
+        "import_done": "Добавлено песен: {count}. Повторяющиеся записи пропущены.",
+        "import_none": "Новых песен для добавления нет.",
+        "import_map": "Настроить столбцы",
+        "import_header_prompt": "Есть ли в таблице строка заголовков?",
+        "import_with_header": "С заголовками",
+        "import_without_header": "Без заголовков",
+        "import_column_prompt": "Выберите столбец для поля «{field}»:",
+        "import_skip": "Не использовать",
+        "import_field_title": "Название",
+        "import_field_time": "Длительность",
+        "import_field_lights": "Свет",
+        "import_field_bpm": "BPM",
+        "import_field_comment": "Комментарий",
+        "import_size": "Вставьте непустую таблицу: до 500 песен и 50 столбцов.",
+        "import_format": "Не удалось прочитать таблицу. Разделяйте столбцы табуляцией или двумя и более пробелами. Также поддерживается CSV с корректными кавычками.",
+        "import_columns": "Не удалось определить название и длительность или порядок столбцов. Настройте столбцы кнопкой ниже.",
+        "import_empty": "В таблице есть заголовки, но нет песен.",
+        "import_duration": "Некорректная длительность. Нужен формат ММ:СС, например 03:43.",
+        "import_bpm": "BPM должен быть положительным целым числом или пустым.",
+        "import_unnamed": "Есть данные в столбце без заголовка. Назначьте его полю или добавьте заголовок.",
+        "import_ambiguous": "В каталоге несколько записей с таким названием или алиасом. Уточните название.",
+        "import_duplicate_conflict": "В таблице это название повторяется с разными параметрами. Исправьте строки.",
+        "import_changed": "Каталог или настройки импорта изменились. Отправьте таблицу повторно и проверьте новый предпросмотр.",
+        "import_fix": "Перед импортом исправьте ошибки и заново отправьте таблицу.",
+        "created": "создание",
+        "add": "добавление песни",
+        "remove": "удаление из списка",
+        "move": "перестановка",
+        "block": "новый блок",
+        "pause": "пауза",
+        "default_pause": "изменение средней паузы",
+        "break": "перерыв",
+        "approved_action": "утверждение",
+        "reopened": "возврат в работу",
+        "restored": "восстановление",
+        "proposal_applied": "применение предложения",
+    },
+    "en": {
+        "welcome": "Repertoire and setlist bot. /help — commands.\nA Telegram chat administrator creates the group with /group Name. Members: /register Your role.",
+        "help": (
+            "A Telegram chat administrator creates the group: /group Name in the group chat.\n"
+            "Apply: /register guitarist. Administrator: /members to review applications.\n"
+            "In private chat: /groups to select a group using buttons. Multiple memberships are supported.\n"
+            "Language: /language ru or en; group language: /group_language ru or en.\n\n"
+            "Catalog: /catalog [query], /archived.\n"
+            "Create: /song Title | 03:38 | 110 | lights | comment\n"
+            "The last three fields are optional.\n"
+            "Table: /song on the first line, then paste cells from Sheets/Excel.\n"
+            "Without headers: title, time, lights, BPM, comment. Review before saving.\n"
+            "Edit: /edit Title | New title | 03:38 | 110 | lights | comment\n"
+            "Copy all parameters: /copy Title | New title | 05:00\n"
+            "Alias: /alias Title | Alternative title\n"
+            "Archive and restore songs using card buttons; proposals: /proposals.\n"
+            "Members propose catalog changes; administrators approve them.\n\n"
+            "Concerts: /concert 2026-12-31 | Title, /concerts.\n"
+            "Select a concert using /concerts buttons.\n"
+            "Setlist: /setlist; shared version: /shared.\n"
+            "Add: /add to select a song; /add Comet | 2 for the second block.\n"
+            "List: /add on the first line, then one song title per line.\n"
+            "Replace the entire setlist: /suggestion and a list of songs. History is preserved.\n"
+            "/suggestion without a list asks for your variant; reply to that message with your list.\n"
+            "You can reply with a list directly to a working setlist; its message selects the concert.\n"
+            "Remove: /remove block position.\n"
+            "Move: /move block from to.\n"
+            "New block: /block Name; encore: /encore.\n"
+            "Encore songs: /add_encore and a list; remove a song: /remove_encore_song [position].\n"
+            "Remove encore: /remove_encore (requires confirmation).\n"
+            "Average concert pause: /pause 30 (new concerts default to 5 seconds).\n"
+            "Lead-in before a song: /pause position seconds; 0 means no lead-in.\n"
+            "Other blocks: /pause block position seconds. Use default instead of seconds to reset.\n"
+            "New concerts in the group: /group_pause seconds (administrator).\n"
+            "Break after a block: /break block seconds.\n"
+            "Average pauses count only between songs. Only an explicit lead-in counts before the first.\n"
+            "Inherited pauses are hidden in the list; explicit positive lead-ins are shown.\n"
+            "Approve: /approve; reopen: /reopen.\n"
+            "History, variants and restoration: /history or /versions and buttons.\n\n"
+            "“Propose your variant” is only below the current editable setlist, including an empty one.\n"
+            "It asks a question and provides titles to copy; reply to that question with your list.\n"
+            "Administrator: /delete_concert, /delete_group (two confirmations), /backup for shared data ZIP.\n"
+            "Trash and restoration within 30 days: /trash.\n\n"
+            "In private chat, /setlist and edits use your personal draft.\n"
+            "Propose it to the group: /publish. Apply using the published proposal button.\n"
+            "Song selection and actions are available via /catalog buttons. /cancel cancels confirmations."
+        ),
+        "ok": "Done.",
+        "empty": "Nothing here yet.",
+        "choose_group": "Select a group:",
+        "choose_concert": "Select a concert:",
+        "selected": "Selected: {name}",
+        "created_group": "Created group “{name}”. You are its administrator.",
+        "invited": "Single-use code valid for 24 hours: {token}\nSend the bot /join {token} in a private chat.",
+        "confirm": "Review and confirm:",
+        "confirm_button": "Confirm",
+        "cancel_button": "Cancel",
+        "proposed": "Proposal sent for administrator review.",
+        "saved_song": "Song “{name}” saved.",
+        "approve_button": "Approve",
+        "reject_button": "Reject",
+        "draft": "Personal draft",
+        "working": "Shared working setlist",
+        "approved_title": "Approved setlist",
+        "block_title": "Block {number}",
+        "version": "Version {version}",
+        "average_pause": "Average pause: {time}.",
+        "inherited_pause": "pause {time} (average)",
+        "custom_pause": "pause {time} (custom)",
+        "lead_in": "Lead-in: {time}",
+        "block_duration": "Block duration: {time}",
+        "block_break": "Break: {time}",
+        "encore": "Encore",
+        "add_encore": "Add encore",
+        "copy_variant": "Propose your variant",
+        "suggestion_prompt": "What variant do you propose? Reply to this message with one song title per line.",
+        "suggestion_private": "This only changes your personal draft. Use /publish to share it.",
+        "timing_net": "Performance: {time}",
+        "timing_breaks": "Breaks: {time}",
+        "timing_total": "Total: {time}",
+        "template_expired": "This button expired. Open the variant again and use its new button.",
+        "in_trash": "This concert or group is deleted. An administrator can restore it using /trash within 30 days.",
+        "trash_expired": "The 30-day restoration period has expired.",
+        "chat_taken": "This chat is linked to another group. Free the chat before restoring this group.",
+        "delete_changed": "Data changed after the preview. Start deletion again to review the current contents.",
+        "trash_title": "Trash. Administrators can restore items within 30 days:",
+        "trash_empty": "There are no groups or concerts available for restoration in your trash.",
+        "trash_group": "Group “{name}” — restore before {until}.",
+        "trash_concert": "Concert “{name}” — restore before {until}.",
+        "restore_group_button": "Restore group: {name}",
+        "restore_concert_button": "Restore concert: {name}",
+        "group_restored": "Group “{name}” restored. Select it using /groups in private chat or continue in the group chat.",
+        "concert_restored": "Concert “{name}” restored with all variants and drafts. Select it using /concerts.",
+        "group_delete_preview": "Delete group “{name}” including its catalog, concerts, all variants and private drafts?\nYou can first download a ZIP of shared data. Private drafts are excluded. Restore using /trash within 30 days, after which the data will be permanently deleted.\nThis is the first of two confirmations.",
+        "group_delete_final": "Final confirmation: delete group “{name}” and all its data. It will stay in trash for 30 days and its chat will be released. Press Confirm to delete.",
+        "group_deleted": "Group “{name}” moved to trash for 30 days. Restore using /trash. Its chat is available for a new group.",
+        "concert_delete_preview": "Delete concert “{name}” with all setlist versions, submissions and members’ private drafts? The song catalog is preserved. Restore using /trash within 30 days, after which concert data will be permanently deleted.",
+        "concert_deleted": "Concert “{name}” moved to trash for 30 days. Restore using /trash.",
+        "delete_concert_button": "Delete concert",
+        "backup_button": "Download shared data ZIP",
+        "backup_ready": "The ZIP contains the catalog, concerts, shared versions and published proposals as JSON and CSV. Private drafts and Telegram IDs are excluded. Restore from trash using /trash; ZIP import is not implemented yet.",
+        "encore_exists": "An encore already exists. Use /add_encore for songs or /remove_encore to remove it.",
+        "encore_missing": "No encore yet. Use /encore first.",
+        "encore_add_button": "Add songs to encore",
+        "encore_remove_song_button": "Remove song from encore",
+        "encore_drop_button": "Remove encore",
+        "encore_add_prompt": "Select a song for the encore or send /add_encore followed by one title per line.",
+        "encore_remove_prompt": "Select the song to remove from the encore:",
+        "encore_drop_preview": "The encore and its songs will be removed from the working variant. The previous variant stays in history.",
+        "encore_song_drop_preview": "The selected song will be removed from the encore. The catalog and previous versions are preserved.",
+        "encore_private_drop_preview": "This change will only affect your private draft.",
+        "remove_block": "block removed",
+        "variant_label": "{name} · variant {number}",
+        "revision_label": "{name} · version {number}",
+        "member_name": "Member",
+        "song_list_input": "Send /add or /suggestion, followed by one song title per line (1 to 200 songs).",
+        "song_list_errors": "The list was not applied. Correct these lines and send the entire list again:",
+        "song_list_missing": "song not found in the active catalog",
+        "song_list_ambiguous": "multiple matches: {names}. Specify the title",
+        "song_list_line": "Line {number} “{title}”: {reason}.",
+        "add_list": "song list added",
+        "suggestion": "new setlist variant",
+        "group_pause_setting": "{name}\nDefault pause for new concerts: {time}.\nExisting concerts and drafts keep their settings. Change: /group_pause seconds (administrator).",
+        "pause_usage": "Average pause between songs: /pause 30.\nLead-in: /pause 2 60 — 60 seconds before the second song in the first block; /pause 1 2 60 includes the block number.\n0 means no lead-in; use default instead of seconds to reset.\nOnly an explicit lead-in counts before the first song. Private chat changes only your draft.",
+        "pause_input": "Enter a whole number of seconds from 0 to 86400. For example, /pause 30 or /pause 1 2 0.",
+        "timing": "Performance: {net}. Breaks: {breaks}. Total: {total}.",
+        "block_timing": "Block duration: {time}; break after: {break_time}",
+        "published": "Draft published in the group chat.",
+        "submission": "A member proposed a setlist. Open the proposal using the button below.",
+        "restore_notice": "Restores the selected order using current catalog parameters.",
+        "private_only": "This command is available only in a private chat with the bot.",
+        "group_only": "Use the linked group chat. Private chat edits only affect your personal draft.",
+        "forbidden": "You do not have access to this group.",
+        "admin_only": "Group administrator access is required.",
+        "chat_admin": "A Telegram chat administrator must create the group.",
+        "not_found": "Object not found or unavailable.",
+        "select_group": "Select a group first: /groups.",
+        "select_concert": "Select a concert first: /concerts.",
+        "bind_first": "An administrator must create the group in this chat first: /group Name.",
+        "view_first": "Open /setlist first to see the current version.",
+        "conflict": "The data has changed. Open the current list and repeat your action.",
+        "approved": "The setlist is approved. An administrator can /reopen it.",
+        "not_approved": "The setlist is not approved yet.",
+        "empty_setlist": "Cannot approve an empty setlist.",
+        "duration": "Use a positive MM:SS duration, for example 00:05.",
+        "song_input": "Check the song fields. See /help for the command format.",
+        "setlist_input": "Check block numbers, positions and arguments. See /help.",
+        "concert_input": "Format: /concert YYYY-MM-DD | Optional title.",
+        "group_name": "Use a group name between 1 and 200 characters.",
+        "invitation": "Invitation missing, expired or already used.",
+        "already_member": "You are already a member or your application is pending.",
+        "already_bound": "This chat already has a group.",
+        "alias_collision": "Alias matches another title. Choose a unique alias; ambiguity resolution will be added later.",
+        "already_done": "This action has already been completed.",
+        "archived": "Archived songs cannot be added to a new version.",
+        "catalog_changed": "The catalog changed after publication. The author must refresh and publish the draft again.",
+        "confirmation": "Confirmation expired, was cancelled, or belongs to another user, chat or concert.",
+        "no_chat": "The group's chat is unavailable.",
+        "musical_role": "Specify your musical role, for example /register guitarist.",
+        "registered": "Application received; waiting for administrator approval. /members lists applications for the administrator.",
+        "members": "Members and applications (name · musical role · status):",
+        "pending": "pending approval",
+        "active": "member",
+        "input": "Could not parse the command. See /help for examples.",
+        "internal": "Could not complete the action. Please try again later.",
+        "history_line": "v{number} · {action} · {time} · author {author}",
+        "song_choose": "Several matches found. Select a song via /catalog and use its card buttons.",
+        "song_open": "Open: {name}",
+        "song_add": "Add to setlist",
+        "song_edit": "Edit",
+        "song_copy": "Copy",
+        "song_alias": "Add alias",
+        "song_archive": "Archive",
+        "song_unarchive": "Restore song",
+        "edit_hint": "Send the modified card for the selected song:\n/edit | {title} | {time} | {bpm} | {lights} | {comment}",
+        "copy_hint": "To copy the selected song send:\n/copy | New title | 05:00",
+        "alias_hint": "For the selected song send:\n/alias | Alternative title",
+        "add_choose": "Select a song to add:",
+        "revision_open": "Open version {number}",
+        "revision_restore": "Restore this order",
+        "submission_open": "Open proposal",
+        "submission_apply": "Apply to shared setlist",
+        "import_summary": "Import: {new} new, {duplicates} duplicates, {errors} invalid rows.",
+        "import_new": "New",
+        "import_duplicate": "Already in catalog or list — skipped",
+        "import_row_error": "Row {number} “{title}”: {error}",
+        "import_note": "Existing songs will remain unchanged. Fix invalid rows before importing.",
+        "import_done": "Songs added: {count}. Duplicates were skipped.",
+        "import_none": "There are no new songs to add.",
+        "import_map": "Map columns",
+        "import_header_prompt": "Does the table include a header row?",
+        "import_with_header": "With headers",
+        "import_without_header": "Without headers",
+        "import_column_prompt": "Select the column for “{field}”:",
+        "import_skip": "Skip",
+        "import_field_title": "Title",
+        "import_field_time": "Duration",
+        "import_field_lights": "Lights",
+        "import_field_bpm": "BPM",
+        "import_field_comment": "Comment",
+        "import_size": "Paste a nonempty table with at most 500 songs and 50 columns.",
+        "import_format": "Could not read the table. Separate columns with tabs or two or more spaces. Correctly quoted CSV is also supported.",
+        "import_columns": "Could not identify title and duration or the column order. Map columns using the button below.",
+        "import_empty": "The table has headers but no songs.",
+        "import_duration": "Invalid duration. Use MM:SS, for example 03:43.",
+        "import_bpm": "BPM must be a positive integer or empty.",
+        "import_unnamed": "An unnamed column contains data. Map it to a field or add a header.",
+        "import_ambiguous": "Several catalog songs match this title or alias. Use a distinct title.",
+        "import_duplicate_conflict": "The table repeats this title with different parameters. Fix the rows.",
+        "import_changed": "The catalog or column mapping changed. Send the table again and review the new preview.",
+        "import_fix": "Fix invalid rows and send the table again before importing.",
+        "created": "created",
+        "add": "song added",
+        "remove": "song removed",
+        "move": "reordered",
+        "block": "block added",
+        "pause": "pause",
+        "default_pause": "average pause changed",
+        "break": "break",
+        "approved_action": "approved",
+        "reopened": "reopened",
+        "restored": "restored",
+        "proposal_applied": "proposal applied",
+    },
+}
+
+
+def tr(language: str, key: str, **values: Any) -> str:
+    return MESSAGES.get(language, MESSAGES["ru"])[key].format(**values)

@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: setlist
+      POSTGRES_PASSWORD: setlist
+      POSTGRES_DB: setlist
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U setlist"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "127.0.0.1:5432:5432"
+  migrate:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+asyncpg://setlist:setlist@db:5432/setlist
+    command: [".venv/bin/alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+  bot:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN:-}
+      BOT_COMMAND_LEGACY_LANGUAGES: "${BOT_COMMAND_LEGACY_LANGUAGES:-[]}"
+      BOT_COMMAND_EXTRA_SCOPES: "${BOT_COMMAND_EXTRA_SCOPES:-[]}"
+      DATABASE_URL: postgresql+asyncpg://setlist:setlist@db:5432/setlist
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+volumes:
+  postgres_data:

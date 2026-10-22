@@ -1,0 +1,1113 @@
+import json
+from dataclasses import dataclass, field
+from datetime import date, timedelta
+from typing import Any
+from uuid import UUID
+
+from setlist_bot.application.backup import Backup
+from setlist_bot.application.catalog import SONG_FIELDS, Catalog
+from setlist_bot.application.groups import Groups
+from setlist_bot.application.importing import Importer
+from setlist_bot.application.ports import Store
+from setlist_bot.application.setlists import Setlists
+from setlist_bot.application.templates import Templates
+from setlist_bot.application.trash import RETENTION, Trash
+from setlist_bot.domain.entities import (
+    CatalogImport,
+    CatalogProposal,
+    ChatBinding,
+    Concert,
+    Confirmation,
+    Context,
+    Group,
+    Membership,
+    Outbox,
+    Revision,
+    Song,
+    Submission,
+    User,
+    now,
+)
+from setlist_bot.domain.importing import FIELDS, read_table
+from setlist_bot.domain.rules import (
+    SongListError,
+    clock,
+    duration,
+    normalize,
+    require,
+    validate_song,
+)
+from setlist_bot.transport.i18n import tr
+from setlist_bot.transport.render import concert_label, render_setlist, song_card
+
+
+@dataclass
+class Response:
+    text: str
+    buttons: list[tuple[str, str]] = field(default_factory=list)
+    files: list[tuple[str, bytes]] = field(default_factory=list)
+    monospace: bool = False
+    suggestion_template_id: UUID | None = None
+    force_reply: bool = False
+
+
+class Controller:
+    def __init__(
+        self, store: Store, user: User, chat_id: int, *, private: bool, chat_admin: bool = False
+    ) -> None:
+        self.store, self.user, self.chat_id = store, user, chat_id
+        self.private, self.chat_admin = private, chat_admin
+        self.language = user.language
+        self.groups = Groups(store, user)
+        self.catalog = Catalog(store, user)
+        self.setlists = Setlists(store, user)
+        self.importer = Importer(store, user, chat_id)
+        self.trash = Trash(store, user)
+        self.templates = Templates(store, user, chat_id)
+        self.reply_target: tuple[UUID, UUID] | None = None
+
+    def t(self, key: str, **values: Any) -> str:
+        return tr(self.language, key, **values)
+
+    async def confirm(
+        self,
+        context: Context,
+        command: str,
+        preview: str,
+        *,
+        concert: bool = False,
+        monospace: bool = False,
+    ) -> Response:
+        payload: dict[str, Any] = {
+            "command": command,
+            "group_id": str(context.group_id),
+            "concert_id": str(context.concert_id) if concert else None,
+        }
+        assert context.group_id is not None
+        payload["group_epoch"] = (await self.store.get(Group, context.group_id)).lifecycle_version
+        if concert:
+            assert context.concert_id is not None
+            payload["concert_epoch"] = (
+                await self.store.get(Concert, context.concert_id)
+            ).lifecycle_version
+        if command.startswith(("change_shared approve", "publish_draft")):
+            assert context.group_id is not None and context.concert_id is not None
+            snapshot, _, _ = await self.setlists.read(
+                context.group_id, context.concert_id, private=self.private
+            )
+            payload["song_versions"] = {
+                item["song_id"]: item["song_version"]
+                for block in snapshot["blocks"]
+                for item in block["items"]
+            }
+        confirmation = Confirmation(
+            user_id=self.user.id,
+            chat_id=self.chat_id,
+            expires_at=now() + timedelta(minutes=10),
+            command=json.dumps(payload),
+        )
+        self.store.add(confirmation)
+        buttons = [
+            (self.t("confirm_button"), f"confirm {confirmation.id}"),
+            (self.t("cancel_button"), "cancel"),
+        ]
+        return Response(
+            self.t("confirm") + "\n" + preview,
+            buttons,
+            monospace=monospace,
+        )
+
+    async def execute(
+        self, text: str, *, confirmed: bool = False, reply_template_id: UUID | None = None
+    ) -> Response:
+        message = text.lstrip()
+        head = message.split(maxsplit=1)[0] if message else ""
+        raw_args = message[len(head) :].lstrip(" \t\r")
+        if raw_args.startswith("\n"):
+            raw_args = raw_args[1:]
+        args = raw_args.strip()
+        command = head.lstrip("/").split("@")[0].lower()
+        args = args.strip()
+        if not self.private:
+            bindings = await self.store.find(ChatBinding, chat_id=self.chat_id)
+            if bindings:
+                group = await self.store.get(Group, bindings[0].group_id)
+                self.language = group.language
+        if reply_template_id is not None and (
+            not message.startswith("/") or command == "suggestion"
+        ):
+            await self._template_context(reply_template_id)
+            if not message.startswith("/"):
+                command, args = "suggestion", message.strip()
+        if command in ("start", "help"):
+            return Response(self.t("welcome" if command == "start" else "help"))
+        if command == "language":
+            require(args in ("ru", "en"), "input")
+            self.user.language = args
+            self.language = args if self.private else self.language
+            return Response(self.t("ok"))
+        if command == "copy_list":
+            return await self._suggestion_prompt(UUID(args))
+        if command == "trash":
+            return await self._trash_list()
+        if command == "restore_group":
+            identifier, epoch = args.split()
+            restored_group = await self.trash.restore_group(UUID(identifier), int(epoch))
+            return Response(self.t("group_restored", name=restored_group.name))
+        if command == "restore_concert":
+            identifier, epoch = args.split()
+            restored_target = await self.store.get(Concert, UUID(identifier))
+            restored_concert = await self.trash.restore_concert(
+                restored_target.group_id, restored_target.id, int(epoch)
+            )
+            return Response(self.t("concert_restored", name=concert_label(restored_concert)))
+        if command == "cancel":
+            for item in await self.store.find(
+                Confirmation, user_id=self.user.id, chat_id=self.chat_id
+            ):
+                await self.store.delete(item)
+            for job in await self.store.find(
+                CatalogImport, owner_id=self.user.id, chat_id=self.chat_id, status="pending"
+            ):
+                job.status = "cancelled"
+            return Response(self.t("ok"))
+        if command == "group":
+            require(not self.private, "group_only")
+            require(self.chat_admin, "chat_admin")
+            group = await self.groups.create(args, self.chat_id)
+            return Response(self.t("created_group", name=group.name))
+        if command == "groups":
+            require(self.private, "private_only")
+            memberships = await self.store.find(Membership, user_id=self.user.id, status="active")
+            groups = [await self.store.get(Group, m.group_id) for m in memberships]
+            groups = [g for g in groups if g.deleted_at is None]
+            return Response(
+                self.t("choose_group") if groups else self.t("empty"),
+                [(g.name, f"use_group {g.id}") for g in groups],
+            )
+        context = await self.groups.context(self.chat_id, self.private)
+        if command == "use_group":
+            require(self.private, "private_only")
+            group = await self.groups.access(UUID(args))
+            context.group_id, context.concert_id, context.observed_version = group.id, None, None
+            context.selected_song_id = None
+            return Response(self.t("selected", name=group.name))
+        require(context.group_id is not None, "select_group")
+        group_id = context.group_id
+        assert group_id is not None
+        if command == "register":
+            require(not self.private, "group_only")
+            await self.groups.register(group_id, args)
+            return Response(self.t("registered"))
+        group = await self.groups.access(group_id)
+        if command in ("backup", "backup_group"):
+            require(not args or UUID(args) == group_id, "not_found")
+            return Response(
+                self.t("backup_ready"),
+                files=[
+                    ("setlist-shared-data.zip", await Backup(self.store, self.user).build(group_id))
+                ],
+            )
+        if command in ("delete_group", "delete_group_step", "delete_group_final"):
+            await self.groups.access(group_id, admin=True)
+            fingerprint = await self.trash.group_fingerprint(group_id)
+            if command != "delete_group":
+                require(confirmed and args == fingerprint, "delete_changed")
+            if command == "delete_group_final":
+                await self.trash.delete_group(group_id, args)
+                return Response(self.t("group_deleted", name=group.name))
+            next_step = "delete_group_step" if command == "delete_group" else "delete_group_final"
+            response = await self.confirm(
+                context,
+                f"{next_step} {fingerprint}",
+                self.t(
+                    "group_delete_preview" if command == "delete_group" else "group_delete_final",
+                    name=group.name,
+                ),
+            )
+            if command == "delete_group":
+                response.buttons.insert(
+                    0, (self.t("backup_button"), f"backup_group {group_id.hex}")
+                )
+            return response
+        if command == "group_pause":
+            if args:
+                group = await self.groups.set_default_pause(group_id, args)
+            return Response(
+                self.t(
+                    "group_pause_setting", name=group.name, time=clock(group.default_pause_seconds)
+                )
+            )
+        table_input = "\t" in raw_args or ("\n" in raw_args and "|" not in raw_args.splitlines()[0])
+        if command == "import" or (command == "song" and table_input):
+            job = await self.importer.create(group_id, raw_args)
+            return await self._import_preview(context, job)
+        if command == "commit_import":
+            require(confirmed, "confirmation")
+            identifier, fingerprint = args.split()
+            count = await self.importer.commit(group_id, UUID(identifier), fingerprint)
+            return Response(self.t("import_done", count=count))
+        if command in ("map_start", "map_header", "map_col"):
+            values = args.split()
+            job = await self.importer.job(group_id, UUID(values[0]))
+            if command == "map_start":
+                return Response(
+                    self.t("import_header_prompt"),
+                    [
+                        (self.t("import_with_header"), f"map_header {job.id.hex} 1"),
+                        (self.t("import_without_header"), f"map_header {job.id.hex} 0"),
+                    ],
+                )
+            if command == "map_header":
+                require(len(values) == 2 and values[1] in ("0", "1"), "input")
+                job.has_header, job.mapping = values[1] == "1", {}
+            else:
+                require(len(values) == 3 and job.mapping is not None, "input")
+                step, index = int(values[1]), int(values[2])
+                assert job.mapping is not None
+                require(0 <= step < len(FIELDS), "input")
+                require(step == len(job.mapping), "confirmation")
+                table = read_table(job.source, job.has_header)
+                require(0 <= index < len(table.headers) or (step > 1 and index == -1), "input")
+                require(index == -1 or index not in job.mapping.values(), "input")
+                job.mapping = {**job.mapping, FIELDS[step]: index}
+            assert job.mapping is not None
+            if len(job.mapping) == len(FIELDS):
+                return await self._import_preview(context, job)
+            return self._mapping_step(job)
+        if command == "confirm":
+            confirmation = await self.store.get(Confirmation, UUID(args))
+            require(
+                confirmation.user_id == self.user.id
+                and confirmation.chat_id == self.chat_id
+                and confirmation.expires_at > now(),
+                "confirmation",
+            )
+            data = json.loads(confirmation.command)
+            require(data["group_id"] == str(context.group_id), "confirmation")
+            require(data.get("group_epoch", 0) == group.lifecycle_version, "confirmation")
+            require(
+                data["concert_id"] is None or data["concert_id"] == str(context.concert_id),
+                "confirmation",
+            )
+            if data["concert_id"] is not None:
+                target_concert = await self.store.get(Concert, UUID(data["concert_id"]))
+                require(
+                    target_concert.deleted_at is None
+                    and data.get("concert_epoch", 0) == target_concert.lifecycle_version,
+                    "confirmation",
+                )
+            for identifier, song_version in data.get("song_versions", {}).items():
+                song = await self.catalog.song(group_id, UUID(identifier))
+                require(song.version == song_version, "conflict")
+            await self.store.delete(confirmation)
+            return await self.execute(data["command"], confirmed=True)
+        if command == "group_language":
+            await self.groups.access(group_id, admin=True)
+            require(args in ("ru", "en"), "input")
+            group.language = args
+            if not self.private:
+                self.language = args
+            return Response(self.t("ok"))
+        if command == "members":
+            await self.groups.access(group_id, admin=True)
+            lines = [self.t("members")]
+            buttons = []
+            for member in await self.store.find(Membership, group_id=group_id):
+                user = await self.store.get(User, member.user_id)
+                label = user.display_name or str(user.telegram_id)
+                lines.append(f"{label} · {member.musical_role} · {self.t(member.status)}")
+                if member.status == "pending":
+                    for action, key in (("yes", "approve_button"), ("no", "reject_button")):
+                        buttons.append((f"{self.t(key)} {label}", f"member {action} {member.id}"))
+            return Response("\n".join(lines), buttons)
+        if command == "member":
+            action, identifier = args.split()
+            require(action in ("yes", "no"), "input")
+            await self.groups.decide_member(group_id, UUID(identifier), action == "yes")
+            return Response(self.t("ok"))
+        if command in ("catalog", "archived"):
+            songs = (
+                await self.catalog.search(group_id, args)
+                if args and command == "catalog"
+                else await self.catalog.list_songs(group_id, archived=command == "archived")
+            )
+            return Response(
+                group.name + "\n\n" + ("\n\n".join(song_card(s) for s in songs) or self.t("empty")),
+                [(self.t("song_open", name=s.title), f"show_song {s.id}") for s in songs],
+            )
+        if command in ("show_song", "edit_hint", "copy_hint", "alias_hint"):
+            selected = await self.catalog.song(group_id, UUID(args))
+            context.selected_song_id = selected.id
+            if command != "show_song":
+                return Response(
+                    self.t(
+                        command,
+                        title=selected.title,
+                        time=clock(selected.duration_seconds),
+                        bpm=selected.bpm or "",
+                        lights=selected.lights,
+                        comment=selected.comment,
+                    )
+                )
+            buttons = [
+                (self.t("song_edit"), f"edit_hint {selected.id}"),
+                (self.t("song_copy"), f"copy_hint {selected.id}"),
+                (self.t("song_alias"), f"alias_hint {selected.id}"),
+            ]
+            if not selected.archived:
+                buttons.insert(0, (self.t("song_add"), f"offer_add {selected.id}"))
+            member = (await self.store.find(Membership, group_id=group_id, user_id=self.user.id))[0]
+            if member.role == "admin":
+                action = "unarchive" if selected.archived else "archive"
+                buttons.append(
+                    (
+                        self.t("song_unarchive" if selected.archived else "song_archive"),
+                        f"{action} {selected.id}",
+                    )
+                )
+            return Response(song_card(selected), buttons)
+        if command in ("song", "edit", "copy"):
+            parts = [part.strip() for part in args.split("|")]
+            song_id: UUID | None = None
+            expected: int | None = None
+            if command == "copy":
+                require(len(parts) == 3, "song_input")
+                original = await self._resolve_song(group_id, parts[0], context)
+                data = {key: getattr(original, key) for key in SONG_FIELDS}
+                data.update(title=parts[1], duration_seconds=duration(parts[2]))
+            else:
+                original = None
+                if command == "edit":
+                    original = await self._resolve_song(group_id, parts.pop(0), context)
+                    song_id = original.id
+                    expected = original.version
+                require(2 <= len(parts) <= 5, "song_input")
+                provided = len(parts)
+                parts += [""] * (5 - len(parts))
+                data = {
+                    "title": parts[0],
+                    "duration_seconds": duration(parts[1]),
+                    "bpm": int(parts[2]) if parts[2] else None,
+                    "lights": parts[3],
+                    "comment": parts[4],
+                }
+                if original:
+                    for key in SONG_FIELDS[provided:]:
+                        data[key] = getattr(original, key)
+            validate_song(data)
+            payload = {
+                "data": data,
+                "song_id": str(song_id) if song_id else None,
+                "expected": expected,
+            }
+            return await self.confirm(context, "save_song " + json.dumps(payload), song_card(data))
+        if command == "save_song":
+            require(confirmed, "confirmation")
+            payload = json.loads(args)
+            result = await self.catalog.save(
+                group_id,
+                payload["data"],
+                UUID(payload["song_id"]) if payload["song_id"] else None,
+                payload["expected"],
+            )
+            return Response(
+                self.t(
+                    "proposed" if isinstance(result, CatalogProposal) else "saved_song",
+                    name=payload["data"]["title"],
+                )
+            )
+        if command == "alias":
+            identifier, title = [part.strip() for part in args.split("|", 1)]
+            target = await self._resolve_song(group_id, identifier, context)
+            alias_result = await self.catalog.alias(group_id, target.id, title)
+            return Response(
+                self.t("proposed", id=alias_result.id)
+                if isinstance(alias_result, CatalogProposal)
+                else self.t("ok")
+            )
+        if command in ("archive", "unarchive"):
+            song = await self._resolve_song(
+                group_id, args, context, archived=command == "unarchive"
+            )
+            await self.groups.access(group_id, admin=True)
+            return await self.confirm(
+                context, f"set_archive {song.id} {song.version} {command}", song_card(song)
+            )
+        if command == "set_archive":
+            require(confirmed, "confirmation")
+            identifier, raw_version, action = args.split()
+            await self.catalog.archive(
+                group_id, UUID(identifier), int(raw_version), action == "archive"
+            )
+            return Response(self.t("ok"))
+        if command == "proposals":
+            await self.groups.access(group_id, admin=True)
+            proposals = await self.store.find(CatalogProposal, group_id=group_id, status="pending")
+            lines, buttons = [], []
+            for proposal in proposals:
+                preview = proposal.payload.get("alias") or song_card(proposal.payload)
+                author = await self.store.get(User, proposal.author_id)
+                lines.append(f"{author.display_name or author.telegram_id}\n{preview}")
+                for action, key in (("yes", "approve_button"), ("no", "reject_button")):
+                    buttons.append(
+                        (
+                            f"{self.t(key)}: {preview.splitlines()[0][:60]}",
+                            f"decide {action} {proposal.id}",
+                        )
+                    )
+            return Response("\n\n".join(lines) or self.t("empty"), buttons)
+        if command == "decide":
+            action, identifier = args.split()
+            require(action in ("yes", "no"), "input")
+            await self.catalog.decide(group_id, UUID(identifier), action == "yes")
+            return Response(self.t("ok"))
+        if command == "concert":
+            parts = [part.strip() for part in args.split("|", 1)]
+            concert = await self.setlists.create(
+                group_id, date.fromisoformat(parts[0]), parts[1] if len(parts) > 1 else ""
+            )
+            context.concert_id = concert.id
+            return await self._show(context)
+        if command == "concerts":
+            concerts = sorted(
+                await self.store.find(Concert, group_id=group_id, deleted_at=None),
+                key=lambda c: c.date,
+            )
+            return Response(
+                self.t("choose_concert") if concerts else self.t("empty"),
+                [(concert_label(c), f"use_concert {c.id}") for c in concerts],
+            )
+        if command == "use_concert":
+            await self.setlists.load(group_id, UUID(args))
+            context.concert_id = UUID(args)
+            context.observed_version = None
+            return await self._show(context)
+        if command == "view_submission":
+            submission = await self.store.get(Submission, UUID(args))
+            require(submission.group_id == group_id, "not_found")
+            context.concert_id = submission.concert_id
+            await self._show(context)
+            return Response(
+                render_setlist(
+                    submission.snapshot,
+                    await self.store.get(Concert, submission.concert_id),
+                    self.language,
+                    0,
+                ),
+                (
+                    [(self.t("submission_apply"), f"apply {submission.id}")]
+                    if not self.private
+                    else []
+                ),
+                monospace=True,
+            )
+        require(context.concert_id is not None, "select_concert")
+        concert_id = context.concert_id
+        assert concert_id is not None
+        if command in ("delete_concert", "delete_concert_final"):
+            await self.groups.access(group_id, admin=True)
+            require(
+                not args or command == "delete_concert_final" or UUID(args) == concert_id,
+                "confirmation",
+            )
+            fingerprint = await self.trash.concert_fingerprint(group_id, concert_id)
+            if command == "delete_concert_final":
+                require(confirmed and args == fingerprint, "delete_changed")
+                deleted_concert = await self.trash.delete_concert(group_id, concert_id, fingerprint)
+                return Response(self.t("concert_deleted", name=concert_label(deleted_concert)))
+            target_concert = await self.store.get(Concert, concert_id)
+            return await self.confirm(
+                context,
+                f"delete_concert_final {fingerprint}",
+                self.t("concert_delete_preview", name=concert_label(target_concert)),
+                concert=True,
+            )
+        if command in ("setlist", "shared"):
+            return await self._show(context, shared=command == "shared")
+        if command == "pause" and not args:
+            response = await self._show(context)
+            response.text += "\n\n" + self.t("pause_usage")
+            return response
+        require(context.observed_version is not None, "view_first")
+        expected = context.observed_version
+        assert expected is not None
+        if command in ("add_encore", "remove_encore_song", "remove_encore", "manage_encore"):
+            if command == "manage_encore":
+                identifier, raw_version, action = args.split()
+                require(UUID(identifier) == concert_id, "confirmation")
+                require(int(raw_version) == expected, "conflict")
+                require(action in ("add", "remove", "drop"), "input")
+                command = {
+                    "add": "add_encore",
+                    "remove": "remove_encore_song",
+                    "drop": "remove_encore",
+                }[action]
+                args = ""
+            snapshot, version, approved = await self.setlists.read(
+                group_id, concert_id, private=self.private
+            )
+            require(version == expected, "conflict")
+            require(not approved, "approved")
+            enc_blocks = [
+                i
+                for i, block_data in enumerate(snapshot["blocks"], 1)
+                if block_data["kind"] == "encore"
+            ]
+            require(len(enc_blocks) == 1, "encore_missing")
+            enc_block = enc_blocks[0]
+            if command == "add_encore":
+                if args:
+                    try:
+                        await self.setlists.edit_songs(
+                            group_id,
+                            concert_id,
+                            expected,
+                            [line.strip() for line in args.splitlines() if line.strip()],
+                            block=enc_block,
+                            private=self.private,
+                        )
+                    except SongListError as exc:
+                        return self._song_list_errors(exc)
+                    return await self._show(context)
+                return Response(
+                    self.t("encore_add_prompt"),
+                    [
+                        (song_card(song).splitlines()[0], f"offer_add {song.id.hex} {enc_block}")
+                        for song in await self.catalog.list_songs(group_id)
+                    ],
+                )
+            if command == "remove_encore_song" and not args:
+                return Response(
+                    self.t("encore_remove_prompt"),
+                    [
+                        (
+                            f"{pos}. {item['title']}",
+                            f"encore_pick {concert_id.hex} {expected} {pos}",
+                        )
+                        for pos, item in enumerate(snapshot["blocks"][enc_block - 1]["items"], 1)
+                    ],
+                )
+            if command == "remove_encore_song":
+                pos = int(args)
+                require(
+                    1 <= pos <= len(snapshot["blocks"][enc_block - 1]["items"]), "setlist_input"
+                )
+                operation, encore_values = "remove", f"{enc_block} {pos}"
+            else:
+                operation, encore_values = "remove_block", str(enc_block)
+            return await self.confirm(
+                context,
+                f"edit_list {operation} {expected} {encore_values}",
+                self.t(
+                    "encore_private_drop_preview"
+                    if self.private
+                    else (
+                        "encore_drop_preview"
+                        if command == "remove_encore"
+                        else "encore_song_drop_preview"
+                    )
+                )
+                + "\n"
+                + render_setlist(
+                    snapshot,
+                    await self.store.get(Concert, concert_id),
+                    self.language,
+                    version,
+                    private=self.private,
+                ),
+                concert=True,
+                monospace=True,
+            )
+        if command == "encore_pick":
+            identifier, raw_version, position = args.split()
+            require(UUID(identifier) == concert_id and int(raw_version) == expected, "confirmation")
+            return await self.execute(f"remove_encore_song {position}")
+        if command == "suggestion" and not args:
+            shown = await self._show(context)
+            require(shown.suggestion_template_id is not None, "approved")
+            assert shown.suggestion_template_id is not None
+            return await self._suggestion_prompt(shown.suggestion_template_id)
+        if command == "suggestion" or (command == "add" and "\n" in message[len(head) :]):
+            body = args
+            batch_block = 1
+            inline = message[len(head) :].split("\n", 1)[0].strip().lstrip("|").strip()
+            if command == "add" and inline.isdecimal():
+                batch_block = int(inline)
+                body = message[len(head) :].split("\n", 1)[1]
+            titles = [line.strip() for line in body.splitlines() if line.strip()]
+            try:
+                await self.setlists.edit_songs(
+                    group_id,
+                    concert_id,
+                    expected,
+                    titles,
+                    replace=command == "suggestion",
+                    block=batch_block,
+                    private=self.private,
+                )
+            except SongListError as exc:
+                lines = [self.t("song_list_errors")]
+                for number, title, candidates in exc.issues:
+                    reason = (
+                        self.t("song_list_ambiguous", names=", ".join(candidates))
+                        if candidates
+                        else self.t("song_list_missing")
+                    )
+                    lines.append(
+                        self.t("song_list_line", number=number, title=title, reason=reason)
+                    )
+                return Response("\n\n".join(lines))
+            return await self._show(context)
+        if command == "encore":
+            if args:
+                identifier, raw_version = args.split()
+                require(UUID(identifier) == concert_id, "confirmation")
+                expected = int(raw_version)
+            await self.setlists.edit(
+                group_id, concert_id, expected, "encore", [self.t("encore")], private=self.private
+            )
+            return await self._show(context)
+        if command == "offer_add":
+            values = args.split()
+            target = await self.catalog.song(group_id, UUID(values[0]))
+            block = values[1] if len(values) > 1 else "1"
+            preview = (await self._show(context)).text + "\n\n" + song_card(target)
+            assert context.observed_version is not None
+            return await self.confirm(
+                context,
+                f"edit_list add {context.observed_version} {block} {target.id}",
+                preview,
+                concert=True,
+            )
+        if command in ("add", "move", "block", "pause", "break", "remove"):
+            values = args.split()
+            operation = command
+            if command == "pause" and len(values) == 1:
+                operation = "default_pause"
+            elif command == "pause" and len(values) == 2:
+                values.insert(0, "1")
+            if command == "add":
+                selector, _, block = args.partition("|")
+                block = block.strip() or "1"
+                require(block.isdigit() and 1 <= int(block) <= 20, "setlist_input")
+                try:
+                    legacy_song_id = UUID(values[0]) if values else None
+                except ValueError:
+                    legacy_song_id = None
+                if legacy_song_id is not None:
+                    require(len(values) in (1, 2), "setlist_input")
+                    values = [values[1] if len(values) == 2 else "1", str(legacy_song_id)]
+                else:
+                    songs = (
+                        await self.catalog.search(group_id, selector.strip())
+                        if selector.strip()
+                        else await self.catalog.list_songs(group_id)
+                    )
+                    if len(songs) != 1 or not selector.strip():
+                        return Response(
+                            self.t("add_choose") if songs else self.t("empty"),
+                            [
+                                (song_card(s).splitlines()[0], f"offer_add {s.id.hex} {block}")
+                                for s in songs
+                            ],
+                        )
+                    values = [block, str(songs[0].id)]
+            lengths = {"add": 2, "move": 3, "pause": 3, "default_pause": 1, "break": 2, "remove": 2}
+            require(command == "block" or len(values) == lengths[operation], "setlist_input")
+            if command == "remove" and not confirmed:
+                snapshot, version, approved = await self.setlists.read(
+                    group_id, concert_id, private=self.private
+                )
+                return await self.confirm(
+                    context,
+                    f"edit_list {command} {expected} {args}",
+                    render_setlist(
+                        snapshot,
+                        await self.store.get(Concert, concert_id),
+                        self.language,
+                        version,
+                        private=self.private,
+                        approved=approved,
+                    )
+                    + f"\n/remove {args}",
+                    concert=True,
+                    monospace=True,
+                )
+            await self.setlists.edit(
+                group_id, concert_id, expected, operation, values, private=self.private
+            )
+            return await self._show(context)
+        if command == "edit_list":
+            require(confirmed, "confirmation")
+            operation, raw_version, rest = args.split(" ", 2)
+            await self.setlists.edit(
+                group_id,
+                concert_id,
+                int(raw_version),
+                operation,
+                rest.split(),
+                private=self.private,
+            )
+            return await self._show(context)
+        if command in ("approve", "reopen", "restore", "apply"):
+            require(not self.private, "group_only")
+            if command in ("approve", "reopen"):
+                await self.groups.access(group_id, admin=True)
+            preview = (await self._show(context)).text
+            if command == "restore":
+                revision = await self.store.get(Revision, UUID(args))
+                setlist = await self.setlists.load(group_id, concert_id)
+                require(
+                    revision.group_id == group_id and revision.setlist_id == setlist.id, "not_found"
+                )
+                preview = (
+                    self.t("restore_notice")
+                    + "\n"
+                    + render_setlist(
+                        revision.snapshot,
+                        await self.store.get(Concert, concert_id),
+                        self.language,
+                        revision.number,
+                    )
+                )
+            if command == "apply":
+                submission = await self.store.get(Submission, UUID(args))
+                require(
+                    submission.group_id == group_id and submission.concert_id == concert_id,
+                    "not_found",
+                )
+                preview = render_setlist(
+                    submission.snapshot, await self.store.get(Concert, concert_id), self.language, 0
+                )
+            return await self.confirm(
+                context,
+                f"change_shared {command} {expected} {args}".strip(),
+                preview,
+                concert=True,
+                monospace=True,
+            )
+        if command == "change_shared":
+            require(confirmed and not self.private, "confirmation")
+            values = args.split()
+            operation, raw_version = values[:2]
+            if operation == "approve":
+                await self.setlists.approve(group_id, concert_id, int(raw_version))
+            elif operation == "reopen":
+                await self.setlists.reopen(group_id, concert_id, int(raw_version))
+            elif operation == "restore":
+                await self.setlists.restore(group_id, concert_id, UUID(values[2]), int(raw_version))
+            elif operation == "apply":
+                await self.setlists.apply(group_id, concert_id, UUID(values[2]), int(raw_version))
+            else:
+                require(False, "input")
+            return await self._show(context)
+        if command in ("history", "versions"):
+            history = await self.setlists.history(group_id, concert_id)
+            lines = [concert_label(await self.store.get(Concert, concert_id))]
+            for revision in history:
+                author = await self.store.get(User, revision.author_id)
+                lines.append(
+                    self.t(
+                        "history_line",
+                        number=revision.number,
+                        action=self.t(
+                            "approved_action" if revision.action == "approved" else revision.action
+                        ),
+                        time=revision.created_at.isoformat(timespec="seconds"),
+                        author=author.display_name or str(author.telegram_id),
+                    )
+                )
+            return Response(
+                "\n\n".join(lines),
+                [(await self._revision_label(r), f"revision {r.id}") for r in history],
+            )
+        if command == "revision":
+            revision = await self.store.get(Revision, UUID(args))
+            setlist = await self.setlists.load(group_id, concert_id)
+            require(
+                revision.group_id == group_id and revision.setlist_id == setlist.id, "not_found"
+            )
+            return Response(
+                render_setlist(
+                    revision.snapshot,
+                    await self.store.get(Concert, concert_id),
+                    self.language,
+                    revision.number,
+                    approved=revision.action == "approved",
+                ),
+                (
+                    [(self.t("revision_restore"), f"restore {revision.id}")]
+                    if not self.private
+                    else []
+                ),
+                monospace=True,
+            )
+        if command == "publish":
+            require(self.private, "private_only")
+            return await self.confirm(
+                context,
+                f"publish_draft {expected}",
+                (await self._show(context)).text,
+                concert=True,
+                monospace=True,
+            )
+        if command == "publish_draft":
+            require(confirmed and self.private, "confirmation")
+            snapshot, version, _ = await self.setlists.read(group_id, concert_id, private=True)
+            require(version == int(args), "conflict")
+            bindings = await self.store.find(ChatBinding, group_id=group_id)
+            require(bool(bindings), "no_chat")
+            submission = await self.setlists.publish(group_id, concert_id)
+            public_text = (
+                tr(group.language, "submission")
+                + "\n"
+                + render_setlist(
+                    snapshot,
+                    await self.store.get(Concert, concert_id),
+                    group.language,
+                    version,
+                    private=True,
+                )
+            )
+            self.store.add(
+                Outbox(
+                    chat_id=bindings[0].chat_id,
+                    text=public_text,
+                    group_id=group_id,
+                    concert_id=concert_id,
+                    monospace=True,
+                    buttons=[
+                        [tr(group.language, "submission_open"), f"view_submission {submission.id}"]
+                    ],
+                )
+            )
+            return Response(self.t("published"))
+        require(False, "input")
+        raise AssertionError("unreachable")
+
+    async def _revision_label(self, revision: Revision) -> str:
+        author = await self.store.get(User, revision.proposer_id or revision.author_id)
+        return self.t(
+            "variant_label" if revision.suggestion_number is not None else "revision_label",
+            name=author.display_name or self.t("member_name"),
+            number=revision.suggestion_number
+            if revision.suggestion_number is not None
+            else revision.number,
+        )
+
+    def _song_list_errors(self, exc: SongListError) -> Response:
+        lines = [self.t("song_list_errors")]
+        for number, title, candidates in exc.issues:
+            reason = (
+                self.t("song_list_ambiguous", names=", ".join(candidates))
+                if candidates
+                else self.t("song_list_missing")
+            )
+            lines.append(self.t("song_list_line", number=number, title=title, reason=reason))
+        return Response("\n\n".join(lines))
+
+    async def _template_context(self, template_id: UUID) -> Context:
+        template = await self.templates.load(template_id)
+        self.reply_target = template.group_id, template.concert_id
+        context = await self.groups.context(self.chat_id, self.private)
+        context.group_id, context.concert_id = template.group_id, template.concert_id
+        context.observed_version = template.version
+        return context
+
+    async def _suggestion_prompt(self, template_id: UUID) -> Response:
+        context = await self._template_context(template_id)
+        assert context.group_id is not None and context.concert_id is not None
+        _, version, approved = await self.setlists.read(
+            context.group_id, context.concert_id, private=self.private
+        )
+        require(version == context.observed_version, "conflict")
+        require(not approved, "approved")
+        template = await self.templates.load(template_id)
+        text = self.t("suggestion_prompt")
+        if self.private:
+            text += "\n" + self.t("suggestion_private")
+        if template.titles:
+            text += "\n\n" + "\n".join(template.titles)
+        return Response(text, suggestion_template_id=template_id, force_reply=True)
+
+    async def _trash_list(self) -> Response:
+        memberships = await self.store.find(
+            Membership, user_id=self.user.id, role="admin", status="active"
+        )
+        buttons, lines = [], [self.t("trash_title")]
+        for membership in memberships:
+            group = await self.store.get(Group, membership.group_id)
+            if group.deleted_at is not None:
+                if not self.private and group.deleted_chat_id != self.chat_id:
+                    continue
+                if group.deleted_at + RETENTION > now():
+                    lines.append(
+                        self.t(
+                            "trash_group",
+                            name=group.name,
+                            until=(group.deleted_at + RETENTION).date().isoformat(),
+                        )
+                    )
+                    buttons.append(
+                        (
+                            self.t("restore_group_button", name=group.name),
+                            f"restore_group {group.id.hex} {group.lifecycle_version}",
+                        )
+                    )
+            else:
+                bindings = await self.store.find(ChatBinding, group_id=group.id)
+                if not self.private and not any(b.chat_id == self.chat_id for b in bindings):
+                    continue
+                for concert in await self.store.find(Concert, group_id=group.id):
+                    if concert.deleted_at is not None and concert.deleted_at + RETENTION > now():
+                        lines.append(
+                            self.t(
+                                "trash_concert",
+                                name=concert_label(concert),
+                                until=(concert.deleted_at + RETENTION).date().isoformat(),
+                            )
+                        )
+                        buttons.append(
+                            (
+                                self.t("restore_concert_button", name=concert_label(concert)),
+                                f"restore_concert {concert.id.hex} {concert.lifecycle_version}",
+                            )
+                        )
+        return Response("\n\n".join(lines) if buttons else self.t("trash_empty"), buttons)
+
+    async def _resolve_song(
+        self, group_id: UUID, selector: str, context: Context, *, archived: bool = False
+    ) -> Song:
+        if not selector and context.selected_song_id:
+            return await self.catalog.song(group_id, context.selected_song_id)
+        try:
+            identifier = UUID(selector)
+        except ValueError:
+            songs = await self.catalog.list_songs(group_id, archived=archived)
+            matches = [song for song in songs if normalize(song.title) == normalize(selector)]
+            require(bool(matches), "not_found")
+            require(len(matches) == 1, "song_choose")
+            return matches[0]
+        return await self.catalog.song(group_id, identifier)
+
+    async def _import_preview(self, context: Context, job: CatalogImport) -> Response:
+        plan = await self.importer.preview(job.group_id, job.id)
+        group = await self.store.get(Group, job.group_id)
+        lines = [
+            group.name,
+            self.t(
+                "import_summary",
+                new=len(plan.new),
+                duplicates=len(plan.duplicates),
+                errors=len(plan.errors),
+            ),
+        ]
+        if plan.parsed.error:
+            lines.append(self.t(plan.parsed.error))
+        for data in plan.new:
+            lines.append(self.t("import_new") + ": " + song_card(data))
+        for row in plan.duplicates:
+            lines.append(f"{row.title}: {self.t('import_duplicate')}")
+        for row in plan.errors:
+            lines.append(
+                self.t(
+                    "import_row_error", number=row.number, title=row.title, error=self.t(row.error)
+                )
+            )
+        lines.append(self.t("import_note"))
+        preview = "\n\n".join(lines)
+        if plan.new and not plan.errors and not plan.parsed.error:
+            response = await self.confirm(
+                context, f"commit_import {job.id} {plan.fingerprint}", preview
+            )
+        else:
+            if not plan.new and not plan.errors and not plan.parsed.error:
+                preview += "\n" + self.t("import_none")
+            response = Response(preview, [(self.t("cancel_button"), "cancel")])
+        response.buttons.insert(-1, (self.t("import_map"), f"map_start {job.id.hex}"))
+        return response
+
+    def _mapping_step(self, job: CatalogImport) -> Response:
+        assert job.mapping is not None
+        step = len(job.mapping)
+        table = read_table(job.source, job.has_header)
+        buttons = []
+        for index, header in enumerate(table.headers):
+            if index in job.mapping.values():
+                continue
+            label = (
+                header or table.rows[1 if table.has_header and len(table.rows) > 1 else 0][index]
+            )
+            buttons.append((f"{index + 1}. {label[:60]}", f"map_col {job.id.hex} {step} {index}"))
+        if step > 1:
+            buttons.append((self.t("import_skip"), f"map_col {job.id.hex} {step} -1"))
+        return Response(
+            self.t("import_column_prompt", field=self.t("import_field_" + FIELDS[step])), buttons
+        )
+
+    async def _show(self, context: Context, *, shared: bool = False) -> Response:
+        assert context.group_id is not None and context.concert_id is not None
+        personal = self.private and not shared
+        snapshot, version, approved = await self.setlists.read(
+            context.group_id, context.concert_id, private=personal
+        )
+        if not shared:
+            context.observed_version = version
+        concert = await self.store.get(Concert, context.concert_id)
+        group = await self.store.get(Group, context.group_id)
+        buttons = []
+        template_id = None
+        if not approved:
+            edit_version = version
+            if shared and self.private:
+                _, edit_version, _ = await self.setlists.read(
+                    context.group_id, context.concert_id, private=True
+                )
+            template = self.templates.create(
+                context.group_id,
+                context.concert_id,
+                snapshot,
+                private=self.private,
+                version=edit_version,
+                group_epoch=group.lifecycle_version,
+                concert_epoch=concert.lifecycle_version,
+            )
+            template_id = template.id
+            buttons.append((self.t("copy_variant"), f"copy_list {template.id.hex}"))
+        if not personal:
+            variants = [
+                r
+                for r in await self.setlists.history(context.group_id, context.concert_id)
+                if r.suggestion_number is not None
+            ]
+            buttons.extend(
+                [(await self._revision_label(r), f"revision {r.id}") for r in variants[:10]]
+            )
+        if not shared and not approved:
+            if any(block["kind"] == "encore" for block in snapshot["blocks"]):
+                for label, action in (
+                    ("encore_add_button", "add"),
+                    ("encore_remove_song_button", "remove"),
+                    ("encore_drop_button", "drop"),
+                ):
+                    buttons.append(
+                        (self.t(label), f"manage_encore {concert.id.hex} {version} {action}")
+                    )
+            else:
+                buttons.append((self.t("add_encore"), f"encore {concert.id.hex} {version}"))
+        membership = (
+            await self.store.find(Membership, group_id=context.group_id, user_id=self.user.id)
+        )[0]
+        if membership.role == "admin":
+            buttons.append((self.t("delete_concert_button"), f"delete_concert {concert.id.hex}"))
+        return Response(
+            group.name
+            + "\n"
+            + render_setlist(
+                snapshot, concert, self.language, version, private=personal, approved=approved
+            ),
+            buttons,
+            monospace=True,
+            suggestion_template_id=template_id,
+        )

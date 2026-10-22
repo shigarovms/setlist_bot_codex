@@ -1,0 +1,15 @@
+# Optional override for a network with a trusted corporate/cloud TLS proxy.
+# Supply a public CA bundle, never a private key or a Telegram token.
+services:
+  bot:
+    build:
+      secrets: [ca_bundle]
+    secrets: [ca_bundle]
+    environment:
+      SSL_CERT_FILE: /run/secrets/ca_bundle
+  migrate:
+    build:
+      secrets: [ca_bundle]
+secrets:
+  ca_bundle:
+    file: ${CA_BUNDLE_FILE:?Set CA_BUNDLE_FILE to your trusted public CA bundle}

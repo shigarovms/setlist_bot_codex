@@ -1,0 +1,2 @@
+# Empty final cells in original pasted tables are significant import test data.
+tests/fixtures/*.tsv whitespace=-blank-at-eol

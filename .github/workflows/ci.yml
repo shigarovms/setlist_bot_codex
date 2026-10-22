@@ -1,0 +1,34 @@
+name: Checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: setlist
+          POSTGRES_PASSWORD: setlist
+          POSTGRES_DB: setlist_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U setlist" --health-interval 3s
+          --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql+asyncpg://setlist:setlist@localhost:5432/setlist_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.23"
+      - run: uv sync --frozen --extra dev
+      - run: uv lock --check
+      - run: uv run ruff check src tests migrations
+      - run: uv run ruff format --check src tests migrations
+      - run: uv run mypy src
+      - run: uv run pytest -q
