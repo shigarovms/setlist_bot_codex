@@ -185,6 +185,28 @@ class SetlistMessage(Entity):
 
 
 @dataclass(kw_only=True)
+class ExportSnapshot(Entity):
+    group_id: UUID
+    concert_id: UUID
+    chat_id: int
+    payload: dict[str, Any]
+    expires_at: datetime
+    owner_id: UUID | None = None
+    group_epoch: int = 0
+    concert_epoch: int = 0
+
+
+@dataclass(kw_only=True)
+class ExportFile(Entity):
+    export_id: UUID
+    audience: str
+    language: str
+    transliterate: bool
+    filename: str
+    content: bytes
+
+
+@dataclass(kw_only=True)
 class CatalogImport(Entity):
     group_id: UUID
     owner_id: UUID

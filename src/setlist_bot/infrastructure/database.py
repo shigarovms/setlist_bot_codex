@@ -13,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Integer,
+    LargeBinary,
     MetaData,
     String,
     Table,
@@ -278,6 +279,32 @@ table(
     col("chat_id", BigInteger),
     col("message_id", BigInteger),
     UniqueConstraint("chat_id", "message_id"),
+)
+table(
+    e.ExportSnapshot,
+    "export_snapshots",
+    tenant(),
+    col("concert_id", Uuid),
+    col("chat_id", BigInteger),
+    col("payload", JSONB),
+    col("expires_at", DateTime(timezone=True), index=True),
+    col("owner_id", Uuid, ForeignKey("users.id"), nullable=True),
+    col("group_epoch", Integer),
+    col("concert_epoch", Integer),
+    ForeignKeyConstraint(["group_id", "concert_id"], ["concerts.group_id", "concerts.id"]),
+)
+table(
+    e.ExportFile,
+    "export_files",
+    col("export_id", Uuid, ForeignKey("export_snapshots.id", ondelete="CASCADE"), index=True),
+    col("audience", String(12)),
+    col("language", String(2)),
+    col("transliterate", Boolean),
+    col("filename", String(180)),
+    col("content", LargeBinary),
+    UniqueConstraint("export_id", "audience", "language", "transliterate"),
+    CheckConstraint("audience IN ('musicians', 'lights')", name="audience"),
+    CheckConstraint("language IN ('ru', 'en')", name="language"),
 )
 table(
     e.CatalogImport,

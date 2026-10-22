@@ -147,6 +147,8 @@ class TrashCleanup:
                 await self._purge_concert(concert)
         for template in await self.store.expired(e.SongListTemplate, "expires_at", at):
             await self.store.delete(template)
+        for export in await self.store.expired(e.ExportSnapshot, "expires_at", at):
+            await self.store.delete(export)
         for confirmation in await self.store.expired(e.Confirmation, "expires_at", at):
             await self.store.delete(confirmation)
 
@@ -157,7 +159,7 @@ class TrashCleanup:
 
     async def _purge_concert(self, concert: e.Concert) -> None:
         filters = {"group_id": concert.group_id, "concert_id": concert.id}
-        for kind in (e.Outbox, e.SongListTemplate, e.PersonalDraft, e.Submission):
+        for kind in (e.Outbox, e.ExportSnapshot, e.SongListTemplate, e.PersonalDraft, e.Submission):
             await self._delete(kind, **filters)
         for setlist in await self.store.find(e.Setlist, **filters):
             setlist.approved_revision_id = None

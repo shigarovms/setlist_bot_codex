@@ -21,6 +21,8 @@ MESSAGES = {
             "Концерты: /concert 2026-12-31 | Название, /concerts.\n"
             "Выбирайте концерт кнопками /concerts.\n"
             "Сет-лист: /setlist; общий вариант: /shared.\n"
+            "Экспорт: кнопка «Экспорт» или /export — PDF для музыкантов, световика или оба файла.\n"
+            "А4: музыкантам — крупные названия, световику — таблица. До утверждения — «Черновик».\n"
             "Добавить: /add — выбор песни кнопками; /add Комета | 2 — во второй блок.\n"
             "Списком: /add на первой строке, затем названия песен по одному на строку.\n"
             "Новый вариант целиком: /suggestion и список песен. Старый остаётся в истории.\n"
@@ -76,6 +78,29 @@ MESSAGES = {
         "encore": "Бис",
         "add_encore": "Добавить бис",
         "copy_variant": "Предложить свой вариант",
+        "export_button": "Экспорт",
+        "export_choose": "Выберите PDF. «Для всех» отправит два отдельных файла.\nФайлы сохраняют состав и параметры показанной версии.",
+        "export_musicians": "Для музыкантов · PDF",
+        "export_lights": "Для световика · PDF",
+        "export_all": "Для всех · два PDF",
+        "export_language": "Язык PDF: {code}",
+        "export_latin_on": "Транслитерация: включена",
+        "export_latin_off": "Транслитерация: выключена",
+        "export_ready": "PDF готовы к печати на А4.",
+        "export_expired": "Срок действия экспорта истёк. Откройте нужный сет-лист и нажмите «Экспорт» заново.",
+        "export_empty": "Сет-лист пуст. Добавьте песни перед экспортом.",
+        "back_button": "Назад",
+        "pdf_musicians": "Для музыкантов",
+        "pdf_lights": "Для световика",
+        "pdf_draft": "ЧЕРНОВИК",
+        "pdf_approved": "УТВЕРЖДЕНО",
+        "pdf_page": "Страница {number}",
+        "pdf_col_number": "№",
+        "pdf_col_title": "Песня",
+        "pdf_col_duration": "Время",
+        "pdf_col_bpm": "BPM",
+        "pdf_col_lights": "Свет",
+        "pdf_col_comment": "Комментарий",
         "suggestion_prompt": "Какой вариант вы предлагаете? Ответьте на это сообщение списком песен — по одному названию на строку.",
         "suggestion_private": "Это изменит только ваш личный черновик. Для публикации используйте /publish.",
         "timing_net": "Чистое время: {time}",
@@ -245,6 +270,8 @@ MESSAGES = {
             "Concerts: /concert 2026-12-31 | Title, /concerts.\n"
             "Select a concert using /concerts buttons.\n"
             "Setlist: /setlist; shared version: /shared.\n"
+            "Export: the Export button or /export — PDFs for musicians, lighting, or both files.\n"
+            "A4: large song titles for musicians, a table for lighting. Unapproved files are marked DRAFT.\n"
             "Add: /add to select a song; /add Comet | 2 for the second block.\n"
             "List: /add on the first line, then one song title per line.\n"
             "Replace the entire setlist: /suggestion and a list of songs. History is preserved.\n"
@@ -300,6 +327,29 @@ MESSAGES = {
         "encore": "Encore",
         "add_encore": "Add encore",
         "copy_variant": "Propose your variant",
+        "export_button": "Export",
+        "export_choose": "Choose a PDF. “For everyone” sends two separate files.\nFiles preserve the displayed version's songs and parameters.",
+        "export_musicians": "For musicians · PDF",
+        "export_lights": "For lighting · PDF",
+        "export_all": "For everyone · two PDFs",
+        "export_language": "PDF language: {code}",
+        "export_latin_on": "Transliteration: on",
+        "export_latin_off": "Transliteration: off",
+        "export_ready": "PDFs are ready to print on A4.",
+        "export_expired": "This export has expired. Open the setlist and press Export again.",
+        "export_empty": "The setlist is empty. Add songs before exporting.",
+        "back_button": "Back",
+        "pdf_musicians": "For musicians",
+        "pdf_lights": "For lighting",
+        "pdf_draft": "DRAFT",
+        "pdf_approved": "APPROVED",
+        "pdf_page": "Page {number}",
+        "pdf_col_number": "No.",
+        "pdf_col_title": "Song",
+        "pdf_col_duration": "Time",
+        "pdf_col_bpm": "BPM",
+        "pdf_col_lights": "Lights",
+        "pdf_col_comment": "Comment",
         "suggestion_prompt": "What variant do you propose? Reply to this message with one song title per line.",
         "suggestion_private": "This only changes your personal draft. Use /publish to share it.",
         "timing_net": "Performance: {time}",

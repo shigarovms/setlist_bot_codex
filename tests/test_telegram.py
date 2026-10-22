@@ -257,3 +257,65 @@ async def test_monospace_chunks_preserve_literal_titles_utf16_entities_and_final
         assert method.parse_mode is None
     assert all(method.reply_markup is None for method in session.sent[:-1])
     assert session.sent[-1].reply_markup.inline_keyboard[0][0].text == "Предложить свой вариант"
+
+
+async def test_pdf_export_submenu_sends_both_a4_documents_through_aiogram(engine, world):
+    from io import BytesIO
+
+    from aiogram.types import BufferedInputFile
+    from pypdf import PdfReader
+
+    session = FakeTelegram()
+    async with Bot("123456:TEST_ONLY_NOT_A_REAL_TELEGRAM_TOKEN", session=session) as bot:
+        dispatcher = Dispatcher()
+        dispatcher.include_router(make_router(Processor(engine), "setlist_test_bot"))
+        ids = count(1)
+
+        async def send(text, callback=False):
+            user = User(id=1, is_bot=False, first_name="Админ")
+            message = Message(
+                message_id=next(ids),
+                date=datetime.now(UTC),
+                chat=Chat(id=-100, type="supergroup"),
+                from_user=user,
+                text=text,
+            )
+            update_id = next(ids)
+            update = (
+                Update(
+                    update_id=update_id,
+                    callback_query=CallbackQuery(
+                        id=str(update_id),
+                        from_user=user,
+                        chat_instance="chat",
+                        message=message,
+                        data=text,
+                    ),
+                )
+                if callback
+                else Update(update_id=update_id, message=message)
+            )
+            await dispatcher.feed_update(bot, update)
+            return session.sent[-1]
+
+        await send(f"/use_concert {world.concert.id}")
+        shown = await send("/add Комета")
+        button = next(
+            row[0].callback_data
+            for row in shown.reply_markup.inline_keyboard
+            if row[0].text == "Экспорт"
+        )
+        menu = await send(button, callback=True)
+        all_files = next(
+            row[0].callback_data
+            for row in menu.reply_markup.inline_keyboard
+            if row[0].text == "Для всех · два PDF"
+        )
+        await send(all_files, callback=True)
+    assert len(session.documents) == 2
+    for event in session.documents:
+        assert isinstance(event.document, BufferedInputFile)
+        assert event.document.filename.endswith(".pdf")
+        pdf = PdfReader(BytesIO(event.document.data))
+        assert "Комета" in pdf.pages[0].extract_text()
+        assert "ЧЕРНОВИК" in pdf.pages[0].extract_text()

@@ -6,6 +6,7 @@ from uuid import UUID
 
 from setlist_bot.application.backup import Backup
 from setlist_bot.application.catalog import SONG_FIELDS, Catalog
+from setlist_bot.application.exports import Exports
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.importing import Importer
 from setlist_bot.application.ports import Store
@@ -37,6 +38,7 @@ from setlist_bot.domain.rules import (
     require,
     validate_song,
 )
+from setlist_bot.infrastructure.pdf import PdfDocuments
 from setlist_bot.transport.i18n import tr
 from setlist_bot.transport.render import concert_label, render_setlist, song_card
 
@@ -64,6 +66,7 @@ class Controller:
         self.importer = Importer(store, user, chat_id)
         self.trash = Trash(store, user)
         self.templates = Templates(store, user, chat_id)
+        self.exports = Exports(store, user, chat_id)
         self.reply_target: tuple[UUID, UUID] | None = None
 
     def t(self, key: str, **values: Any) -> str:
@@ -148,6 +151,25 @@ class Controller:
             return Response(self.t("ok"))
         if command == "copy_list":
             return await self._suggestion_prompt(UUID(args))
+        if command in ("export_menu", "export_file", "export_back"):
+            values = args.split()
+            export = await self.exports.load(UUID(values[0]))
+            if command == "export_back":
+                context = await self.groups.context(self.chat_id, self.private)
+                context.group_id, context.concert_id = export.group_id, export.concert_id
+                await self._show(context)
+                return await self.execute(export.payload["back"])
+            language = values[-2] if len(values) > 1 else export.payload["language"]
+            latin = values[-1] if len(values) > 1 else "0"
+            require(language in ("ru", "en") and latin in ("0", "1"), "input")
+            response = self._export_menu(export.id, export.payload, language, latin == "1")
+            if command == "export_file":
+                require(len(values) == 4, "input")
+                response.files = await self.exports.files(
+                    export.id, values[1], language, latin == "1", PdfDocuments()
+                )
+                response.text = self.t("export_ready") + "\n\n" + response.text
+            return response
         if command == "trash":
             return await self._trash_list()
         if command == "restore_group":
@@ -488,6 +510,14 @@ class Controller:
             require(submission.group_id == group_id, "not_found")
             context.concert_id = submission.concert_id
             await self._show(context)
+            export_buttons = await self._export_buttons(
+                group_id,
+                submission.concert_id,
+                submission.snapshot,
+                0,
+                approved=False,
+                back=f"view_submission {submission.id}",
+            )
             return Response(
                 render_setlist(
                     submission.snapshot,
@@ -499,7 +529,8 @@ class Controller:
                     [(self.t("submission_apply"), f"apply {submission.id}")]
                     if not self.private
                     else []
-                ),
+                )
+                + export_buttons,
                 monospace=True,
             )
         require(context.concert_id is not None, "select_concert")
@@ -525,6 +556,20 @@ class Controller:
             )
         if command in ("setlist", "shared"):
             return await self._show(context, shared=command == "shared")
+        if command == "export":
+            snapshot, version, approved = await self.setlists.read(
+                group_id, concert_id, private=self.private
+            )
+            export = await self.exports.create(
+                group_id,
+                concert_id,
+                snapshot,
+                version,
+                approved=approved,
+                private=self.private,
+                back="setlist",
+            )
+            return self._export_menu(export.id, export.payload, export.payload["language"], False)
         if command == "pause" and not args:
             response = await self._show(context)
             response.text += "\n\n" + self.t("pause_usage")
@@ -840,6 +885,14 @@ class Controller:
                     [(self.t("revision_restore"), f"restore {revision.id}")]
                     if not self.private
                     else []
+                )
+                + await self._export_buttons(
+                    group_id,
+                    concert_id,
+                    revision.snapshot,
+                    revision.number,
+                    approved=revision.action == "approved",
+                    back=f"revision {revision.id}",
                 ),
                 monospace=True,
             )
@@ -870,6 +923,17 @@ class Controller:
                     private=True,
                 )
             )
+            export_buttons = await self._export_buttons(
+                group_id,
+                concert_id,
+                snapshot,
+                version,
+                approved=False,
+                back=f"view_submission {submission.id}",
+                chat_id=bindings[0].chat_id,
+                private=False,
+                language=group.language,
+            )
             self.store.add(
                 Outbox(
                     chat_id=bindings[0].chat_id,
@@ -879,7 +943,8 @@ class Controller:
                     monospace=True,
                     buttons=[
                         [tr(group.language, "submission_open"), f"view_submission {submission.id}"]
-                    ],
+                    ]
+                    + [list(button) for button in export_buttons],
                 )
             )
             return Response(self.t("published"))
@@ -894,6 +959,63 @@ class Controller:
             number=revision.suggestion_number
             if revision.suggestion_number is not None
             else revision.number,
+        )
+
+    async def _export_buttons(
+        self,
+        group_id: UUID,
+        concert_id: UUID,
+        snapshot: dict[str, Any],
+        version: int,
+        *,
+        approved: bool,
+        back: str,
+        chat_id: int | None = None,
+        private: bool | None = None,
+        language: str | None = None,
+    ) -> list[tuple[str, str]]:
+        if not any(block["items"] for block in snapshot["blocks"]):
+            return []
+        service = self.exports if chat_id is None else Exports(self.store, self.user, chat_id)
+        export = await service.create(
+            group_id,
+            concert_id,
+            snapshot,
+            version,
+            approved=approved,
+            private=self.private if private is None else private,
+            back=back,
+        )
+        return [(tr(language or self.language, "export_button"), f"export_menu {export.id.hex}")]
+
+    def _export_menu(
+        self, export_id: UUID, payload: dict[str, Any], language: str, latin: bool
+    ) -> Response:
+        buttons = [
+            (self.t(label), f"export_file {export_id.hex} {audience} {language} {int(latin)}")
+            for label, audience in (
+                ("export_musicians", "musicians"),
+                ("export_lights", "lights"),
+                ("export_all", "all"),
+            )
+        ]
+        buttons += [
+            (
+                self.t("export_language", code=language.upper()),
+                f"export_menu {export_id.hex} {'en' if language == 'ru' else 'ru'} {int(latin)}",
+            ),
+            (
+                self.t("export_latin_on" if latin else "export_latin_off"),
+                f"export_menu {export_id.hex} {language} {int(not latin)}",
+            ),
+            (self.t("back_button"), f"export_back {export_id.hex}"),
+        ]
+        status = self.t("pdf_approved" if payload["approved"] else "pdf_draft")
+        return Response(
+            f"{payload['group_name']}\n{payload['concert_date']} {payload['concert_title']}\n"
+            f"{self.t('version', version=payload['version'])} · {status}\n\n"
+            + self.t("export_choose"),
+            buttons,
         )
 
     def _song_list_errors(self, exc: SongListError) -> Response:
@@ -1084,6 +1206,14 @@ class Controller:
             buttons.extend(
                 [(await self._revision_label(r), f"revision {r.id}") for r in variants[:10]]
             )
+        buttons += await self._export_buttons(
+            context.group_id,
+            context.concert_id,
+            snapshot,
+            version,
+            approved=approved,
+            back="shared" if shared else "setlist",
+        )
         if not shared and not approved:
             if any(block["kind"] == "encore" for block in snapshot["blocks"]):
                 for label, action in (

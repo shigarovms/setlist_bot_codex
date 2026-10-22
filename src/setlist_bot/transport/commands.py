@@ -46,6 +46,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "concerts": ("Выбрать концерт", "Select a concert"),
     "setlist": ("Сет-лист выбранного концерта", "Setlist for the selected concert"),
     "shared": ("Показать общий сет-лист", "Show the shared setlist"),
+    "export": ("PDF для музыкантов и световика", "PDFs for musicians and lighting"),
     "add": ("Добавить песню или список по строкам", "Add a song or a list, one title per line"),
     "suggestion": (
         "Создать свой вариант из списка песен",
@@ -101,6 +102,7 @@ COMMON = (
     "concerts",
     "setlist",
     "shared",
+    "export",
     "add",
     "suggestion",
     "versions",
