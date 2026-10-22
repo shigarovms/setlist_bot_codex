@@ -11,6 +11,7 @@ from setlist_bot.application.groups import Groups
 from setlist_bot.application.importing import Importer
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
+from setlist_bot.application.song_selection import PAGE_SIZE, SongSelection
 from setlist_bot.application.templates import Templates
 from setlist_bot.application.trash import RETENTION, Trash
 from setlist_bot.domain.entities import (
@@ -31,6 +32,7 @@ from setlist_bot.domain.entities import (
 )
 from setlist_bot.domain.importing import FIELDS, read_table
 from setlist_bot.domain.rules import (
+    AppError,
     SongListError,
     clock,
     duration,
@@ -51,6 +53,15 @@ class Response:
     monospace: bool = False
     suggestion_template_id: UUID | None = None
     force_reply: bool = False
+    selection_id: UUID | None = None
+    reply_keyboard: list[list[str]] | None = None
+    keyboard_text: str = ""
+    remove_keyboard: bool = False
+    keyboard_message_id: int | None = None
+    previous_keyboard_id: int | None = None
+    edit_message_ids: list[int] = field(default_factory=list)
+    delete_input: bool = False
+    button_columns: int = 1
 
 
 class Controller:
@@ -63,6 +74,7 @@ class Controller:
         self.groups = Groups(store, user)
         self.catalog = Catalog(store, user)
         self.setlists = Setlists(store, user)
+        self.selection = SongSelection(store, user, chat_id)
         self.importer = Importer(store, user, chat_id)
         self.trash = Trash(store, user)
         self.templates = Templates(store, user, chat_id)
@@ -136,6 +148,9 @@ class Controller:
             if bindings:
                 group = await self.store.get(Group, bindings[0].group_id)
                 self.language = group.language
+        if command in ("pick_start", "pick_text", "pick_confirm", "pick_cancel"):
+            require(self.private, "private_only")
+            return await self._selection_action(command, UUID(args))
         if reply_template_id is not None and (
             not message.startswith("/") or command == "suggestion"
         ):
@@ -306,6 +321,7 @@ class Controller:
                 "confirmation",
             )
             data = json.loads(confirmation.command)
+            require("command" in data, "confirmation")
             require(data["group_id"] == str(context.group_id), "confirmation")
             require(data.get("group_epoch", 0) == group.lifecycle_version, "confirmation")
             require(
@@ -703,7 +719,15 @@ class Controller:
                         self.t("song_list_line", number=number, title=title, reason=reason)
                     )
                 return Response("\n\n".join(lines))
-            return await self._show(context)
+            previous = await self.selection.active() if self.private else None
+            if self.private:
+                await self.selection.clear()
+            response = await self._show(context)
+            response.remove_keyboard = (
+                previous is not None and self.selection.data(previous)["stage"] == "choosing"
+            )
+            response.keyboard_text = self.t("selection_keyboard_closed")
+            return response
         if command == "encore":
             if args:
                 identifier, raw_version = args.split()
@@ -1051,7 +1075,166 @@ class Controller:
             text += "\n" + self.t("suggestion_private")
         if template.titles:
             text += "\n\n" + "\n".join(template.titles)
+        if self.private:
+            previous = await self.selection.active()
+            previous_data = self.selection.data(previous) if previous else {}
+            session = await self.selection.create(
+                context.group_id, context.concert_id, version, template_id
+            )
+            return Response(
+                text + "\n\n" + self.t("selection_method"),
+                [
+                    (self.t("selection_text_button"), f"pick_text {session.id.hex}"),
+                    (self.t("selection_pick_button"), f"pick_start {session.id.hex}"),
+                ],
+                suggestion_template_id=template_id,
+                selection_id=session.id,
+                remove_keyboard=previous_data.get("stage") == "choosing",
+                keyboard_text=self.t("selection_keyboard_closed"),
+                previous_keyboard_id=previous_data.get("keyboard_message_id"),
+            )
         return Response(text, suggestion_template_id=template_id, force_reply=True)
+
+    def _selection_view(
+        self, session: Confirmation, data: dict[str, Any], *, keyboard: bool = False
+    ) -> Response:
+        roster = {s["id"]: s for s in data["songs"]}
+        titles = [roster[i]["title"] for i in data["selected"]]
+        reviewing = data["stage"] == "review"
+        body = "\n".join(
+            titles if reviewing else [f"{i}. {title}" for i, title in enumerate(titles, 1)]
+        )
+        response = Response(
+            self.t("selection_title")
+            + "\n\n"
+            + (body or self.t("selection_no_songs"))
+            + "\n\n"
+            + self.t("selection_count", count=len(titles)),
+            selection_id=session.id,
+            edit_message_ids=list(data["panel_ids"]),
+            previous_keyboard_id=data["keyboard_message_id"],
+        )
+        if reviewing:
+            response.buttons = [
+                (self.t("selection_confirm"), f"pick_confirm {session.id.hex}"),
+                (self.t("selection_cancel"), f"pick_cancel {session.id.hex}"),
+            ]
+            response.button_columns = 2
+            response.remove_keyboard = True
+            response.keyboard_text = self.t("selection_review")
+        elif keyboard:
+            start = data["page"] * PAGE_SIZE
+            labels = [s["label"] for s in data["songs"][start : start + PAGE_SIZE]]
+            rows = [[self.t("selection_finish")]]
+            rows += [labels[i : i + 2] for i in range(0, len(labels), 2)]
+            navigation = []
+            if data["page"]:
+                navigation.append(self.t("selection_prev"))
+            if start + PAGE_SIZE < len(data["songs"]):
+                navigation.append(self.t("selection_next"))
+            if navigation:
+                rows.append(navigation)
+            response.reply_keyboard = rows
+            response.keyboard_text = self.t(
+                "selection_page",
+                page=data["page"] + 1,
+                pages=(len(data["songs"]) + PAGE_SIZE - 1) // PAGE_SIZE,
+            )
+        return response
+
+    async def _selection_action(self, action: str, identifier: UUID) -> Response:
+        if action == "pick_cancel":
+            # Cancellation must still work after the draft/catalog/context has changed.
+            sessions = await self.store.find(
+                Confirmation, id=identifier, user_id=self.user.id, chat_id=self.chat_id
+            )
+            require(bool(sessions), "selection_expired")
+            session = sessions[0]
+            data = self.selection.data(session)
+            active = await self.selection.active()
+            require(
+                data.get("kind") == "song_selection"
+                and active is not None
+                and active.id == session.id,
+                "selection_expired",
+            )
+            await self.store.delete(session)
+            context = await self.groups.context(self.chat_id, True)
+            was_choosing = data["stage"] == "choosing"
+            response = Response(self.t("selection_cancelled"), remove_keyboard=was_choosing)
+            try:
+                if context.group_id == UUID(data["group_id"]) and context.concert_id == UUID(
+                    data["concert_id"]
+                ):
+                    # Fresh prompt with the current version, not the cancelled snapshot.
+                    shown = await self._show(context)
+                    assert shown.suggestion_template_id is not None
+                    response = await self._suggestion_prompt(shown.suggestion_template_id)
+                    response.text = self.t("selection_cancelled") + "\n\n" + response.text
+                    response.remove_keyboard = was_choosing
+            except AppError:
+                pass
+            response.previous_keyboard_id = data["keyboard_message_id"]
+            response.keyboard_text = self.t("selection_keyboard_closed")
+            return response
+        if action == "pick_start":
+            session, data = await self.selection.start(identifier)
+            return self._selection_view(session, data, keyboard=True)
+        session, data = await self.selection.load(identifier)
+        if action == "pick_text":
+            require(data["stage"] == "method", "selection_expired")
+            data["stage"] = "text"
+            self.selection.write(session, data)
+            template_id = UUID(data["template_id"])
+            return Response(
+                self.t("suggestion_prompt") + "\n" + self.t("suggestion_private"),
+                suggestion_template_id=template_id,
+                force_reply=True,
+                selection_id=session.id,
+            )
+        await self.selection.save(identifier)
+        context = await self.groups.context(self.chat_id, True)
+        response = await self._show(context)
+        response.text = self.t("selection_saved") + "\n\n" + response.text
+        return response
+
+    async def selection_input(self, value: str, message_id: int | None) -> Response | None:
+        session = await self.selection.active()
+        if session is None:
+            return None
+        session, data = await self.selection.load(session.id)
+        if data["stage"] in ("method", "text"):
+            return await self.execute(
+                "/suggestion\n" + value, reply_template_id=UUID(data["template_id"])
+            )
+        if data["stage"] != "choosing":
+            return None
+        if (
+            message_id is not None
+            and data["keyboard_message_id"] is not None
+            and message_id <= data["keyboard_message_id"]
+        ):
+            return None
+        keyboard = False
+        if value == self.t("selection_finish"):
+            require(bool(data["selected"]), "empty_setlist")
+            data["stage"] = "review"
+        elif value in (self.t("selection_prev"), self.t("selection_next")):
+            page = data["page"] + (-1 if value == self.t("selection_prev") else 1)
+            require(0 <= page * PAGE_SIZE < len(data["songs"]), "selection_expired")
+            data["page"] = page
+            keyboard = True
+        else:
+            start = data["page"] * PAGE_SIZE
+            matches = [s for s in data["songs"][start : start + PAGE_SIZE] if s["label"] == value]
+            if not matches:
+                return Response(self.t("selection_unknown"))
+            require(len(data["selected"]) < 200, "song_list_input")
+            data["selected"] = [*data["selected"], matches[0]["id"]]
+        self.selection.write(session, data)
+        response = self._selection_view(session, data, keyboard=keyboard)
+        response.delete_input = True
+        return response
 
     async def _trash_list(self) -> Response:
         memberships = await self.store.find(

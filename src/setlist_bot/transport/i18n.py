@@ -27,6 +27,7 @@ MESSAGES = {
             "Списком: /add на первой строке, затем названия песен по одному на строку.\n"
             "Новый вариант целиком: /suggestion и список песен. Старый остаётся в истории.\n"
             "/suggestion без списка спрашивает ваш вариант; ответьте списком на сообщение бота.\n"
+            "В личном чате можно ввести список или выбрать песни на клавиатуре; подтверждение сохраняет только личный черновик.\n"
             "Можно ответить списком прямо на рабочий сет-лист — концерт определяется этим сообщением.\n"
             "Удалить: /remove блок позиция.\n"
             "Переместить: /move блок откуда куда.\n"
@@ -103,6 +104,26 @@ MESSAGES = {
         "pdf_col_comment": "Комментарий",
         "suggestion_prompt": "Какой вариант вы предлагаете? Ответьте на это сообщение списком песен — по одному названию на строку.",
         "suggestion_private": "Это изменит только ваш личный черновик. Для публикации используйте /publish.",
+        "selection_method": "Выберите способ ввода. Можно сразу отправить список песен одним сообщением или вставить его из буфера обмена.",
+        "selection_text_button": "📝 Ввести списком",
+        "selection_pick_button": "🎵 Выбрать песни",
+        "selection_title": "🎵 Ваш сет-лист",
+        "selection_no_songs": "Пока нет выбранных песен.",
+        "selection_count": "Всего песен: {count}.",
+        "selection_finish": "✅ Завершить",
+        "selection_prev": "◀️ Назад",
+        "selection_next": "Вперёд ▶️",
+        "selection_page": "Выберите песни · страница {page}/{pages}. Порядок нажатий сохраняется, повторы разрешены. /cancel — отмена; другая команда завершит режим выбора без сохранения.",
+        "selection_review": "Выбор завершён. Подтвердите список ниже или отмените ввод. Это сохранение личного черновика, без публикации группе.",
+        "selection_confirm": "✅ Подтвердить",
+        "selection_cancel": "❌ Отменить",
+        "selection_cancelled": "Ввод отменён. Сохранённый черновик не изменён.",
+        "selection_saved": "Список сохранён в личный черновик. Он не опубликован и не утверждён.",
+        "selection_expired": "Этот выбор уже завершён или устарел. Откройте /suggestion заново.",
+        "selection_empty_catalog": "В репертуаре пока нет активных песен. Сначала добавьте их в каталог.",
+        "selection_catalog_changed": "Выбранная песня изменилась или архивирована. Черновик не изменён. Отмените ввод и начните выбор заново.",
+        "selection_unknown": "Нажмите песню на текущей странице клавиатуры. Для ввода списком откройте /suggestion; для отмены — /cancel.",
+        "selection_keyboard_closed": "Выбор песен закрыт.",
         "timing_net": "Чистое время: {time}",
         "timing_breaks": "Перерывы: {time}",
         "timing_total": "Итого: {time}",
@@ -276,6 +297,7 @@ MESSAGES = {
             "List: /add on the first line, then one song title per line.\n"
             "Replace the entire setlist: /suggestion and a list of songs. History is preserved.\n"
             "/suggestion without a list asks for your variant; reply to that message with your list.\n"
+            "In private chat, enter a list or pick songs on the keyboard; confirmation only saves your private draft.\n"
             "You can reply with a list directly to a working setlist; its message selects the concert.\n"
             "Remove: /remove block position.\n"
             "Move: /move block from to.\n"
@@ -352,6 +374,26 @@ MESSAGES = {
         "pdf_col_comment": "Comment",
         "suggestion_prompt": "What variant do you propose? Reply to this message with one song title per line.",
         "suggestion_private": "This only changes your personal draft. Use /publish to share it.",
+        "selection_method": "Choose an input method. You can also send or paste a multiline song list immediately.",
+        "selection_text_button": "📝 Enter a list",
+        "selection_pick_button": "🎵 Choose songs",
+        "selection_title": "🎵 Your setlist",
+        "selection_no_songs": "No songs selected yet.",
+        "selection_count": "Total songs: {count}.",
+        "selection_finish": "✅ Finish",
+        "selection_prev": "◀️ Back",
+        "selection_next": "Next ▶️",
+        "selection_page": "Choose songs · page {page}/{pages}. Tap order is preserved; repeats are allowed. /cancel discards input; another command exits without saving.",
+        "selection_review": "Selection finished. Confirm the list below or cancel input. This only saves your private draft, without publishing it.",
+        "selection_confirm": "✅ Confirm",
+        "selection_cancel": "❌ Cancel",
+        "selection_cancelled": "Input cancelled. Your saved draft is unchanged.",
+        "selection_saved": "Saved to your private draft. It has not been published or approved.",
+        "selection_expired": "This selection has ended or expired. Open /suggestion again.",
+        "selection_empty_catalog": "There are no active songs in the catalog. Add songs first.",
+        "selection_catalog_changed": "A selected song changed or was archived. Your draft is unchanged. Cancel input and start a new selection.",
+        "selection_unknown": "Tap a song on the current keyboard page. Open /suggestion to enter a list, or /cancel to cancel.",
+        "selection_keyboard_closed": "Song selection closed.",
         "timing_net": "Performance: {time}",
         "timing_breaks": "Breaks: {time}",
         "timing_total": "Total: {time}",

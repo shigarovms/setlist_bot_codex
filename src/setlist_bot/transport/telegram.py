@@ -1,22 +1,37 @@
 import logging
+from asyncio import Lock
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+from weakref import WeakValueDictionary
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
+    Chat,
     ErrorEvent,
     ForceReply,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     Message,
     MessageEntity,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
     Update,
 )
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from setlist_bot.domain.entities import ProcessedUpdate, SetlistMessage, SongListTemplate, User
+from setlist_bot.application.song_selection import SongSelection
+from setlist_bot.domain.entities import (
+    Confirmation,
+    ProcessedUpdate,
+    SetlistMessage,
+    SongListTemplate,
+    User,
+)
 from setlist_bot.domain.rules import AppError
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.transport.controller import Controller, Response
@@ -59,7 +74,14 @@ class Processor:
         chat_admin: bool = False,
         display_name: str = "",
         reply_message_id: int | None = None,
+        message_id: int | None = None,
+        is_callback: bool | None = None,
     ) -> Response | None:
+        if is_callback is None:
+            # Preserve direct Processor callers that pass internal callback commands.
+            is_callback = (
+                message_id is None and reply_message_id is None and not command.startswith("/")
+            )
         async with PostgresUnitOfWork(self.engine) as uow:
             # Serializes user creation and each chat's command stream; group locks additionally
             # serialize access from private chats with commands from the shared chat.
@@ -82,6 +104,7 @@ class Processor:
             )
             try:
                 async with uow.session.begin_nested():
+                    selection_before = await controller.selection.active() if private else None
                     references = (
                         await uow.store.find(
                             SetlistMessage, chat_id=chat_id, message_id=reply_message_id
@@ -95,10 +118,32 @@ class Processor:
                         and not references
                     ):
                         return None
-                    response = await controller.execute(
-                        command,
-                        reply_template_id=references[0].template_id if references else None,
-                    )
+                    if (
+                        private
+                        and not is_callback
+                        and not command.lstrip().startswith("/")
+                        and not references
+                    ):
+                        response = await controller.selection_input(command, message_id)
+                    else:
+                        response = await controller.execute(
+                            command,
+                            reply_template_id=references[0].template_id if references else None,
+                        )
+                    if (
+                        selection_before is not None
+                        and response is not None
+                        and response.selection_id is None
+                        and (is_callback or command.lstrip().startswith("/"))
+                    ):
+                        await controller.selection.clear()
+                        response.remove_keyboard = response.remove_keyboard or (
+                            SongSelection.data(selection_before)["stage"] == "choosing"
+                        )
+                        if response.remove_keyboard and not response.keyboard_text:
+                            response.keyboard_text = tr(
+                                controller.language, "selection_keyboard_closed"
+                            )
                     await uow.store.flush()
             except (AppError, ValueError, IndexError) as exc:
                 code = exc.code if isinstance(exc, AppError) else "input"
@@ -122,9 +167,24 @@ class Processor:
     async def remember_response(
         self, chat_id: int, response: Response, messages: list[Message]
     ) -> None:
-        if response.suggestion_template_id is None:
+        if response.suggestion_template_id is None and response.selection_id is None:
             return
         async with PostgresUnitOfWork(self.engine) as uow:
+            if response.selection_id is not None:
+                sessions = await uow.store.find(
+                    Confirmation,
+                    id=response.selection_id,
+                )
+                if sessions:
+                    session = sessions[0]
+                    data = SongSelection.data(session)
+                    if data["stage"] in ("choosing", "review"):
+                        data["panel_ids"] = [message.message_id for message in messages]
+                        if response.keyboard_message_id is not None:
+                            data["keyboard_message_id"] = response.keyboard_message_id
+                        SongSelection.write(session, data)
+            if response.suggestion_template_id is None:
+                return
             templates = await uow.store.find(SongListTemplate, id=response.suggestion_template_id)
             # Cleanup may expire a template between sending and recording its message.
             if not templates:
@@ -142,19 +202,46 @@ class Processor:
                     )
 
 
-async def keyboards(buttons: list[tuple[str, str]]) -> AsyncIterator[InlineKeyboardMarkup]:
+async def keyboards(
+    buttons: list[tuple[str, str]], columns: int = 1
+) -> AsyncIterator[InlineKeyboardMarkup]:
     for start in range(0, len(buttons), 40):
         yield InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text=label[:100], callback_data=data)]
-                for label, data in buttons[start : start + 40]
+                [
+                    InlineKeyboardButton(text=label[:100], callback_data=data)
+                    for label, data in buttons[i : i + columns]
+                ]
+                for i in range(start, min(start + 40, len(buttons)), columns)
             ]
         )
 
 
 async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Message]:
     pieces = chunks(response.text)
-    markup_batches = [markup async for markup in keyboards(response.buttons)]
+    markup_batches = [
+        markup async for markup in keyboards(response.buttons, response.button_columns)
+    ]
+    if response.reply_keyboard is not None or response.remove_keyboard:
+        carrier = await bot.send_message(
+            chat_id,
+            response.keyboard_text or "⌨️",
+            reply_markup=(
+                ReplyKeyboardMarkup(
+                    keyboard=[
+                        [KeyboardButton(text=label) for label in row]
+                        for row in response.reply_keyboard
+                    ],
+                    resize_keyboard=True,
+                    is_persistent=True,
+                )
+                if response.reply_keyboard is not None
+                else ReplyKeyboardRemove()
+            ),
+        )
+        response.keyboard_message_id = carrier.message_id
+        if response.previous_keyboard_id is not None:
+            await delete_selection_message(bot, chat_id, response.previous_keyboard_id)
     messages = []
     for i, piece in enumerate(pieces):
         markup = markup_batches.pop(0) if i == len(pieces) - 1 and markup_batches else None
@@ -163,6 +250,39 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
             if response.monospace
             else None
         )
+        if i < len(response.edit_message_ids):
+            identifier = response.edit_message_ids[i]
+            try:
+                edited = await bot.edit_message_text(
+                    piece,
+                    chat_id=chat_id,
+                    message_id=identifier,
+                    entities=entities,
+                    parse_mode=None,
+                    reply_markup=markup,
+                )
+                if isinstance(edited, Message):
+                    messages.append(edited)
+                else:
+                    messages.append(
+                        Message(
+                            message_id=identifier,
+                            date=datetime.now(UTC),
+                            chat=Chat(id=chat_id, type="private"),
+                        )
+                    )
+                continue
+            except TelegramBadRequest as exc:
+                if "message is not modified" in exc.message.lower():
+                    messages.append(
+                        Message(
+                            message_id=identifier,
+                            date=datetime.now(UTC),
+                            chat=Chat(id=chat_id, type="private"),
+                        )
+                    )
+                    continue
+                # A manually deleted/expired panel is replaced and its new ID is persisted.
         messages.append(
             await bot.send_message(
                 chat_id,
@@ -172,6 +292,8 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
                 reply_markup=ForceReply() if response.force_reply else markup,
             )
         )
+    for identifier in response.edit_message_ids[len(pieces) :]:
+        await delete_selection_message(bot, chat_id, identifier)
     for markup in markup_batches:
         await bot.send_message(chat_id, "…", reply_markup=markup)
     for filename, data in response.files:
@@ -179,8 +301,23 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
     return messages
 
 
+async def delete_selection_message(bot: Bot, chat_id: int, message_id: int) -> None:
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except Exception as exc:
+        logger.info("Could not delete selection message (%s)", type(exc).__name__)
+
+
 def make_router(processor: Processor, username: str) -> Router:
     router = Router()
+    locks: WeakValueDictionary[int, Lock] = WeakValueDictionary()
+
+    def delivery_lock(chat_id: int) -> Lock:
+        lock = locks.get(chat_id)
+        if lock is None:
+            lock = Lock()
+            locks[chat_id] = lock
+        return lock
 
     @router.message(F.text)
     async def command(message: Message, event_update: Update, bot: Bot) -> None:
@@ -199,28 +336,33 @@ def make_router(processor: Processor, username: str) -> Router:
         reply_id = (
             reply.message_id if reply and reply.from_user and reply.from_user.id == bot.id else None
         )
-        if not message.text.lstrip().startswith("/") and reply_id is None:
-            return
         private = message.chat.type == "private"
+        if not message.text.lstrip().startswith("/") and reply_id is None and not private:
+            return
         if message.chat.type not in ("private", "group", "supergroup"):
             return
         chat_admin = False
         if head.split("@", 1)[0].casefold() == "/group" and not private:
             administrators = await bot.get_chat_administrators(message.chat.id)
             chat_admin = any(member.user.id == message.from_user.id for member in administrators)
-        response = await processor.process(
-            event_update.update_id,
-            message.from_user.id,
-            message.chat.id,
-            message.text,
-            private=private,
-            chat_admin=chat_admin,
-            display_name=message.from_user.full_name,
-            reply_message_id=reply_id,
-        )
-        if response:
-            sent = await send_response(bot, message.chat.id, response)
-            await processor.remember_response(message.chat.id, response, sent)
+        async with delivery_lock(message.chat.id):
+            response = await processor.process(
+                event_update.update_id,
+                message.from_user.id,
+                message.chat.id,
+                message.text,
+                private=private,
+                chat_admin=chat_admin,
+                display_name=message.from_user.full_name,
+                reply_message_id=reply_id,
+                message_id=message.message_id,
+                is_callback=False,
+            )
+            if response:
+                if response.delete_input:
+                    await delete_selection_message(bot, message.chat.id, message.message_id)
+                sent = await send_response(bot, message.chat.id, response)
+                await processor.remember_response(message.chat.id, response, sent)
 
     @router.callback_query(F.data)
     async def callback(query: CallbackQuery, event_update: Update, bot: Bot) -> None:
@@ -228,17 +370,19 @@ def make_router(processor: Processor, username: str) -> Router:
             await query.answer()
             return
         await query.answer()
-        response = await processor.process(
-            event_update.update_id,
-            query.from_user.id,
-            query.message.chat.id,
-            query.data,
-            private=query.message.chat.type == "private",
-            display_name=query.from_user.full_name,
-        )
-        if response:
-            sent = await send_response(bot, query.message.chat.id, response)
-            await processor.remember_response(query.message.chat.id, response, sent)
+        async with delivery_lock(query.message.chat.id):
+            response = await processor.process(
+                event_update.update_id,
+                query.from_user.id,
+                query.message.chat.id,
+                query.data,
+                private=query.message.chat.type == "private",
+                display_name=query.from_user.full_name,
+                is_callback=True,
+            )
+            if response:
+                sent = await send_response(bot, query.message.chat.id, response)
+                await processor.remember_response(query.message.chat.id, response, sent)
 
     @router.errors()
     async def failure(event: ErrorEvent, bot: Bot) -> bool:

@@ -235,6 +235,7 @@ class Setlists:
         replace: bool = False,
         block: int = 1,
         private: bool = False,
+        song_ids: list[UUID] | None = None,
     ) -> None:
         """Resolve every input before writing a single atomic setlist revision."""
         setlist = await self.load(group_id, concert_id)
@@ -242,7 +243,13 @@ class Setlists:
         require((draft.version if draft else setlist.version) == expected, "conflict")
         require(private or not setlist.approved, "approved")
         content = pause_content(draft.content) if draft else await self._working(setlist)
-        songs = await Catalog(self.store, self.user).resolve_list(group_id, titles)
+        catalog = Catalog(self.store, self.user)
+        if song_ids is None:
+            songs = await catalog.resolve_list(group_id, titles)
+        else:
+            require(1 <= len(song_ids) <= 200, "song_list_input")
+            songs = [await catalog.song(group_id, identifier) for identifier in song_ids]
+            require(all(not song.archived for song in songs), "selection_catalog_changed")
         items = [{"song_id": str(song.id), "pause_before": None} for song in songs]
         if replace:
             content["blocks"] = [{"title": "", "kind": "main", "break_seconds": 0, "items": items}]
