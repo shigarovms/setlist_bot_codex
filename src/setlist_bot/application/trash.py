@@ -158,6 +158,12 @@ class TrashCleanup:
         await self.store.flush()
 
     async def _purge_concert(self, concert: e.Concert) -> None:
+        for session in await self.store.find(e.Confirmation):
+            payload = json.loads(session.command)
+            if payload.get("concert_id") == str(concert.id) and payload.get("group_id") == str(
+                concert.group_id
+            ):
+                await self.store.delete(session)
         filters = {"group_id": concert.group_id, "concert_id": concert.id}
         for kind in (e.Outbox, e.ExportSnapshot, e.SongListTemplate, e.PersonalDraft, e.Submission):
             await self._delete(kind, **filters)

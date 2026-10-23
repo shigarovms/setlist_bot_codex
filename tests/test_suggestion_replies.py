@@ -3,6 +3,7 @@ from itertools import count
 
 import pytest
 from aiogram.types import Chat, Message
+from menu_helpers import variants
 
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.application.trash import TrashCleanup
@@ -51,7 +52,7 @@ async def test_empty_concert_button_and_reply_create_first_variant_for_another_m
     prompt = await send(copy_button(empty), actor=2, remember=101)
     assert "Какой вариант вы предлагаете?" in prompt.text
     result = await send("Комета\nКомета", actor=2, reply=101)
-    assert "Музыкант 2 · вариант 1" in dict(result.buttons)
+    assert "Музыкант 2 · вариант 1" in dict((await variants(send, result, actor=2)).buttons)
     assert "1. Комета" in result.text and "2. Комета" in result.text
     async with PostgresUnitOfWork(engine) as uow:
         data, version, _ = await Setlists(uow.store, world.member).read(
@@ -67,7 +68,9 @@ async def test_reply_to_working_message_uses_original_concert_after_switch(engin
     await send(f"/use_concert {world.concert.id}", remember=100)
     await send(f"/use_concert {world.concert2.id}", actor=2)
     result = await send(body, actor=2, reply=100)
-    assert "Новый год" in result.text and "вариант 1" in str(result.buttons)
+    assert "Новый год" in result.text and "вариант 1" in str(
+        (await variants(send, result, actor=2)).buttons
+    )
     async with PostgresUnitOfWork(engine) as uow:
         service = Setlists(uow.store, world.admin)
         assert (await service.read(world.group.id, world.concert.id))[1] == 1
@@ -98,6 +101,7 @@ async def test_stale_reply_and_stale_button_show_current_original_concert_withou
     assert "уже изменились" in stale.text and "Новый год" in stale.text
     assert "1. Комета" in stale.text and "2. Комета" not in stale.text
     assert stale.suggestion_template_id and stale.monospace
+    assert stale.menu_card_id is not None
     assert "уже изменились" in (await send(copy_button(old), actor=2)).text
     async with PostgresUnitOfWork(engine) as uow:
         service = Setlists(uow.store, world.admin)
@@ -153,7 +157,7 @@ async def test_invalid_reply_is_atomic_and_can_be_corrected_on_same_prompt(engin
     invalid = await send("Комета\nXXXXXXXXZZZZ", reply=100)
     assert "Список не применён" in invalid.text and "Строка 2" in invalid.text
     result = await send("Комета", reply=100)
-    assert "вариант 1" in str(result.buttons)
+    assert "вариант 1" in str((await variants(send, result, actor=2)).buttons)
 
 
 async def test_reply_anchor_does_not_revive_after_concert_deleted_and_restored(engine, world):

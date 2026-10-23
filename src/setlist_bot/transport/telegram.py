@@ -25,6 +25,7 @@ from aiogram.types import (
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from setlist_bot.application.setlist_menus import CARD, SetlistMenus
 from setlist_bot.application.song_selection import SongSelection
 from setlist_bot.domain.entities import (
     Confirmation,
@@ -103,6 +104,7 @@ class Processor:
             controller = Controller(
                 uow.store, user, chat_id, private=private, chat_admin=chat_admin
             )
+            controller.source_message_id = message_id if is_callback else None
             response: Response | None
             try:
                 async with uow.session.begin_nested():
@@ -163,6 +165,19 @@ class Processor:
                 code = exc.code if isinstance(exc, AppError) else "input"
                 await uow.session.refresh(user)
                 response = Response(tr(controller.language, code))
+                if is_callback and command.split(maxsplit=1)[0] in (
+                    "slmenu",
+                    "slact",
+                    "slopt",
+                    "slrev",
+                    "slreq",
+                    "slreturn",
+                    "export_menu",
+                    "export_back",
+                    "export_file",
+                ):
+                    response.callback_notice = response.text
+                    return response
                 if code == "conflict":
                     try:
                         context = await controller.groups.context(chat_id, private)
@@ -174,6 +189,7 @@ class Processor:
                             response.buttons = current.buttons
                             response.monospace = current.monospace
                             response.suggestion_template_id = current.suggestion_template_id
+                            response.menu_card_id = current.menu_card_id
                     except AppError:
                         pass
             return response
@@ -185,9 +201,20 @@ class Processor:
             response.suggestion_template_id is None
             and response.selection_id is None
             and response.group_creation_id is None
+            and response.menu_card_id is None
         ):
             return
         async with PostgresUnitOfWork(self.engine) as uow:
+            if response.menu_card_id is not None and messages:
+                cards = await uow.store.find(
+                    Confirmation, id=response.menu_card_id, chat_id=chat_id
+                )
+                if cards:
+                    data = SetlistMenus.data(cards[0])
+                    if data.get("kind") == CARD:
+                        SetlistMenus.write(
+                            cards[0], {**data, "message_ids": [m.message_id for m in messages]}
+                        )
             if response.group_creation_id is not None and messages:
                 sessions = await uow.store.find(
                     Confirmation, id=response.group_creation_id, chat_id=chat_id
@@ -212,15 +239,24 @@ class Processor:
                             data["keyboard_message_id"] = response.keyboard_message_id
                         SongSelection.write(session, data)
             if response.suggestion_template_id is None:
+                for message in messages:
+                    if message.message_id in response.edit_message_ids:
+                        for binding in await uow.store.find(
+                            SetlistMessage, chat_id=chat_id, message_id=message.message_id
+                        ):
+                            await uow.store.delete(binding)
                 return
             templates = await uow.store.find(SongListTemplate, id=response.suggestion_template_id)
             # Cleanup may expire a template between sending and recording its message.
             if not templates:
                 return
             for message in messages:
-                if not await uow.store.find(
+                bindings = await uow.store.find(
                     SetlistMessage, chat_id=chat_id, message_id=message.message_id
-                ):
+                )
+                if bindings and message.message_id in response.edit_message_ids:
+                    bindings[0].template_id = response.suggestion_template_id
+                elif not bindings:
                     uow.store.add(
                         SetlistMessage(
                             template_id=response.suggestion_template_id,
@@ -246,6 +282,23 @@ async def keyboards(
 
 
 async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Message]:
+    if response.markup_only:
+        batches = [markup async for markup in keyboards(response.buttons, response.button_columns)]
+        if response.edit_message_ids:
+            try:
+                await bot.edit_message_reply_markup(
+                    chat_id=chat_id,
+                    message_id=response.edit_message_ids[-1],
+                    reply_markup=batches[0] if batches else None,
+                )
+            except TelegramBadRequest as exc:
+                if "message is not modified" not in exc.message.lower():
+                    raise
+        for filename, data in response.files:
+            await bot.send_document(chat_id, BufferedInputFile(data, filename=filename))
+        return []
+    if response.callback_notice and not response.buttons and not response.files:
+        return []
     pieces = chunks(response.text)
     markup_batches = [
         markup async for markup in keyboards(response.buttons, response.button_columns)
@@ -398,7 +451,6 @@ def make_router(processor: Processor, username: str) -> Router:
         if not isinstance(query.message, Message) or not query.data:
             await query.answer()
             return
-        await query.answer()
         async with delivery_lock(query.message.chat.id):
             chat_admin = False
             if query.message.chat.type in ("group", "supergroup") and query.data.split(maxsplit=1)[
@@ -415,10 +467,20 @@ def make_router(processor: Processor, username: str) -> Router:
                 display_name=query.from_user.full_name,
                 is_callback=True,
                 chat_admin=chat_admin,
+                message_id=query.message.message_id,
             )
+            if response:
+                await query.answer(
+                    text=response.callback_notice or None, show_alert=bool(response.callback_notice)
+                )
+            else:
+                await query.answer()
             if response:
                 sent = await send_response(bot, query.message.chat.id, response)
                 await processor.remember_response(query.message.chat.id, response, sent)
+                for target_chat, extra in response.deliveries:
+                    extra_sent = await send_response(bot, target_chat, extra)
+                    await processor.remember_response(target_chat, extra, extra_sent)
 
     @router.errors()
     async def failure(event: ErrorEvent, bot: Bot) -> bool:

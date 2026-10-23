@@ -98,7 +98,10 @@ async def test_confirm_replaces_only_private_draft_preserves_order_duplicates_an
     assert "устарел" in (await send(confirm)).text
     assert (await contents(engine, world))[1] == 2
     async with PostgresUnitOfWork(engine) as uow:
-        assert not await uow.store.find(Confirmation, user_id=world.member.id)
+        assert all(
+            SongSelection.data(row).get("kind") != "song_selection"
+            for row in await uow.store.find(Confirmation, user_id=world.member.id)
+        )
         assert not await uow.store.find(Outbox)
         assert not await uow.store.find(Submission)
         assert len(await uow.store.find(PersonalDraft)) == 1

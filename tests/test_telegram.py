@@ -7,7 +7,14 @@ from typing import Any
 import pytest
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
-from aiogram.methods import AnswerCallbackQuery, GetChatAdministrators, SendDocument, SendMessage
+from aiogram.methods import (
+    AnswerCallbackQuery,
+    EditMessageReplyMarkup,
+    EditMessageText,
+    GetChatAdministrators,
+    SendDocument,
+    SendMessage,
+)
 from aiogram.types import CallbackQuery, Chat, ChatMemberOwner, Message, Update, User
 
 from setlist_bot.domain.entities import Concert, Group, Membership, Song
@@ -22,6 +29,8 @@ class FakeTelegram(BaseSession):
         self.documents: list[SendDocument] = []
         self.admin_ids = [1]
         self.admin_requests = 0
+        self.markups = []
+        self.edits = []
 
     async def close(self):
         pass
@@ -44,6 +53,16 @@ class FakeTelegram(BaseSession):
                 text=method.text,
                 from_user=User(id=bot.id, is_bot=True, first_name="Bot"),
                 entities=method.entities,
+            )
+        if isinstance(method, (EditMessageReplyMarkup, EditMessageText)):
+            (self.markups if isinstance(method, EditMessageReplyMarkup) else self.edits).append(
+                method
+            )
+            return Message(
+                message_id=method.message_id,
+                date=datetime.now(UTC),
+                chat=Chat(id=int(method.chat_id), type="supergroup"),
+                text=method.text if isinstance(method, EditMessageText) else "",
             )
         if isinstance(method, AnswerCallbackQuery):
             return True
@@ -138,9 +157,7 @@ async def test_aiogram_end_to_end_with_fake_telegram_and_real_postgres(engine, t
             "/suggestion@setlist_test_bot\nСлавик\nСердце лёд\nМеланхолия\nПодожгу\nАтомы\nVIBY"
         )
         assert "1. Славик" in suggested.text and "6. VIBY" in suggested.text
-        assert any(
-            row[0].text == "Админ · вариант 1" for row in suggested.reply_markup.inline_keyboard
-        )
+        assert any(row[0].text == "⚙️ Опции" for row in suggested.reply_markup.inline_keyboard)
         await send("/setlist", actor=2)
         appended = await send("/add\nКомета\nРадуга", actor=2)
         assert "7. Комета" in appended.text and "8. Радуга" in appended.text
@@ -231,7 +248,7 @@ async def test_router_accepts_only_replies_to_its_working_messages_and_persists_
         )
         assert await send("Комета", reply=unrelated) is None
         result = await send("Комета\nКомета", reply=prompt, actor=2)
-        assert "Музыкант 2 · вариант 1" in str(session.sent[-1].reply_markup)
+        assert "⚙️ Опции" in str(session.sent[-1].reply_markup)
         foreign = working.model_copy(
             update={"from_user": User(id=987654, is_bot=True, first_name="Other")}
         )
@@ -278,7 +295,7 @@ async def test_pdf_export_submenu_sends_both_a4_documents_through_aiogram(engine
         async def send(text, callback=False):
             user = User(id=1, is_bot=False, first_name="Админ")
             message = Message(
-                message_id=next(ids),
+                message_id=len(session.sent) if callback else next(ids),
                 date=datetime.now(UTC),
                 chat=Chat(id=-100, type="supergroup"),
                 from_user=user,
@@ -299,14 +316,23 @@ async def test_pdf_export_submenu_sends_both_a4_documents_through_aiogram(engine
                 if callback
                 else Update(update_id=update_id, message=message)
             )
+            before = len(session.markups)
             await dispatcher.feed_update(bot, update)
-            return session.sent[-1]
+            return session.markups[-1] if len(session.markups) > before else session.sent[-1]
 
         await send(f"/use_concert {world.concert.id}")
         shown = await send("/add Комета")
+        options = await send(
+            next(
+                row[0].callback_data
+                for row in shown.reply_markup.inline_keyboard
+                if row[0].text == "⚙️ Опции"
+            ),
+            callback=True,
+        )
         button = next(
             row[0].callback_data
-            for row in shown.reply_markup.inline_keyboard
+            for row in options.reply_markup.inline_keyboard
             if row[0].text == "Экспорт"
         )
         menu = await send(button, callback=True)

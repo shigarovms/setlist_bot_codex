@@ -2,17 +2,31 @@ import argparse
 import asyncio
 import contextlib
 import logging
+from uuid import UUID
 
 from aiogram import Bot, Dispatcher
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from setlist_bot.application.setlist_menus import REQUEST, SetlistMenus
 from setlist_bot.application.trash import TrashCleanup
 from setlist_bot.config import Settings
-from setlist_bot.domain.entities import ChatBinding, Concert, Group, Outbox
+from setlist_bot.domain.entities import (
+    ChatBinding,
+    Concert,
+    Confirmation,
+    Group,
+    Membership,
+    Outbox,
+    User,
+    now,
+)
+from setlist_bot.domain.rules import AppError
 from setlist_bot.infrastructure.database import PostgresUnitOfWork, metadata
 from setlist_bot.transport.commands import collect_command_targets, synchronize_commands
 from setlist_bot.transport.controller import Response
+from setlist_bot.transport.i18n import tr
 from setlist_bot.transport.session import VerifiedSession
 from setlist_bot.transport.telegram import Processor, make_router, send_response
 
@@ -34,21 +48,86 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
         event = await uow.store.get(Outbox, pending.id, lock=True)
         if event.sent:
             return
+        request = None
+        request_data = None
         if group is not None:
             bindings = await uow.store.find(ChatBinding, group_id=group.id, chat_id=event.chat_id)
             concert = await uow.store.get(Concert, event.concert_id) if event.concert_id else None
+            if event.chat_id > 0 and event.buttons and event.buttons[0][1].startswith("slreq "):
+                requests = await uow.store.find(
+                    Confirmation, id=UUID(event.buttons[0][1].split()[1])
+                )
+                if requests:
+                    request = requests[0]
+                    request_data = SetlistMenus.data(request)
+                    admin = await uow.store.get(User, request.user_id)
+                    if not (
+                        request_data.get("kind") == REQUEST
+                        and request_data["status"] == "pending"
+                        and request.expires_at > now()
+                        and request.chat_id == event.chat_id == admin.telegram_id
+                        and request_data["group_id"] == str(event.group_id)
+                        and request_data["concert_id"] == str(event.concert_id)
+                        and await uow.store.find(
+                            Membership,
+                            group_id=group.id,
+                            user_id=admin.id,
+                            role="admin",
+                            status="active",
+                        )
+                        and await uow.store.find(
+                            Membership,
+                            group_id=group.id,
+                            user_id=UUID(request_data["requester_id"]),
+                            status="active",
+                        )
+                    ):
+                        if (
+                            request_data.get("kind") == REQUEST
+                            and request_data.get("status") == "pending"
+                        ):
+                            SetlistMenus.write(request, {**request_data, "status": "stale"})
+                        event.sent = True
+                        return
+                    try:
+                        await SetlistMenus(uow.store, admin, event.chat_id).validate(
+                            request_data, fresh=True
+                        )
+                    except AppError:
+                        SetlistMenus.write(request, {**request_data, "status": "stale"})
+                        event.sent = True
+                        return
             if (
                 group.deleted_at is not None
-                or not bindings
+                or (not bindings and request is None)
                 or (concert and concert.deleted_at is not None)
             ):
                 event.sent = True
                 return
-        await send_response(
-            bot,
-            event.chat_id,
-            Response(event.text, [(b[0], b[1]) for b in event.buttons], monospace=event.monospace),
-        )
+        try:
+            await send_response(
+                bot,
+                event.chat_id,
+                Response(
+                    event.text, [(b[0], b[1]) for b in event.buttons], monospace=event.monospace
+                ),
+            )
+        except (TelegramForbiddenError, TelegramBadRequest) as exc:
+            if request is None or request_data is None or group is None:
+                raise
+            if isinstance(exc, TelegramBadRequest) and not any(
+                reason in exc.message.lower() for reason in ("chat not found", "user not found")
+            ):
+                raise
+            SetlistMenus.write(request, {**request_data, "status": "undeliverable"})
+            uow.store.add(
+                Outbox(
+                    group_id=group.id,
+                    concert_id=event.concert_id,
+                    chat_id=request_data["source_chat_id"],
+                    text=tr(group.language, "request_delivery_failed"),
+                )
+            )
         event.sent = True
 
 

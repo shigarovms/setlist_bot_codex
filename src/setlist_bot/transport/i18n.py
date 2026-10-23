@@ -43,7 +43,8 @@ MESSAGES = {
             "Стандартные паузы скрыты в списке; вручную заданные положительные подводки видны.\n"
             "Утвердить: /approve; вернуть в работу: /reopen.\n"
             "История, просмотр вариантов и восстановление: /history или /versions и кнопки.\n\n"
-            "«Предложить свой вариант» — только под текущим редактируемым списком, включая пустой.\n"
+            "Под текущим списком — «Предложить свой вариант» и «⚙️ Опции»; варианты и экспорт находятся в опциях.\n"
+            "В общем чате участник кнопками запрашивает у администратора утверждение или редактирование утверждённого списка.\n"
             "Кнопка задаёт вопрос и даёт названия для копирования; ответьте своим списком на этот вопрос.\n"
             "Администратор: /delete_concert, /delete_group (два подтверждения), /backup — ZIP общих данных.\n"
             "Корзина и восстановление в течение 30 дней: /trash.\n\n"
@@ -79,6 +80,27 @@ MESSAGES = {
         "encore": "Бис",
         "add_encore": "Добавить бис",
         "copy_variant": "Предложить свой вариант",
+        "menu_options": "⚙️ Опции",
+        "menu_variants": "📋 Варианты",
+        "menu_back": "◀️ Назад",
+        "menu_approve": "✅ Утвердить",
+        "menu_edit": "✏️ Редактировать",
+        "menu_cancel": "❌ Отмена",
+        "menu_return_yes": "✅ Да, вернуть",
+        "menu_reopen_prompt": "Вернуть сет-лист в режим редактирования? Статус „Утверждён“ будет снят.",
+        "menu_expired": "Этот вариант или кнопка уже устарели. Откройте /setlist заново. Данные не изменены.",
+        "request_admin": "{name} из коллектива «{group}» просит {action} этот вариант:",
+        "request_approve": "утвердить",
+        "request_edit": "открыть редактирование утверждённого сет-листа",
+        "request_yes": "✅ Подтвердить",
+        "request_no": "❌ Отказать",
+        "request_sent": "Запрос поставлен в очередь отправки администратору в личные сообщения.",
+        "request_duplicate": "Вы уже отправили запрос для этого варианта. Ожидайте решения администратора.",
+        "request_group": "{name} запросил у администратора: {action}.\nКонцерт: {concert}, версия {version}.",
+        "request_accepted": "Запрос подтверждён.",
+        "request_rejected": "В запросе отказано. Сет-лист не изменён.",
+        "request_result": "Решение администратора по запросу «{action}»: {result}",
+        "request_delivery_failed": "Не удалось доставить запрос администратору в личные сообщения. Администратору нужно открыть бота, нажать /start и при необходимости разблокировать его. После этого отправьте запрос повторно.",
         "export_button": "Экспорт",
         "export_choose": "Выберите PDF. «Для всех» отправит два отдельных файла.\nФайлы сохраняют состав и параметры показанной версии.",
         "export_musicians": "Для музыкантов · PDF",
@@ -320,7 +342,8 @@ MESSAGES = {
             "Inherited pauses are hidden in the list; explicit positive lead-ins are shown.\n"
             "Approve: /approve; reopen: /reopen.\n"
             "History, variants and restoration: /history or /versions and buttons.\n\n"
-            "“Propose your variant” is only below the current editable setlist, including an empty one.\n"
+            "Current setlists show “Propose your variant” and “⚙️ Options”; variants and export are under options.\n"
+            "In group chats, members can request approval or reopening of an approved list from the administrator.\n"
             "It asks a question and provides titles to copy; reply to that question with your list.\n"
             "Administrator: /delete_concert, /delete_group (two confirmations), /backup for shared data ZIP.\n"
             "Trash and restoration within 30 days: /trash.\n\n"
@@ -356,6 +379,27 @@ MESSAGES = {
         "encore": "Encore",
         "add_encore": "Add encore",
         "copy_variant": "Propose your variant",
+        "menu_options": "⚙️ Options",
+        "menu_variants": "📋 Variants",
+        "menu_back": "◀️ Back",
+        "menu_approve": "✅ Approve",
+        "menu_edit": "✏️ Edit",
+        "menu_cancel": "❌ Cancel",
+        "menu_return_yes": "✅ Yes, reopen",
+        "menu_reopen_prompt": "Reopen this setlist for editing? Its approved status will be removed.",
+        "menu_expired": "This variant or button is outdated. Open /setlist again. No data was changed.",
+        "request_admin": "{name} from group “{group}” asks you to {action} this variant:",
+        "request_approve": "approve",
+        "request_edit": "reopen the approved setlist for editing",
+        "request_yes": "✅ Confirm",
+        "request_no": "❌ Decline",
+        "request_sent": "Your request is queued for delivery to the administrator's private chat.",
+        "request_duplicate": "You already requested this action for this variant. Please wait for the administrator's decision.",
+        "request_group": "{name} asked the administrator to {action}.\nConcert: {concert}, version {version}.",
+        "request_accepted": "Request accepted.",
+        "request_rejected": "Request declined. The setlist is unchanged.",
+        "request_result": "Administrator decision for “{action}”: {result}",
+        "request_delivery_failed": "The request could not be delivered to the administrator's private chat. Ask them to open the bot, send /start and unblock it if necessary. You can then send the request again.",
         "export_button": "Export",
         "export_choose": "Choose a PDF. “For everyone” sends two separate files.\nFiles preserve the displayed version's songs and parameters.",
         "export_musicians": "For musicians · PDF",

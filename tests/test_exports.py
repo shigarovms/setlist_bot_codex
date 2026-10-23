@@ -3,6 +3,7 @@ from io import BytesIO
 from itertools import count
 
 import pytest
+from menu_helpers import export_command
 from pypdf import PdfReader
 
 from setlist_bot.application.catalog import Catalog
@@ -41,7 +42,7 @@ async def test_export_submenu_all_files_back_and_default_group_language(engine, 
     send = sender(engine)
     await send(f"/use_concert {world.concert.id}")
     shown = await send("/suggestion\nКомета\nКомета")
-    menu = await send(button(shown, "export_menu "), actor=2)
+    menu = await send(await export_command(send, shown), actor=2)
     assert {"Для музыкантов · PDF", "Для световика · PDF", "Для всех · два PDF", "Назад"} <= dict(
         menu.buttons
     ).keys()
@@ -55,7 +56,7 @@ async def test_export_submenu_all_files_back_and_default_group_language(engine, 
     assert "BPM" not in pdf_text(files.files[0]) and "BPM" in pdf_text(files.files[1])
     assert all("ЧЕРНОВИК" in pdf_text(file) for file in files.files)
     back = await send(button(menu, "export_back "), actor=2)
-    assert "1. Комета" in back.text and "Общий рабочий" in back.text
+    assert back.markup_only and "◀️ Назад" in dict(back.buttons)
 
 
 async def test_export_snapshot_and_cached_files_remain_unchanged_after_edits_and_restart(
@@ -64,7 +65,7 @@ async def test_export_snapshot_and_cached_files_remain_unchanged_after_edits_and
     send = sender(engine)
     await send(f"/use_concert {world.concert.id}")
     shown = await send("/suggestion\nКомета")
-    menu = await send(button(shown, "export_menu "))
+    menu = await send(await export_command(send, shown))
     request = next(data for label, data in menu.buttons if label == "Для всех · два PDF")
     original = await send(request)
     await send("/add Комета")
@@ -94,7 +95,7 @@ async def test_old_card_exports_its_displayed_version_even_before_first_download
     await send(f"/use_concert {world.concert.id}")
     old = await send("/suggestion\nКомета")
     await send("/add Комета")
-    menu = await send(button(old, "export_menu "))
+    menu = await send(await export_command(send, old))
     file = await send(button(menu, "export_file "))
     assert pdf_text(file.files[0]).count("Комета") == 1 and "Версия 1" in pdf_text(file.files[0])
     assert len((await send("/export")).buttons) == 6
@@ -105,9 +106,9 @@ async def test_private_export_is_owner_only_and_never_publishes_draft(engine, wo
     await send(f"/use_group {world.group.id}", actor=2, private=True)
     await send(f"/use_concert {world.concert.id}", actor=2, private=True)
     shown = await send("/suggestion\nКомета", actor=2, private=True)
-    request = button(shown, "export_menu ")
-    assert "не найден" in (await send(request, private=True)).text
-    assert "не найден" in (await send(request)).text
+    request = await export_command(send, shown, actor=2, private=True)
+    assert "устарели" in (await send(request, private=True)).text
+    assert "устарели" in (await send(request)).text
     menu = await send(request, actor=2, private=True)
     file = await send(button(menu, "export_file "), actor=2, private=True)
     assert len(file.files) == 1 and "ЧЕРНОВИК" in pdf_text(file.files[0])
@@ -122,14 +123,14 @@ async def test_export_checks_membership_original_chat_and_group_scope(engine, wo
     send = sender(engine)
     await send(f"/use_concert {world.concert.id}")
     shown = await send("/add Комета")
-    request = button(shown, "export_menu ")
+    request = await export_command(send, shown)
     assert "Нет доступа" in (await send(request, actor=3)).text
-    assert "не найден" in (await send(request, chat=-200)).text
+    assert "устарели" in (await send(request, chat=-200)).text
     # A valid member can use a snapshot belonging to another selected concert in the same chat.
     await send(f"/use_concert {world.concert2.id}", actor=2)
     menu = await send(request, actor=2)
     back = await send(button(menu, "export_back "), actor=2)
-    assert "Новый год" in back.text
+    assert back.markup_only and "◀️ Назад" in dict(back.buttons)
 
 
 async def test_approved_and_historical_exports_keep_their_status(engine, world):
@@ -139,10 +140,10 @@ async def test_approved_and_historical_exports_keep_their_status(engine, world):
     draft = await send("/setlist")
     approval = await send("/approve")
     approved = await send(approval.buttons[0][1])
-    menu = await send(button(approved, "export_menu "))
+    menu = await send(await export_command(send, approved))
     file = await send(button(menu, "export_file "))
     assert "УТВЕРЖДЕНО" in pdf_text(file.files[0]) and "ЧЕРНОВИК" not in pdf_text(file.files[0])
-    old_menu = await send(button(draft, "export_menu "))
+    old_menu = await send(await export_command(send, draft))
     assert "ЧЕРНОВИК" in pdf_text((await send(button(old_menu, "export_file "))).files[0])
     history = await send("/history")
     historical = await send(button(history, "revision "))
@@ -156,7 +157,7 @@ async def test_empty_export_and_language_transliteration_options(engine, world):
     assert not any(data.startswith("export_menu ") for _, data in empty.buttons)
     assert "пуст" in (await send("/export")).text
     shown = await send("/add Комета")
-    menu = await send(button(shown, "export_menu "))
+    menu = await send(await export_command(send, shown))
     english = await send(next(data for label, data in menu.buttons if label == "Язык PDF: RU"))
     latin = await send(
         next(data for label, data in english.buttons if label == "Транслитерация: выключена")
@@ -171,7 +172,7 @@ async def test_deleted_restored_and_expired_export_cannot_leak_cached_pdf(engine
     send = sender(engine)
     await send(f"/use_concert {world.concert.id}")
     shown = await send("/add Комета")
-    menu = await send(button(shown, "export_menu "))
+    menu = await send(await export_command(send, shown))
     request = button(menu, "export_file ")
     await send(request)
     async with PostgresUnitOfWork(engine) as uow:

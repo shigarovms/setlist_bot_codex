@@ -5,6 +5,7 @@ from itertools import count
 from pathlib import Path
 
 import pytest
+from menu_helpers import options, variants
 
 from setlist_bot.application.catalog import Catalog
 from setlist_bot.application.setlists import Setlists
@@ -82,15 +83,18 @@ async def test_suggestions_replace_whole_setlist_and_number_each_proposer(engine
     send = messenger(engine)
     await send(f"/use_concert {world.concert.id}")
     first = await send("/suggestion\n" + SONG_LIST)
-    first_button = next(data for label, data in first.buttons if label == "Алексей · вариант 1")
+    first_variants = await variants(send, first)
+    first_button = next(
+        data for label, data in first_variants.buttons if label == "Алексей · вариант 1"
+    )
     await send("/add Комета")
     await send(f"/use_concert {world.concert.id}", actor=2)
     second = await send("/suggestion\nVIBY\nСлавик", actor=2)
-    assert "Борис · вариант 1" in dict(second.buttons)
+    assert "Борис · вариант 1" in dict((await variants(send, second, actor=2)).buttons)
     stale = await send("/suggestion\nАтомы")
     assert "уже изменились" in stale.text
     third = await send("/suggestion\nАтомы\nСердце лёд")
-    assert "Алексей · вариант 2" in dict(third.buttons)
+    assert "Алексей · вариант 2" in dict((await variants(send, third)).buttons)
     async with PostgresUnitOfWork(engine) as uow:
         service = Setlists(uow.store, world.admin)
         current, version, _ = await service.read(world.group.id, world.concert.id)
@@ -135,7 +139,7 @@ async def test_private_suggestion_stays_private_until_explicit_publish_and_apply
     opened = await send(event.buttons[0][1])
     apply = await send(opened.buttons[0][1])
     result = await send(apply.buttons[0][1])
-    assert "Борис · вариант 1" in dict(result.buttons)
+    assert "Борис · вариант 1" in dict((await variants(send, result)).buttons)
     async with PostgresUnitOfWork(engine) as uow:
         revision = (
             await Setlists(uow.store, world.admin).history(world.group.id, world.concert.id)
@@ -231,13 +235,14 @@ async def test_concurrent_batch_replacements_produce_one_version_and_one_conflic
 async def test_encore_button_is_bound_to_its_concert_and_version(engine, world):
     send = messenger(engine)
     first = await send(f"/use_concert {world.concert.id}")
-    button = next(data for _, data in first.buttons if data.startswith("encore "))
+    menu = await options(send, first)
+    button = next(data for label, data in menu.buttons if label == "Добавить бис")
     await send(f"/use_concert {world.concert2.id}")
-    assert "Подтверждение" in (await send(button)).text
+    assert "Бис" in (await send(button)).text
     await send(f"/use_concert {world.concert.id}")
     await send("/add Комета")
-    assert "уже изменились" in (await send(button)).text
+    assert "устарели" in (await send(button)).text
     async with PostgresUnitOfWork(engine) as uow:
         for concert in (world.concert, world.concert2):
             current, _, _ = await Setlists(uow.store, world.admin).read(world.group.id, concert.id)
-            assert len(current["blocks"]) == 1
+            assert len(current["blocks"]) == (2 if concert.id == world.concert.id else 1)

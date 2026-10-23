@@ -10,6 +10,7 @@ from setlist_bot.application.exports import Exports
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.importing import Importer
 from setlist_bot.application.ports import Store
+from setlist_bot.application.setlist_menus import CARD, REQUEST, SetlistMenus
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.application.song_selection import PAGE_SIZE, SongSelection
 from setlist_bot.application.templates import Templates
@@ -63,6 +64,10 @@ class Response:
     delete_input: bool = False
     button_columns: int = 1
     group_creation_id: UUID | None = None
+    menu_card_id: UUID | None = None
+    markup_only: bool = False
+    callback_notice: str = ""
+    deliveries: list[tuple[int, "Response"]] = field(default_factory=list)
 
 
 class Controller:
@@ -80,6 +85,8 @@ class Controller:
         self.trash = Trash(store, user)
         self.templates = Templates(store, user, chat_id)
         self.exports = Exports(store, user, chat_id)
+        self.menus = SetlistMenus(store, user, chat_id)
+        self.source_message_id: int | None = None
         self.reply_target: tuple[UUID, UUID] | None = None
 
     def t(self, key: str, **values: Any) -> str:
@@ -149,6 +156,8 @@ class Controller:
             if bindings:
                 group = await self.store.get(Group, bindings[0].group_id)
                 self.language = group.language
+        if command in ("slmenu", "slact", "slopt", "slrev", "slreq", "slreturn"):
+            return await self._menu_action(command, args)
         if command in ("pick_start", "pick_text", "pick_confirm", "pick_cancel"):
             require(self.private, "private_only")
             return await self._selection_action(command, UUID(args))
@@ -186,6 +195,8 @@ class Controller:
             values = args.split()
             export = await self.exports.load(UUID(values[0]))
             if command == "export_back":
+                if export.payload.get("menu_card_id"):
+                    return await self.execute(export.payload["back"])
                 context = await self.groups.context(self.chat_id, self.private)
                 context.group_id, context.concert_id = export.group_id, export.concert_id
                 await self._show(context)
@@ -200,6 +211,17 @@ class Controller:
                     export.id, values[1], language, latin == "1", PdfDocuments()
                 )
                 response.text = self.t("export_ready") + "\n\n" + response.text
+            if export.payload.get("menu_card_id"):
+                response.markup_only = True
+                cards = await self.store.find(Confirmation, id=UUID(export.payload["menu_card_id"]))
+                if command == "export_file" and cards and self.menus.data(cards[0]).get("closed"):
+                    # A cached PDF stays downloadable after its source card was refreshed.
+                    response.buttons = []
+                else:
+                    _, card = await self.menus.load(
+                        UUID(export.payload["menu_card_id"]), self.source_message_id
+                    )
+                    response.edit_message_ids = list(card["message_ids"])
             return response
         if command == "trash":
             return await self._trash_list()
@@ -218,6 +240,8 @@ class Controller:
             for item in await self.store.find(
                 Confirmation, user_id=self.user.id, chat_id=self.chat_id
             ):
+                if json.loads(item.command).get("kind") in (CARD, REQUEST):
+                    continue
                 await self.store.delete(item)
             for job in await self.store.find(
                 CatalogImport, owner_id=self.user.id, chat_id=self.chat_id, status="pending"
@@ -1396,6 +1420,279 @@ class Controller:
             self.t("import_column_prompt", field=self.t("import_field_" + FIELDS[step])), buttons
         )
 
+    async def _card_options(self, data: dict[str, Any]) -> list[tuple[str, str]]:
+        options = [(label, command) for label, command in data["options"]]
+        membership = (
+            await self.store.find(
+                Membership, group_id=UUID(data["group_id"]), user_id=self.user.id, status="active"
+            )
+        )[0]
+        if membership.role == "admin":
+            options.append(
+                (self.t("delete_concert_button"), f"delete_concert {data['concert_id']}")
+            )
+        return options
+
+    async def _menu_buttons(
+        self, card: Confirmation, data: dict[str, Any], level: str, page: int = 0
+    ) -> list[tuple[str, str]]:
+        require(level in ("main", "options", "variants"), "input")
+        key = card.id.hex
+        if level == "main":
+            proposal = (
+                f"copy_list {UUID(data['template_id']).hex}"
+                if data["template_id"]
+                else f"slact {key} reopen"
+            )
+            buttons = [
+                (self.t("copy_variant"), proposal),
+                (self.t("menu_options"), f"slmenu {key} options"),
+            ]
+            if not data["private_chat"]:
+                buttons.append(
+                    (
+                        self.t("menu_edit" if data["approved"] else "menu_approve"),
+                        f"slact {key} {'reopen' if data['approved'] else 'approve'}",
+                    )
+                )
+            return buttons
+        variants = (
+            []
+            if data["personal"]
+            else [
+                r
+                for r in await self.setlists.history(
+                    UUID(data["group_id"]), UUID(data["concert_id"])
+                )
+                if r.suggestion_number is not None
+            ]
+        )
+        if level == "options":
+            buttons = [
+                (label, f"slopt {key} {i}")
+                for i, (label, _) in enumerate(await self._card_options(data))
+            ]
+            if variants:
+                buttons.append((self.t("menu_variants"), f"slmenu {key} variants"))
+            return buttons + [(self.t("menu_back"), f"slmenu {key} main")]
+        require(page >= 0, "input")
+        page = min(page, max(0, (len(variants) - 1) // 20))
+        buttons = [
+            (await self._revision_label(r), f"slrev {key} {r.number}")
+            for r in variants[page * 20 : (page + 1) * 20]
+        ]
+        if page:
+            buttons.append(("◀️", f"slmenu {key} variants {page - 1}"))
+        if (page + 1) * 20 < len(variants):
+            buttons.append(("▶️", f"slmenu {key} variants {page + 1}"))
+        return buttons + [(self.t("menu_back"), f"slmenu {key} options")]
+
+    async def _card_context(self, data: dict[str, Any]) -> Context:
+        context = await self.groups.context(self.chat_id, self.private)
+        context.group_id, context.concert_id = UUID(data["group_id"]), UUID(data["concert_id"])
+        context.observed_version = data["version"]
+        return context
+
+    async def _refresh_card(self, row: Confirmation, data: dict[str, Any]) -> Response:
+        context = await self._card_context(data)
+        response = await self._show(context, shared=data["shared"])
+        response.edit_message_ids = list(data["message_ids"])
+        self.menus.write(row, {**data, "closed": True})
+        return response
+
+    async def _menu_action(self, command: str, args: str, *, confirmed: bool = False) -> Response:
+        values = args.split()
+        require(len(values) >= 2, "input")
+        identifier = UUID(values[0])
+        if command == "slreturn":
+            rows = await self.store.find(
+                Confirmation, id=identifier, user_id=self.user.id, chat_id=self.chat_id
+            )
+            require(bool(rows), "menu_expired")
+            challenge = rows[0]
+            challenge_data = self.menus.data(challenge)
+            require(
+                challenge_data.get("kind") == "menu_reopen"
+                and challenge.expires_at > now()
+                and values[1] in ("yes", "no"),
+                "menu_expired",
+            )
+            await self.store.delete(challenge)
+            return await self._menu_action(
+                "slact" if values[1] == "yes" else "slmenu",
+                f"{challenge_data['card_id']} {'return' if values[1] == 'yes' else 'main'}",
+                confirmed=True,
+            )
+        if command == "slreq":
+            require(self.private and values[1] in ("yes", "no"), "confirmation")
+            data = await self.menus.decide(identifier, values[1] == "yes")
+            response = Response(
+                self.t("request_accepted" if values[1] == "yes" else "request_rejected")
+            )
+            if values[1] == "yes":
+                source = Controller(self.store, self.user, data["source_chat_id"], private=False)
+                source.language = (await self.store.get(Group, UUID(data["group_id"]))).language
+                rows = await self.store.find(Confirmation, id=UUID(data["card_id"]))
+                if rows:
+                    refreshed = await source._refresh_card(rows[0], source.menus.data(rows[0]))
+                    response.deliveries.append((data["source_chat_id"], refreshed))
+            group = await self.store.get(Group, UUID(data["group_id"]))
+            self.store.add(
+                Outbox(
+                    group_id=group.id,
+                    concert_id=UUID(data["concert_id"]),
+                    chat_id=data["source_chat_id"],
+                    text=tr(
+                        group.language,
+                        "request_result",
+                        action=tr(
+                            group.language,
+                            "request_approve" if data["operation"] == "approve" else "request_edit",
+                        ),
+                        result=tr(
+                            group.language,
+                            "request_accepted" if values[1] == "yes" else "request_rejected",
+                        ),
+                    ),
+                )
+            )
+            return response
+        row, data = await self.menus.load(identifier, self.source_message_id)
+        if command == "slmenu":
+            return Response(
+                "",
+                await self._menu_buttons(
+                    row, data, values[1], int(values[2]) if len(values) > 2 else 0
+                ),
+                markup_only=True,
+                edit_message_ids=list(data["message_ids"]),
+            )
+        if command == "slrev":
+            context = await self._card_context(data)
+            _, context.observed_version, _ = await self.setlists.read(
+                UUID(data["group_id"]), UUID(data["concert_id"]), private=self.private
+            )
+            history = await self.setlists.history(UUID(data["group_id"]), UUID(data["concert_id"]))
+            revisions = [
+                r for r in history if r.number == int(values[1]) and r.suggestion_number is not None
+            ]
+            require(bool(revisions), "menu_expired")
+            return await self.execute(f"revision {revisions[0].id}")
+        if command == "slopt":
+            options = await self._card_options(data)
+            index = int(values[1])
+            require(0 <= index < len(options), "input")
+            action = options[index][1]
+            if not action.startswith("export_menu "):
+                await self.menus.validate(data, fresh=True)
+            await self._card_context(data)
+            return await self.execute(action)
+        require(
+            command == "slact" and values[1] in ("approve", "reopen", "return", "cancel"), "input"
+        )
+        await self.menus.validate(data, fresh=True)
+        require(not data["private_chat"], "group_only")
+        if values[1] == "cancel":
+            return Response(
+                "",
+                await self._menu_buttons(row, data, "main"),
+                markup_only=True,
+                edit_message_ids=list(data["message_ids"]),
+            )
+        operation = "approve" if values[1] == "approve" else "reopen"
+        require(values[1] != "return" or confirmed, "confirmation")
+        require(data["approved"] == (operation == "reopen"), "menu_expired")
+        membership = (
+            await self.store.find(
+                Membership, group_id=UUID(data["group_id"]), user_id=self.user.id, status="active"
+            )
+        )[0]
+        if membership.role != "admin":
+            require(values[1] != "return", "admin_only")
+            request, admin, created = await self.menus.request(row, data, operation)
+            if created:
+                group = await self.store.get(Group, UUID(data["group_id"]))
+                concert = await self.store.get(Concert, UUID(data["concert_id"]))
+                name = self.user.display_name or self.t("member_name")
+                header = tr(
+                    admin.language,
+                    "request_admin",
+                    name=name,
+                    group=group.name,
+                    action=tr(
+                        admin.language,
+                        "request_approve" if operation == "approve" else "request_edit",
+                    ),
+                )
+                self.store.add(
+                    Outbox(
+                        group_id=group.id,
+                        concert_id=concert.id,
+                        chat_id=admin.telegram_id,
+                        text=header
+                        + "\n\n"
+                        + render_setlist(
+                            data["snapshot"],
+                            concert,
+                            admin.language,
+                            data["version"],
+                            approved=data["approved"],
+                        ),
+                        buttons=[
+                            [tr(admin.language, "request_yes"), f"slreq {request.id.hex} yes"],
+                            [tr(admin.language, "request_no"), f"slreq {request.id.hex} no"],
+                        ],
+                    )
+                )
+                self.store.add(
+                    Outbox(
+                        group_id=group.id,
+                        concert_id=concert.id,
+                        chat_id=self.chat_id,
+                        text=self.t(
+                            "request_group",
+                            name=name,
+                            concert=concert_label(concert),
+                            action=self.t(
+                                "request_approve" if operation == "approve" else "request_edit"
+                            ),
+                            version=data["version"],
+                        ),
+                    )
+                )
+            return Response(
+                "", callback_notice=self.t("request_sent" if created else "request_duplicate")
+            )
+        if operation == "reopen" and values[1] != "return":
+            for previous in await self.store.find(
+                Confirmation, user_id=self.user.id, chat_id=self.chat_id
+            ):
+                previous_data = self.menus.data(previous)
+                if previous_data.get("kind") == "menu_reopen" and previous_data.get(
+                    "card_id"
+                ) == str(row.id):
+                    await self.store.delete(previous)
+            challenge = Confirmation(
+                user_id=self.user.id,
+                chat_id=self.chat_id,
+                command=json.dumps({"kind": "menu_reopen", "card_id": str(row.id)}),
+                expires_at=now() + timedelta(minutes=10),
+            )
+            self.store.add(challenge)
+            return Response(
+                self.t("menu_reopen_prompt"),
+                [
+                    (self.t("menu_return_yes"), f"slreturn {challenge.id.hex} yes"),
+                    (self.t("menu_cancel"), f"slreturn {challenge.id.hex} no"),
+                ],
+                callback_notice=self.t("menu_reopen_prompt"),
+                markup_only=True,
+                edit_message_ids=list(data["message_ids"]),
+            )
+        service = self.setlists.approve if operation == "approve" else self.setlists.reopen
+        await service(UUID(data["group_id"]), UUID(data["concert_id"]), data["version"])
+        return await self._refresh_card(row, data)
+
     async def _show(self, context: Context, *, shared: bool = False) -> Response:
         assert context.group_id is not None and context.concert_id is not None
         personal = self.private and not shared
@@ -1408,7 +1705,7 @@ class Controller:
         group = await self.store.get(Group, context.group_id)
         buttons = []
         template_id = None
-        if not approved:
+        if not approved or self.private:
             edit_version = version
             if shared and self.private:
                 _, edit_version, _ = await self.setlists.read(
@@ -1424,16 +1721,6 @@ class Controller:
                 concert_epoch=concert.lifecycle_version,
             )
             template_id = template.id
-            buttons.append((self.t("copy_variant"), f"copy_list {template.id.hex}"))
-        if not personal:
-            variants = [
-                r
-                for r in await self.setlists.history(context.group_id, context.concert_id)
-                if r.suggestion_number is not None
-            ]
-            buttons.extend(
-                [(await self._revision_label(r), f"revision {r.id}") for r in variants[:10]]
-            )
         buttons += await self._export_buttons(
             context.group_id,
             context.concert_id,
@@ -1454,18 +1741,42 @@ class Controller:
                     )
             else:
                 buttons.append((self.t("add_encore"), f"encore {concert.id.hex} {version}"))
-        membership = (
-            await self.store.find(Membership, group_id=context.group_id, user_id=self.user.id)
-        )[0]
-        if membership.role == "admin":
-            buttons.append((self.t("delete_concert_button"), f"delete_concert {concert.id.hex}"))
-        return Response(
+        text = (
             group.name
             + "\n"
             + render_setlist(
                 snapshot, concert, self.language, version, private=personal, approved=approved
-            ),
-            buttons,
+            )
+        )
+        card = self.menus.create(
+            {
+                "group_id": str(group.id),
+                "concert_id": str(concert.id),
+                "group_epoch": group.lifecycle_version,
+                "concert_epoch": concert.lifecycle_version,
+                "owner_id": str(self.user.id) if self.private else None,
+                "personal": personal,
+                "private_chat": self.private,
+                "shared": shared,
+                "version": version,
+                "approved": approved,
+                "snapshot": snapshot,
+                "template_id": str(template_id) if template_id else None,
+                "options": buttons,
+            }
+        )
+        for _, callback in buttons:
+            if callback.startswith("export_menu "):
+                export = await self.exports.load(UUID(callback.split()[1]))
+                export.payload = {
+                    **export.payload,
+                    "menu_card_id": str(card.id),
+                    "back": f"slmenu {card.id.hex} options",
+                }
+        return Response(
+            text,
+            await self._menu_buttons(card, self.menus.data(card), "main"),
             monospace=True,
             suggestion_template_id=template_id,
+            menu_card_id=card.id,
         )

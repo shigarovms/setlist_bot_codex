@@ -1,6 +1,8 @@
 from datetime import timedelta
 from itertools import count
 
+from menu_helpers import options
+
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.domain.entities import Outbox, SongListTemplate, now
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
@@ -58,7 +60,7 @@ async def test_private_template_cannot_be_read_by_other_user_or_forwarded(engine
     await send(f"/use_concert {world.concert.id}", private=True)
     shown = await send("/suggestion\nКомета", private=True)
     copy = button(shown, "copy_list ")
-    assert (await send(copy, private=True)).text.endswith("Комета")
+    assert "Комета" in (await send(copy, private=True)).text
     assert "не найден" in (await send(copy, actor=2, private=True)).text
     assert "не найден" in (await send(copy, actor=2)).text
     processor = Processor(engine)
@@ -96,7 +98,7 @@ async def test_shared_copy_in_private_chat_is_owned_and_buttons_expire(engine, w
     await send(f"/use_group {world.group.id}", private=True)
     await send(f"/use_concert {world.concert.id}", private=True)
     private_shared = await send("/shared", private=True)
-    assert (await send(button(private_shared, "copy_list "), private=True)).text.endswith("Комета")
+    assert "Комета" in (await send(button(private_shared, "copy_list "), private=True)).text
     async with PostgresUnitOfWork(engine) as uow:
         for template in await uow.store.find(SongListTemplate):
             template.expires_at = now() - timedelta(seconds=1)
@@ -111,9 +113,10 @@ async def test_add_remove_encore_songs_and_drop_encore_preserve_history(engine, 
     await send(f"/use_concert {world.concert.id}", actor=2)
     await send("/add Комета", actor=2)
     encore = await send("/encore", actor=2)
-    assert "Добавить песни в бис" in dict(encore.buttons)
+    menu = await options(send, encore, actor=2)
+    assert "Добавить песни в бис" in dict(menu.buttons)
     picker = await send(
-        next(data for label, data in encore.buttons if label == "Добавить песни в бис"), actor=2
+        next(data for label, data in menu.buttons if label == "Добавить песни в бис"), actor=2
     )
     preview = await send(button(picker, "offer_add "), actor=2)
     await send(button(preview, "confirm "), actor=2)
@@ -173,12 +176,13 @@ async def test_stale_encore_removal_does_not_remove_newer_songs(engine, world):
     assert "уже изменились" in stale.text and "2.2. Комета" in stale.text
 
 
-async def test_duplicate_encore_and_cross_concert_buttons_are_rejected(engine, world):
+async def test_duplicate_encore_is_rejected_and_options_target_the_original_concert(engine, world):
     send = sender(engine)
     await send(f"/use_concert {world.concert.id}")
     assert "ещё не добавлен" in (await send("/add_encore Комета")).text
     encore = await send("/encore")
     assert "уже добавлен" in (await send("/encore")).text
-    old_button = next(data for _, data in encore.buttons if data.startswith("manage_encore "))
+    menu = await options(send, encore)
+    old_button = next(data for label, data in menu.buttons if label == "Добавить песни в бис")
     await send(f"/use_concert {world.concert2.id}")
-    assert "Подтверждение" in (await send(old_button)).text
+    assert "Выберите песню для биса" in (await send(old_button)).text
