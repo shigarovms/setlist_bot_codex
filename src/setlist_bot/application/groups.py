@@ -1,12 +1,16 @@
+import json
+from datetime import timedelta
 from uuid import UUID
 
 from setlist_bot.application.ports import Store
 from setlist_bot.domain.entities import (
     ChatBinding,
+    Confirmation,
     Context,
     Group,
     Membership,
     User,
+    now,
 )
 from setlist_bot.domain.rules import pause_seconds, require
 
@@ -23,10 +27,13 @@ class Groups:
         require(deleted or group.deleted_at is None, "in_trash")
         return group
 
-    async def create(self, name: str, chat_id: int) -> Group:
+    async def check_creation_chat(self, chat_id: int) -> None:
         await self.store.lock_chat(chat_id)
-        require(0 < len(name.strip()) <= 200, "group_name")
         require(not await self.store.find(ChatBinding, chat_id=chat_id), "already_bound")
+
+    async def create(self, name: str, chat_id: int) -> Group:
+        await self.check_creation_chat(chat_id)
+        require(0 < len(name.strip()) <= 200, "group_name")
         group = Group(name=name.strip(), language=self.user.language)
         self.store.add(group)
         await self.store.flush()
@@ -36,6 +43,58 @@ class Groups:
         self.store.add(ChatBinding(group_id=group.id, chat_id=chat_id))
         await self.store.flush()
         return group
+
+    async def clear_creation(self, chat_id: int) -> None:
+        for session in await self.store.find(Confirmation, user_id=self.user.id, chat_id=chat_id):
+            if json.loads(session.command).get("kind") == "create_group":
+                await self.store.delete(session)
+
+    async def begin_creation(self, chat_id: int, name: str | None = None) -> Confirmation:
+        await self.check_creation_chat(chat_id)
+        if name is not None:
+            require(0 < len(name.strip()) <= 200, "group_name")
+        await self.clear_creation(chat_id)
+        session = Confirmation(
+            user_id=self.user.id,
+            chat_id=chat_id,
+            command=json.dumps(
+                {
+                    "kind": "create_group",
+                    "stage": "name" if name is None else "review",
+                    "name": name.strip() if name is not None else None,
+                    "prompt_id": None,
+                },
+                ensure_ascii=False,
+            ),
+            expires_at=now() + timedelta(minutes=10),
+        )
+        self.store.add(session)
+        return session
+
+    async def creation_session(self, chat_id: int, identifier: UUID) -> Confirmation:
+        sessions = await self.store.find(
+            Confirmation, id=identifier, user_id=self.user.id, chat_id=chat_id
+        )
+        require(bool(sessions), "group_creation_expired")
+        session = sessions[0]
+        require(
+            session.expires_at > now()
+            and json.loads(session.command).get("kind") == "create_group",
+            "group_creation_expired",
+        )
+        return session
+
+    async def creation_reply(self, chat_id: int, prompt_id: int) -> Confirmation | None:
+        for session in await self.store.find(Confirmation, user_id=self.user.id, chat_id=chat_id):
+            data = json.loads(session.command)
+            if (
+                data.get("kind") == "create_group"
+                and data.get("stage") == "name"
+                and data.get("prompt_id") == prompt_id
+                and session.expires_at > now()
+            ):
+                return session
+        return None
 
     async def set_default_pause(self, group_id: UUID, value: str) -> Group:
         group = await self.access(group_id, admin=True)

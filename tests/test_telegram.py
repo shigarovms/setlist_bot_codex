@@ -20,16 +20,20 @@ class FakeTelegram(BaseSession):
         super().__init__()
         self.sent: list[SendMessage] = []
         self.documents: list[SendDocument] = []
+        self.admin_ids = [1]
+        self.admin_requests = 0
 
     async def close(self):
         pass
 
     async def make_request(self, bot, method, timeout=None):
         if isinstance(method, GetChatAdministrators):
+            self.admin_requests += 1
             return [
                 ChatMemberOwner(
-                    user=User(id=1, is_bot=False, first_name="Админ"), is_anonymous=False
+                    user=User(id=identifier, is_bot=False, first_name="Админ"), is_anonymous=False
                 )
+                for identifier in self.admin_ids
             ]
         if isinstance(method, SendMessage):
             self.sent.append(method)
@@ -319,3 +323,78 @@ async def test_pdf_export_submenu_sends_both_a4_documents_through_aiogram(engine
         pdf = PdfReader(BytesIO(event.document.data))
         assert "Комета" in pdf.pages[0].extract_text()
         assert "ЧЕРНОВИК" in pdf.pages[0].extract_text()
+
+
+async def test_group_creation_force_reply_binding_and_fresh_admin_checks_through_router(engine):
+    session = FakeTelegram()
+    async with Bot("123456:TEST_ONLY_NOT_A_REAL_TELEGRAM_TOKEN", session=session) as bot:
+        dispatcher = Dispatcher()
+        dispatcher.include_router(make_router(Processor(engine), "setlist_test_bot"))
+        updates = count(1)
+
+        async def send(text, *, reply=None, callback=None, actor=1):
+            user = User(id=actor, is_bot=False, first_name="Админ")
+            uid = next(updates)
+            message = Message(
+                message_id=1000 + uid,
+                date=datetime.now(UTC),
+                chat=Chat(id=-300, type="supergroup"),
+                from_user=user,
+                text=text,
+                reply_to_message=reply,
+            )
+            update = (
+                Update(
+                    update_id=uid,
+                    callback_query=CallbackQuery(
+                        id=str(uid),
+                        from_user=user,
+                        chat_instance="group",
+                        message=callback,
+                        data=text,
+                    ),
+                )
+                if callback is not None
+                else Update(update_id=uid, message=message)
+            )
+            before = len(session.sent)
+            await dispatcher.feed_update(bot, update)
+            if len(session.sent) == before:
+                return None
+            output = session.sent[-1]
+            return Message(
+                message_id=len(session.sent),
+                date=datetime.now(UTC),
+                chat=message.chat,
+                from_user=User(id=bot.id, is_bot=True, first_name="Bot"),
+                text=output.text,
+            )
+
+        prompt = await send("/group@setlist_test_bot")
+        assert session.sent[-1].reply_markup.force_reply
+        assert await send("Посторонний текст") is None
+        assert await send("Чужое название", actor=2, reply=prompt) is None
+        prompt2 = await send("   ", reply=prompt)
+        assert session.sent[-1].reply_markup.force_reply
+        assert "от 1 до 200" in prompt2.text
+        assert await send("Старый ответ", reply=prompt) is None
+        preview = await send("Рок-группа «Атмосфера»", reply=prompt2)
+        markup = session.sent[-1].reply_markup.inline_keyboard
+        create = markup[0][0].callback_data
+        edit = markup[1][0].callback_data
+        session.admin_ids = []
+        rejected = await send(create, callback=preview)
+        assert "администратор" in rejected.text
+        assert session.admin_requests == 2
+        session.admin_ids = [1]
+        renamed_prompt = await send(edit, callback=preview)
+        assert session.sent[-1].reply_markup.force_reply
+        renamed = await send("Атмосфера", reply=renamed_prompt)
+        create_new = session.sent[-1].reply_markup.inline_keyboard[0][0].callback_data
+        created = await send(create_new, callback=renamed)
+        assert "Атмосфера" in created.text and session.admin_requests == 4
+        duplicate = await send(create_new, callback=renamed)
+        assert "устарел" in duplicate.text
+        bound = await send("/group")
+        assert bound.text == "В этом чате уже создан коллектив."
+        assert session.sent[-1].reply_markup is None

@@ -73,7 +73,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "publish": ("Предложить личный черновик группе", "Publish your personal draft to the group"),
     "language": ("Личный язык интерфейса: ru или en", "Personal interface language: ru or en"),
     "cancel": ("Отменить ожидающие подтверждения", "Cancel pending confirmations"),
-    "group": ("Создать коллектив в этом чате (админ)", "Create a group in this chat (admin)"),
+    "group": ("Создать новый коллектив", "Create a new musical group"),
     "members": (
         "Заявки и участники коллектива (админ)",
         "Membership applications and members (admin)",

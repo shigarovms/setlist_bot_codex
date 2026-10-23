@@ -2,9 +2,9 @@ from typing import Any
 
 MESSAGES = {
     "ru": {
-        "welcome": "Бот для репертуара и сет-листов. /help — команды.\nАдминистратор создаёт коллектив командой /group Название в общем чате. Участники: /register Ваша роль.",
+        "welcome": "Бот для репертуара и сет-листов. /help — команды.\nАдминистратор создаёт коллектив командой /group в общем чате. Участники: /register Ваша роль.",
         "help": (
-            "В общем чате администратор Telegram создаёт коллектив: /group Название.\n"
+            "В общем чате администратор Telegram создаёт коллектив: /group — пошагово или /group Название — сразу.\n"
             "Участник подаёт заявку: /register гитарист. Администратор: /members.\n"
             "В личном чате: /groups — выбор коллектива кнопками. Можно состоять в нескольких коллективах.\n"
             "Язык: /language ru или en; язык коллектива: /group_language ru или en.\n\n"
@@ -196,6 +196,13 @@ MESSAGES = {
         "setlist_input": "Проверьте номера блоков, позиций и аргументы. /help — формат команды.",
         "concert_input": "Формат: /concert ГГГГ-ММ-ДД | Название (необязательно).",
         "group_name": "Укажите название коллектива от 1 до 200 символов.",
+        "group_creation_prompt": "🎸 Создание нового коллектива\n\nВведите название вашего коллектива ответом на это сообщение.\n/cancel — отмена.",
+        "group_creation_review": "Вы хотите создать коллектив с названием «{name}»?\n\nВсё правильно?",
+        "group_creation_yes": "✅ Да, создать",
+        "group_creation_edit": "✏️ Нет, изменить название",
+        "group_creation_cancel": "❌ Отмена",
+        "group_creation_cancelled": "Создание коллектива отменено.",
+        "group_creation_expired": "Этот диалог уже завершён или устарел. Начните заново командой /group.",
         "invitation": "Приглашение не найдено, использовано или истекло.",
         "already_member": "Вы уже участник или ваша заявка ожидает подтверждения.",
         "already_bound": "В этом чате уже создан коллектив.",
@@ -272,9 +279,9 @@ MESSAGES = {
         "proposal_applied": "применение предложения",
     },
     "en": {
-        "welcome": "Repertoire and setlist bot. /help — commands.\nA Telegram chat administrator creates the group with /group Name. Members: /register Your role.",
+        "welcome": "Repertoire and setlist bot. /help — commands.\nA Telegram chat administrator creates the group with /group in the group chat. Members: /register Your role.",
         "help": (
-            "A Telegram chat administrator creates the group: /group Name in the group chat.\n"
+            "In the group chat, a Telegram administrator creates the group: /group step by step, or /group Name immediately.\n"
             "Apply: /register guitarist. Administrator: /members to review applications.\n"
             "In private chat: /groups to select a group using buttons. Multiple memberships are supported.\n"
             "Language: /language ru or en; group language: /group_language ru or en.\n\n"
@@ -466,6 +473,13 @@ MESSAGES = {
         "setlist_input": "Check block numbers, positions and arguments. See /help.",
         "concert_input": "Format: /concert YYYY-MM-DD | Optional title.",
         "group_name": "Use a group name between 1 and 200 characters.",
+        "group_creation_prompt": "🎸 Create a new musical group\n\nReply to this message with the name of your group.\n/cancel — cancel.",
+        "group_creation_review": "Create a musical group named “{name}”?\n\nIs this correct?",
+        "group_creation_yes": "✅ Yes, create",
+        "group_creation_edit": "✏️ No, change the name",
+        "group_creation_cancel": "❌ Cancel",
+        "group_creation_cancelled": "Group creation cancelled.",
+        "group_creation_expired": "This dialog has ended or expired. Start again with /group.",
         "invitation": "Invitation missing, expired or already used.",
         "already_member": "You are already a member or your application is pending.",
         "already_bound": "This chat already has a group.",

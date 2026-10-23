@@ -1,3 +1,4 @@
+import json
 import logging
 from asyncio import Lock
 from collections.abc import AsyncIterator
@@ -102,6 +103,7 @@ class Processor:
             controller = Controller(
                 uow.store, user, chat_id, private=private, chat_admin=chat_admin
             )
+            response: Response | None
             try:
                 async with uow.session.begin_nested():
                     selection_before = await controller.selection.active() if private else None
@@ -112,13 +114,25 @@ class Processor:
                         if reply_message_id is not None
                         else []
                     )
+                    creation_reply = (
+                        await controller.groups.creation_reply(chat_id, reply_message_id)
+                        if not private
+                        and not is_callback
+                        and reply_message_id is not None
+                        and not command.lstrip().startswith("/")
+                        else None
+                    )
                     if (
-                        reply_message_id is not None
+                        (reply_message_id is not None or not private)
+                        and not is_callback
                         and not command.lstrip().startswith("/")
                         and not references
+                        and creation_reply is None
                     ):
                         return None
-                    if (
+                    if creation_reply is not None:
+                        response = await controller.group_name_input(creation_reply, command)
+                    elif (
                         private
                         and not is_callback
                         and not command.lstrip().startswith("/")
@@ -167,9 +181,23 @@ class Processor:
     async def remember_response(
         self, chat_id: int, response: Response, messages: list[Message]
     ) -> None:
-        if response.suggestion_template_id is None and response.selection_id is None:
+        if (
+            response.suggestion_template_id is None
+            and response.selection_id is None
+            and response.group_creation_id is None
+        ):
             return
         async with PostgresUnitOfWork(self.engine) as uow:
+            if response.group_creation_id is not None and messages:
+                sessions = await uow.store.find(
+                    Confirmation, id=response.group_creation_id, chat_id=chat_id
+                )
+                if sessions:
+                    session = sessions[0]
+                    data = json.loads(session.command)
+                    if data.get("kind") == "create_group" and data.get("stage") == "name":
+                        data["prompt_id"] = messages[-1].message_id
+                        session.command = json.dumps(data, ensure_ascii=False)
             if response.selection_id is not None:
                 sessions = await uow.store.find(
                     Confirmation,
@@ -323,9 +351,10 @@ def make_router(processor: Processor, username: str) -> Router:
     async def command(message: Message, event_update: Update, bot: Bot) -> None:
         if not message.from_user or message.from_user.is_bot or not message.text:
             return
-        if not message.text.strip():
+        if not message.text.strip() and message.reply_to_message is None:
             return
-        head = message.text.split()[0]
+        parts = message.text.split(maxsplit=1)
+        head = parts[0] if parts else ""
         if (
             head.startswith("/")
             and "@" in head
@@ -371,6 +400,12 @@ def make_router(processor: Processor, username: str) -> Router:
             return
         await query.answer()
         async with delivery_lock(query.message.chat.id):
+            chat_admin = False
+            if query.message.chat.type in ("group", "supergroup") and query.data.split(maxsplit=1)[
+                0
+            ] in ("group_create_yes", "group_create_edit"):
+                administrators = await bot.get_chat_administrators(query.message.chat.id)
+                chat_admin = any(member.user.id == query.from_user.id for member in administrators)
             response = await processor.process(
                 event_update.update_id,
                 query.from_user.id,
@@ -379,6 +414,7 @@ def make_router(processor: Processor, username: str) -> Router:
                 private=query.message.chat.type == "private",
                 display_name=query.from_user.full_name,
                 is_callback=True,
+                chat_admin=chat_admin,
             )
             if response:
                 sent = await send_response(bot, query.message.chat.id, response)

@@ -62,6 +62,7 @@ class Response:
     edit_message_ids: list[int] = field(default_factory=list)
     delete_input: bool = False
     button_columns: int = 1
+    group_creation_id: UUID | None = None
 
 
 class Controller:
@@ -151,6 +152,21 @@ class Controller:
         if command in ("pick_start", "pick_text", "pick_confirm", "pick_cancel"):
             require(self.private, "private_only")
             return await self._selection_action(command, UUID(args))
+        if command in ("group_create_yes", "group_create_edit", "group_create_cancel"):
+            require(not self.private, "group_only")
+            session = await self.groups.creation_session(self.chat_id, UUID(args))
+            data = json.loads(session.command)
+            if command == "group_create_cancel":
+                await self.store.delete(session)
+                return Response(self.t("group_creation_cancelled"))
+            await self.groups.check_creation_chat(self.chat_id)
+            require(self.chat_admin, "chat_admin")
+            require(data["stage"] == "review", "group_creation_expired")
+            if command == "group_create_edit":
+                return self._group_name_prompt(await self.groups.begin_creation(self.chat_id))
+            group = await self.groups.create(data["name"], self.chat_id)
+            await self.groups.clear_creation(self.chat_id)
+            return Response(self.t("created_group", name=group.name))
         if reply_template_id is not None and (
             not message.startswith("/") or command == "suggestion"
         ):
@@ -210,8 +226,12 @@ class Controller:
             return Response(self.t("ok"))
         if command == "group":
             require(not self.private, "group_only")
+            await self.groups.check_creation_chat(self.chat_id)
             require(self.chat_admin, "chat_admin")
+            if not args:
+                return self._group_name_prompt(await self.groups.begin_creation(self.chat_id))
             group = await self.groups.create(args, self.chat_id)
+            await self.groups.clear_creation(self.chat_id)
             return Response(self.t("created_group", name=group.name))
         if command == "groups":
             require(self.private, "private_only")
@@ -1094,6 +1114,31 @@ class Controller:
                 previous_keyboard_id=previous_data.get("keyboard_message_id"),
             )
         return Response(text, suggestion_template_id=template_id, force_reply=True)
+
+    def _group_name_prompt(self, session: Confirmation, *, invalid: bool = False) -> Response:
+        return Response(
+            (self.t("group_name") + "\n\n" if invalid else "") + self.t("group_creation_prompt"),
+            force_reply=True,
+            group_creation_id=session.id,
+        )
+
+    async def group_name_input(self, session: Confirmation, value: str) -> Response:
+        session = await self.groups.creation_session(self.chat_id, session.id)
+        require(json.loads(session.command)["stage"] == "name", "group_creation_expired")
+        await self.groups.check_creation_chat(self.chat_id)
+        if not 0 < len(value.strip()) <= 200:
+            return self._group_name_prompt(
+                await self.groups.begin_creation(self.chat_id), invalid=True
+            )
+        session = await self.groups.begin_creation(self.chat_id, value)
+        return Response(
+            self.t("group_creation_review", name=value.strip()),
+            [
+                (self.t("group_creation_yes"), f"group_create_yes {session.id.hex}"),
+                (self.t("group_creation_edit"), f"group_create_edit {session.id.hex}"),
+                (self.t("group_creation_cancel"), f"group_create_cancel {session.id.hex}"),
+            ],
+        )
 
     def _selection_view(
         self, session: Confirmation, data: dict[str, Any], *, keyboard: bool = False
