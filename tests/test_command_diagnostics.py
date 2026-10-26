@@ -47,6 +47,26 @@ async def test_diagnostics_identify_routing_without_logging_table_or_identity(
     assert not session.sent and session.admin_requests == 0
 
 
+def test_diagnostics_distinguish_command_entity_from_separate_bot_mention(caplog):
+    caplog.set_level(logging.INFO, logger="setlist_bot.transport.telegram")
+    head = "/song@botToPract696_bot"
+    message = Message(
+        message_id=42,
+        date=datetime.now(UTC),
+        chat=Chat(id=-9001, type="group"),
+        from_user=User(id=9876543, is_bot=False, first_name="PRIVATE_NAME"),
+        text=head + "\nPRIVATE_SONG  03:20",
+        entities=[
+            MessageEntity(type="bot_command", offset=0, length=5),
+            MessageEntity(type="mention", offset=5, length=len(head) - 5),
+        ],
+    )
+    trace_message_route(message, 79, 1110437563, "botToPract696_bot")
+    assert "command_name=song" in caplog.text and "command_length=5" in caplog.text
+    assert "entity_covers_head=False" in caplog.text and "address_matches=True" in caplog.text
+    assert "PRIVATE_SONG" not in caplog.text and "PRIVATE_NAME" not in caplog.text
+
+
 @pytest.mark.parametrize("forwarded", [True, False])
 def test_private_diagnostics_only_inspect_explicitly_forwarded_messages(caplog, forwarded):
     caplog.set_level(logging.INFO, logger="setlist_bot.transport.telegram")

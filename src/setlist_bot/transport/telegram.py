@@ -399,11 +399,18 @@ def trace_message_route(message: Message, update_id: int, bot_id: int, username:
     head = parts[0] if parts else ""
     addressed = head.startswith("/") and "@" in head
     address_matches = head.split("@", 1)[1].casefold() == username.casefold() if addressed else None
+    command = next(
+        (e for e in message.entities or [] if e.type == "bot_command" and e.offset == 0), None
+    )
+    head_length = len(head.encode("utf-16-le")) // 2
+    name = head.partition("@")[0].casefold()
+    command_name = name[1:] if name in ("/song", "/import", "/start", "/help") else "other"
     reply = message.reply_to_message
     logger.info(
         "Telegram message route: update=%s starts_command=%s addressed=%s address_matches=%s "
         "reply_to_bot=%s command_entity=%s sender_is_bot=%s sender_chat=%s "
-        "private=%s forwarded=%s code_format=%s trailing_backslash=%s",
+        "private=%s forwarded=%s code_format=%s trailing_backslash=%s "
+        "command_name=%s command_length=%s head_length=%s entity_covers_head=%s lines=%s spans=%s",
         update_id,
         (message.text or "").lstrip().startswith("/"),
         addressed,
@@ -418,6 +425,12 @@ def trace_message_route(message: Message, update_id: int, bot_id: int, username:
         message.forward_origin is not None,
         any(entity.type in ("pre", "code") for entity in message.entities or []),
         head.endswith("\\"),
+        command_name,
+        command.length if command else 0,
+        head_length,
+        bool(command and command.length == head_length),
+        (message.text or "").count("\n"),
+        [(e.type, e.offset, e.length) for e in (message.entities or [])[:8]],
     )
 
 
