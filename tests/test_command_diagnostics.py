@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 from aiogram import Bot, Dispatcher
-from aiogram.types import Chat, Message, MessageEntity, Update, User
+from aiogram.types import Chat, Message, MessageEntity, MessageOriginUser, Update, User
 from test_telegram import FakeTelegram
 
-from setlist_bot.transport.telegram import Processor, make_router
+from setlist_bot.transport.telegram import Processor, make_router, trace_message_route
 
 
 @pytest.mark.parametrize(
@@ -45,3 +45,26 @@ async def test_diagnostics_identify_routing_without_logging_table_or_identity(
     for private_value in ("PRIVATE_SONG", "PRIVATE_NAME", "9876543", "9001", "/song@", "03:20"):
         assert private_value not in caplog.text
     assert not session.sent and session.admin_requests == 0
+
+
+@pytest.mark.parametrize("forwarded", [True, False])
+def test_private_diagnostics_only_inspect_explicitly_forwarded_messages(caplog, forwarded):
+    caplog.set_level(logging.INFO, logger="setlist_bot.transport.telegram")
+    stamp = datetime.now(UTC)
+    user = User(id=9876543, is_bot=False, first_name="PRIVATE_NAME")
+    text = "/song@botToPract696_bot\\\nPRIVATE_SONG  03:20"
+    message = Message(
+        message_id=42,
+        date=stamp,
+        chat=Chat(id=user.id, type="private"),
+        from_user=user,
+        text=text,
+        entities=[MessageEntity(type="pre", offset=0, length=len(text))],
+        forward_origin=MessageOriginUser(date=stamp, sender_user=user) if forwarded else None,
+    )
+    trace_message_route(message, 78, 1110437563, "botToPract696_bot")
+    assert bool(caplog.records) == forwarded
+    if forwarded:
+        assert "code_format=True" in caplog.text and "command_entity=False" in caplog.text
+        assert "trailing_backslash=True" in caplog.text and "address_matches=False" in caplog.text
+    assert "PRIVATE_SONG" not in caplog.text and "PRIVATE_NAME" not in caplog.text
