@@ -389,7 +389,32 @@ async def delete_selection_message(bot: Bot, chat_id: int, message_id: int) -> N
         logger.info("Could not delete selection message (%s)", type(exc).__name__)
 
 
-def make_router(processor: Processor, username: str) -> Router:
+def trace_group_message(message: Message, update_id: int, bot_id: int, username: str) -> None:
+    """Log routing metadata only: no message content, user/chat IDs, names or tokens."""
+    if message.chat.type not in ("group", "supergroup"):
+        return
+    parts = (message.text or "").split(maxsplit=1)
+    head = parts[0] if parts else ""
+    addressed = head.startswith("/") and "@" in head
+    address_matches = head.split("@", 1)[1].casefold() == username.casefold() if addressed else None
+    reply = message.reply_to_message
+    logger.info(
+        "Group message route: update=%s starts_command=%s addressed=%s address_matches=%s "
+        "reply_to_bot=%s command_entity=%s sender_is_bot=%s sender_chat=%s",
+        update_id,
+        (message.text or "").lstrip().startswith("/"),
+        addressed,
+        address_matches,
+        bool(reply and reply.from_user and reply.from_user.id == bot_id),
+        any(
+            entity.type == "bot_command" and entity.offset == 0 for entity in message.entities or []
+        ),
+        bool(message.from_user and message.from_user.is_bot),
+        bool(message.sender_chat),
+    )
+
+
+def make_router(processor: Processor, username: str, *, diagnostics: bool = False) -> Router:
     router = Router()
     locks: WeakValueDictionary[int, Lock] = WeakValueDictionary()
 
@@ -402,6 +427,8 @@ def make_router(processor: Processor, username: str) -> Router:
 
     @router.message(F.text)
     async def command(message: Message, event_update: Update, bot: Bot) -> None:
+        if diagnostics:
+            trace_group_message(message, event_update.update_id, bot.id, username)
         if not message.from_user or message.from_user.is_bot or not message.text:
             return
         if not message.text.strip() and message.reply_to_message is None:

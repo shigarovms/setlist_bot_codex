@@ -185,7 +185,11 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
                 )
                 return
             dispatcher = Dispatcher()
-            dispatcher.include_router(make_router(Processor(engine), me.username or ""))
+            dispatcher.include_router(
+                make_router(
+                    Processor(engine), me.username or "", diagnostics=settings.telegram_diagnostics
+                )
+            )
             workers = [
                 asyncio.create_task(deliver_outbox(bot, engine)),
                 asyncio.create_task(cleanup_trash(engine)),
