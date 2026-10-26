@@ -2,7 +2,7 @@ import json
 import logging
 from asyncio import Lock
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from weakref import WeakValueDictionary
 
 from aiogram import Bot, F, Router
@@ -25,6 +25,7 @@ from aiogram.types import (
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from setlist_bot.application.command_inputs import CommandInputs
 from setlist_bot.application.setlist_menus import CARD, SetlistMenus
 from setlist_bot.application.song_selection import SongSelection
 from setlist_bot.domain.entities import (
@@ -33,6 +34,7 @@ from setlist_bot.domain.entities import (
     SetlistMessage,
     SongListTemplate,
     User,
+    now,
 )
 from setlist_bot.domain.rules import AppError
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
@@ -106,6 +108,7 @@ class Processor:
             )
             controller.source_message_id = message_id if is_callback else None
             response: Response | None
+            input_reply_id = None
             try:
                 async with uow.session.begin_nested():
                     selection_before = await controller.selection.active() if private else None
@@ -124,15 +127,29 @@ class Processor:
                         and not command.lstrip().startswith("/")
                         else None
                     )
+                    input_reply = (
+                        await controller.inputs.reply(reply_message_id)
+                        if not is_callback and reply_message_id is not None
+                        else None
+                    )
+                    if input_reply is not None and command.lstrip().startswith("/"):
+                        parts = command.lstrip().split(maxsplit=1)
+                        name = parts[0].lstrip("/").split("@", 1)[0].lower()
+                        if len(parts) < 2 or name != CommandInputs.data(input_reply)["command"]:
+                            input_reply = None
                     if (
                         (reply_message_id is not None or not private)
                         and not is_callback
                         and not command.lstrip().startswith("/")
                         and not references
                         and creation_reply is None
+                        and input_reply is None
                     ):
                         return None
-                    if creation_reply is not None:
+                    if input_reply is not None:
+                        input_reply_id = input_reply.id
+                        response = await controller.command_input(input_reply, command)
+                    elif creation_reply is not None:
                         response = await controller.group_name_input(creation_reply, command)
                     elif (
                         private
@@ -150,7 +167,12 @@ class Processor:
                         selection_before is not None
                         and response is not None
                         and response.selection_id is None
-                        and (is_callback or command.lstrip().startswith("/"))
+                        and not response.input_rejected
+                        and (
+                            is_callback
+                            or command.lstrip().startswith("/")
+                            or input_reply is not None
+                        )
                     ):
                         await controller.selection.clear()
                         response.remove_keyboard = response.remove_keyboard or (
@@ -165,6 +187,31 @@ class Processor:
                 code = exc.code if isinstance(exc, AppError) else "input"
                 await uow.session.refresh(user)
                 response = Response(tr(controller.language, code))
+                if input_reply_id is not None:
+                    sessions = await uow.store.find(
+                        Confirmation, id=input_reply_id, user_id=user.id, chat_id=chat_id
+                    )
+                    terminal = {
+                        "input_expired",
+                        "conflict",
+                        "forbidden",
+                        "admin_only",
+                        "chat_admin",
+                        "group_only",
+                        "private_only",
+                        "in_trash",
+                        "select_group",
+                        "select_concert",
+                        "already_member",
+                    }
+                    if sessions and code not in terminal:
+                        data = CommandInputs.data(sessions[0])
+                        sessions[0].expires_at = now() + timedelta(minutes=10)
+                        response.text += "\n\n" + data["prompt"]
+                        response.force_reply = True
+                        response.command_input_id = sessions[0].id
+                    elif sessions:
+                        await uow.store.delete(sessions[0])
                 if is_callback and command.split(maxsplit=1)[0] in (
                     "slmenu",
                     "slact",
@@ -202,9 +249,18 @@ class Processor:
             and response.selection_id is None
             and response.group_creation_id is None
             and response.menu_card_id is None
+            and response.command_input_id is None
         ):
             return
         async with PostgresUnitOfWork(self.engine) as uow:
+            if response.command_input_id is not None and messages:
+                rows = await uow.store.find(
+                    Confirmation, id=response.command_input_id, chat_id=chat_id
+                )
+                if rows:
+                    data = CommandInputs.data(rows[0])
+                    if data.get("kind") == "command_input":
+                        CommandInputs.write(rows[0], {**data, "prompt_id": messages[-1].message_id})
             if response.menu_card_id is not None and messages:
                 cards = await uow.store.find(
                     Confirmation, id=response.menu_card_id, chat_id=chat_id
@@ -370,7 +426,9 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
                 piece,
                 entities=entities,
                 parse_mode=None,
-                reply_markup=ForceReply() if response.force_reply else markup,
+                reply_markup=(
+                    ForceReply() if response.force_reply and i == len(pieces) - 1 else markup
+                ),
             )
         )
     for identifier in response.edit_message_ids[len(pieces) :]:
@@ -492,6 +550,9 @@ def make_router(processor: Processor, username: str, *, diagnostics: bool = Fals
                     await delete_selection_message(bot, message.chat.id, message.message_id)
                 sent = await send_response(bot, message.chat.id, response)
                 await processor.remember_response(message.chat.id, response, sent)
+                for target_chat, extra in response.deliveries:
+                    extra_sent = await send_response(bot, target_chat, extra)
+                    await processor.remember_response(target_chat, extra, extra_sent)
 
     @router.callback_query(F.data)
     async def callback(query: CallbackQuery, event_update: Update, bot: Bot) -> None:

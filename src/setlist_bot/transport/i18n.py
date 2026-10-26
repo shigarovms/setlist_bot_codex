@@ -2,56 +2,50 @@ from typing import Any
 
 MESSAGES = {
     "ru": {
-        "welcome": "Бот для репертуара и сет-листов. /help — команды.\nАдминистратор создаёт коллектив командой /group в общем чате. Участники: /register Ваша роль.",
+        "welcome": "Бот для репертуара и сет-листов. /help — команды.\nАдминистратор создаёт коллектив командой /group Название в общем чате. Участники: /register Ваша роль.",
         "help": (
-            "В общем чате администратор Telegram создаёт коллектив: /group — пошагово или /group Название — сразу.\n"
-            "Участник подаёт заявку: /register гитарист. Администратор: /members.\n"
-            "В личном чате: /groups — выбор коллектива кнопками. Можно состоять в нескольких коллективах.\n"
-            "Язык: /language ru или en; язык коллектива: /group_language ru или en.\n\n"
-            "Каталог: /catalog [поиск], /archived.\n"
-            "Создать: /song Название  03:38  110  свет  комментарий\n"
-            "Последние три поля необязательны.\n"
-            "Между полями — два и более пробела. Для пустого необязательного поля укажите -; в /edit это очищает поле.\n"
-            "Таблица: /song на первой строке, затем вставьте ячейки из Sheets/Excel.\n"
-            "Без заголовков: название, время, свет, BPM, комментарий. Сохранение — после предпросмотра.\n"
-            "Изменить: /edit Название  Новое название  03:38  110  свет  комментарий\n"
-            "Копировать все параметры: /copy Название  Новое название  05:00\n"
-            "Алиас: /alias Название  Альтернативное название\n"
-            "Архивирование и восстановление — кнопками карточки песни; заявки: /proposals.\n"
-            "Участники предлагают изменения каталога, администратор одобряет.\n\n"
-            "Концерты: /concert 2026-12-31  Название, /concerts.\n"
-            "Выбирайте концерт кнопками /concerts.\n"
-            "Сет-лист: /setlist; общий вариант: /shared.\n"
-            "Экспорт: кнопка «Экспорт» или /export — PDF для музыкантов, световика или оба файла.\n"
-            "А4: музыкантам — крупные названия, световику — таблица. До утверждения — «Черновик».\n"
-            "Добавить: /add — выбор песни кнопками; /add Комета  2 — во второй блок.\n"
-            "Списком: /add на первой строке, затем названия песен по одному на строку.\n"
-            "Новый вариант целиком: /suggestion и список песен. Старый остаётся в истории.\n"
-            "/suggestion без списка спрашивает ваш вариант; ответьте списком на сообщение бота.\n"
-            "В личном чате можно ввести список или выбрать песни на клавиатуре; подтверждение сохраняет только личный черновик.\n"
-            "Можно ответить списком прямо на рабочий сет-лист — концерт определяется этим сообщением.\n"
-            "Удалить: /remove блок позиция.\n"
-            "Переместить: /move блок откуда куда.\n"
+            "В общем чате администратор создаёт коллектив: /group Название.\n"
+            "Заявка участника: /register гитарист; заявки и роли: /members.\n"
+            "В личном чате выбор коллектива: /groups. Можно участвовать в нескольких коллективах.\n"
+            "Язык: /language ru; язык коллектива: /group_language ru.\n"
+            "\n"
+            "Каталог: /catalog [поиск]; архив песен: /archived.\n"
+            "Песня: /song Название  03:38  110  свет  комментарий.\n"
+            "Последние три поля необязательны. Между полями — два и более пробела; - очищает необязательное поле.\n"
+            "Импорт таблицы: /import Строки таблицы. Колонки: название, время, свет, BPM, комментарий.\n"
+            "Изменить песню: /edit Название  Новое название  03:38  110  свет  комментарий.\n"
+            "Скопировать: /copy Название  Новое название  05:00.\n"
+            "Алиас: /alias Название  Альтернативное название.\n"
+            "Архивировать: /archive Название; восстановить: /unarchive Название.\n"
+            "Предложения по каталогу: /proposals. Изменения участника одобряет администратор.\n"
+            "\n"
+            "Концерт: /concert 2026-12-31  Название; выбор концерта: /concerts.\n"
+            "Список: /setlist; общий вариант: /shared.\n"
+            "Добавить: /add Комета  2 — песня во второй блок; блок по умолчанию — первый.\n"
+            "Новый вариант: /suggestion Названия песен. История сохраняется.\n"
+            "В /add, /suggestion и /add_encore названия списка идут по одному на строку.\n"
+            "Удалить: /remove 1  2 — блок и позиция.\n"
+            "Переставить: /move 1  2  3 — блок, откуда, куда.\n"
             "Новый блок: /block Название; бис: /encore.\n"
-            "Песни в бис: /add_encore и список; удалить песню: /remove_encore_song [позиция].\n"
-            "Удалить бис: /remove_encore (с подтверждением).\n"
-            "Средняя пауза концерта: /pause 30 (по умолчанию 5 секунд в новых концертах).\n"
-            "Подводка перед песней: /pause позиция секунды; 0 — без подводки.\n"
-            "Для другого блока: /pause блок позиция секунды. Вернуть среднюю: default вместо секунд.\n"
-            "Для новых концертов коллектива: /group_pause секунды (администратор).\n"
-            "Перерыв после блока: /break блок секунды.\n"
-            "Средняя пауза учитывается только между песнями. Перед первой — только заданная подводка.\n"
-            "Стандартные паузы скрыты в списке; вручную заданные положительные подводки видны.\n"
-            "Утвердить: /approve; вернуть в работу: /reopen.\n"
-            "История, просмотр вариантов и восстановление: /history или /versions и кнопки.\n\n"
-            "Под текущим списком — «Предложить свой вариант» и «⚙️ Опции»; варианты и экспорт находятся в опциях.\n"
-            "В общем чате участник кнопками запрашивает у администратора утверждение или редактирование утверждённого списка.\n"
-            "Кнопка задаёт вопрос и даёт названия для копирования; ответьте своим списком на этот вопрос.\n"
-            "Администратор: /delete_concert, /delete_group (два подтверждения), /backup — ZIP общих данных.\n"
-            "Корзина и восстановление в течение 30 дней: /trash.\n\n"
-            "В личном чате /setlist и правки работают с вашим черновиком.\n"
-            "Предложить его группе: /publish. Применение — кнопкой опубликованного предложения.\n"
-            "Выбор песни и действия доступны через кнопки /catalog. /cancel — отмена подтверждений."
+            "Добавить в бис: /add_encore Названия песен; удалить из биса: /remove_encore_song 2.\n"
+            "Удалить бис: /remove_encore — с подтверждением.\n"
+            "Средняя пауза: /pause 30. Подводка: /pause 2  10; другой блок: /pause 1  2  10.\n"
+            "0 — без подводки; default вместо секунд возвращает среднюю.\n"
+            "Пауза для новых концертов: /group_pause 5 (администратор).\n"
+            "Перерыв после блока: /break 1  900.\n"
+            "Стандартные паузы учитываются в итогах и не показываются перед песнями.\n"
+            "\n"
+            "Под списком — «Предложить свой вариант» и «⚙️ Опции»; внутри — варианты и экспорт.\n"
+            "Экспорт: /export — PDF для музыкантов, световика или оба файла.\n"
+            "Утвердить: /approve; вернуть в работу: /reopen (администратор).\n"
+            "Участник кнопками запрашивает у администратора утверждение или редактирование.\n"
+            "История и восстановление: /history, /versions.\n"
+            "Удаление: /delete_concert, /delete_group; ZIP общих данных: /backup.\n"
+            "Корзина и восстановление: /trash. Срок хранения удалённых данных — 30 дней.\n"
+            "\n"
+            "В личке правки меняют только личный черновик. Публикация группе: /publish.\n"
+            "Ответ списком на рабочий сет-лист или приглашение — предложение нового варианта.\n"
+            "Выбор песен и действий доступен также кнопками. /cancel — отмена текущего ввода и подтверждений.\n"
         ),
         "ok": "Готово.",
         "empty": "Пока пусто.",
@@ -217,6 +211,30 @@ MESSAGES = {
         "duration": "Длительность должна быть положительной в формате ММ:СС, например 00:05.",
         "song_input": "Проверьте поля песни. /help — формат команды.",
         "field_separator": "Разделитель полей — два и более пробела вместо вертикальной черты. Примеры: /help.",
+        "input_prompt": "Введите данные для /{command} ответом на это сообщение.",
+        "input_cancel": "/cancel — отменить ввод.",
+        "input_expired": "Запрос уже устарел или отменён. Вызовите команду заново.",
+        "input_song": "Название  03:38  110  свет  комментарий\nПоследние три поля необязательны; - — пустое поле. Можно вставить таблицу песен.",
+        "input_import": "Вставьте строки таблицы из Excel/Sheets. Без заголовков: название, длительность, свет, BPM, комментарий. Между столбцами — табуляция или два и более пробела.",
+        "input_edit": "Название песни  Новое название  03:38  110  свет  комментарий\nНепереданные необязательные поля сохраняются; - очищает поле.",
+        "input_copy": "Исходная песня  Новое название  05:00\nОстальные параметры будут скопированы.",
+        "input_alias": "Название песни  Альтернативное название",
+        "input_archive": "Название песни для архивирования.",
+        "input_unarchive": "Название песни из архива для восстановления.",
+        "input_concert": "Дата и необязательное название: 2026-12-31  Новогодний концерт",
+        "input_register": "Укажите свою музыкальную роль, например: гитарист.",
+        "input_language": "Язык интерфейса: ru или en.",
+        "input_group_language": "Язык общего чата: ru или en.",
+        "input_group_pause": "Средняя пауза для новых концертов в секундах, например: 5. Старые концерты не изменятся.",
+        "input_pause": "Средняя пауза в секундах: 30.\nПодводка перед песней: 2  10; другой блок: 1  2  10.\n0 — без подводки; default вместо секунд возвращает среднюю.",
+        "input_move": "Блок, исходная и новая позиции: 1  2  3",
+        "input_remove": "Номер блока и позиция песни: 1  2",
+        "input_block": "Название нового блока, например: Второе отделение.",
+        "input_break": "Номер блока и длительность перерыва после него в секундах: 1  900",
+        "input_add": "Название песни, например: Комета. Номер блока необязателен: Комета  2. Несколько песен — по одному названию на строку.",
+        "input_add_ambiguous": "Нашлось несколько песен. Уточните полное название ответом на этот вопрос:",
+        "input_add_encore": "Названия песен для биса — по одному на строку.",
+        "input_remove_encore_song": "Введите номер песни в бисе, например: 1",
         "setlist_input": "Проверьте номера блоков, позиций и аргументы. /help — формат команды.",
         "concert_input": "Формат: /concert ГГГГ-ММ-ДД  Название (необязательно).",
         "group_name": "Укажите название коллектива от 1 до 200 символов.",
@@ -303,56 +321,50 @@ MESSAGES = {
         "proposal_applied": "применение предложения",
     },
     "en": {
-        "welcome": "Repertoire and setlist bot. /help — commands.\nA Telegram chat administrator creates the group with /group in the group chat. Members: /register Your role.",
+        "welcome": "Repertoire and setlist bot. /help — commands.\nA Telegram chat administrator creates the group with /group Name in the group chat. Members: /register Your role.",
         "help": (
-            "In the group chat, a Telegram administrator creates the group: /group step by step, or /group Name immediately.\n"
-            "Apply: /register guitarist. Administrator: /members to review applications.\n"
-            "In private chat: /groups to select a group using buttons. Multiple memberships are supported.\n"
-            "Language: /language ru or en; group language: /group_language ru or en.\n\n"
-            "Catalog: /catalog [query], /archived.\n"
-            "Create: /song Title  03:38  110  lights  comment\n"
-            "The last three fields are optional.\n"
-            "Separate fields with two or more spaces. Use - for an empty optional field; in /edit this clears it.\n"
-            "Table: /song on the first line, then paste cells from Sheets/Excel.\n"
-            "Without headers: title, time, lights, BPM, comment. Review before saving.\n"
-            "Edit: /edit Title  New title  03:38  110  lights  comment\n"
-            "Copy all parameters: /copy Title  New title  05:00\n"
-            "Alias: /alias Title  Alternative title\n"
-            "Archive and restore songs using card buttons; proposals: /proposals.\n"
-            "Members propose catalog changes; administrators approve them.\n\n"
-            "Concerts: /concert 2026-12-31  Title, /concerts.\n"
-            "Select a concert using /concerts buttons.\n"
+            "In the group chat, an administrator creates a musical group: /group Name.\n"
+            "Membership application: /register guitarist; applications and roles: /members.\n"
+            "Select a group in private chat: /groups. You can belong to several groups.\n"
+            "Language: /language en; group language: /group_language en.\n"
+            "\n"
+            "Catalog: /catalog [search]; archived songs: /archived.\n"
+            "Song: /song Title  03:38  110  lights  comment.\n"
+            "The last three fields are optional. Separate fields with two or more spaces; - clears an optional field.\n"
+            "Table import: /import Table rows. Columns: title, time, lights, BPM, comment.\n"
+            "Edit: /edit Title  New title  03:38  110  lights  comment.\n"
+            "Copy: /copy Title  New title  05:00.\n"
+            "Alias: /alias Title  Alternative title.\n"
+            "Archive: /archive Title; restore: /unarchive Title.\n"
+            "Catalog proposals: /proposals. Member changes require administrator approval.\n"
+            "\n"
+            "Concert: /concert 2026-12-31  Title; select a concert: /concerts.\n"
             "Setlist: /setlist; shared version: /shared.\n"
-            "Export: the Export button or /export — PDFs for musicians, lighting, or both files.\n"
-            "A4: large song titles for musicians, a table for lighting. Unapproved files are marked DRAFT.\n"
-            "Add: /add to select a song; /add Comet  2 for the second block.\n"
-            "List: /add on the first line, then one song title per line.\n"
-            "Replace the entire setlist: /suggestion and a list of songs. History is preserved.\n"
-            "/suggestion without a list asks for your variant; reply to that message with your list.\n"
-            "In private chat, enter a list or pick songs on the keyboard; confirmation only saves your private draft.\n"
-            "You can reply with a list directly to a working setlist; its message selects the concert.\n"
-            "Remove: /remove block position.\n"
-            "Move: /move block from to.\n"
-            "New block: /block Name; encore: /encore.\n"
-            "Encore songs: /add_encore and a list; remove a song: /remove_encore_song [position].\n"
-            "Remove encore: /remove_encore (requires confirmation).\n"
-            "Average concert pause: /pause 30 (new concerts default to 5 seconds).\n"
-            "Lead-in before a song: /pause position seconds; 0 means no lead-in.\n"
-            "Other blocks: /pause block position seconds. Use default instead of seconds to reset.\n"
-            "New concerts in the group: /group_pause seconds (administrator).\n"
-            "Break after a block: /break block seconds.\n"
-            "Average pauses count only between songs. Only an explicit lead-in counts before the first.\n"
-            "Inherited pauses are hidden in the list; explicit positive lead-ins are shown.\n"
-            "Approve: /approve; reopen: /reopen.\n"
-            "History, variants and restoration: /history or /versions and buttons.\n\n"
-            "Current setlists show “Propose your variant” and “⚙️ Options”; variants and export are under options.\n"
-            "In group chats, members can request approval or reopening of an approved list from the administrator.\n"
-            "It asks a question and provides titles to copy; reply to that question with your list.\n"
-            "Administrator: /delete_concert, /delete_group (two confirmations), /backup for shared data ZIP.\n"
-            "Trash and restoration within 30 days: /trash.\n\n"
-            "In private chat, /setlist and edits use your personal draft.\n"
-            "Propose it to the group: /publish. Apply using the published proposal button.\n"
-            "Song selection and actions are available via /catalog buttons. /cancel cancels confirmations."
+            "Add: /add Comet  2 — add to block two; the default block is one.\n"
+            "New variant: /suggestion Song titles. History is preserved.\n"
+            "In /add, /suggestion and /add_encore, enter one song title per line.\n"
+            "Remove: /remove 1  2 — block and position.\n"
+            "Move: /move 1  2  3 — block, from, to.\n"
+            "New block: /block Title; encore: /encore.\n"
+            "Add to encore: /add_encore Song titles; remove: /remove_encore_song 2.\n"
+            "Remove encore: /remove_encore — requires confirmation.\n"
+            "Average pause: /pause 30. Lead-in: /pause 2  10; another block: /pause 1  2  10.\n"
+            "0 means no lead-in; default instead of seconds restores the average.\n"
+            "Pause for new concerts: /group_pause 5 (administrator).\n"
+            "Break after a block: /break 1  900.\n"
+            "Inherited pauses count in totals but are hidden before songs.\n"
+            "\n"
+            "Current lists show “Propose your variant” and “⚙️ Options”; variants and export are inside.\n"
+            "Export: /export — PDF for musicians, lighting, or both files.\n"
+            "Approve: /approve; reopen: /reopen (administrator).\n"
+            "Members can request approval or reopening from the administrator using buttons.\n"
+            "History and restoration: /history, /versions.\n"
+            "Delete: /delete_concert, /delete_group; ZIP of shared data: /backup.\n"
+            "Trash and restoration: /trash. Deleted data is retained for 30 days.\n"
+            "\n"
+            "In private chat edits change only your personal draft. Publish to the group: /publish.\n"
+            "Replying with a list to a working setlist or invitation proposes a new variant.\n"
+            "Song selection and actions are also available through buttons. /cancel cancels input and pending confirmations.\n"
         ),
         "ok": "Done.",
         "empty": "Nothing here yet.",
@@ -518,6 +530,30 @@ MESSAGES = {
         "duration": "Use a positive MM:SS duration, for example 00:05.",
         "song_input": "Check the song fields. See /help for the command format.",
         "field_separator": "Separate fields with two or more spaces instead of a vertical bar. See /help for examples.",
+        "input_prompt": "Reply to this message with the input for /{command}.",
+        "input_cancel": "/cancel — cancel input.",
+        "input_expired": "This input request expired or was cancelled. Run the command again.",
+        "input_song": "Title  03:38  110  lights  comment\nThe last three fields are optional; - means empty. You can also paste a song table.",
+        "input_import": "Paste rows from Excel/Sheets. Without headers: title, duration, lights, BPM, comment. Separate columns with tabs or two or more spaces.",
+        "input_edit": "Song title  New title  03:38  110  lights  comment\nOmitted optional fields are preserved; - clears a field.",
+        "input_copy": "Original song  New title  05:00\nOther fields will be copied.",
+        "input_alias": "Song title  Alternative title",
+        "input_archive": "Title of the song to archive.",
+        "input_unarchive": "Title of the archived song to restore.",
+        "input_concert": "Date and optional title: 2026-12-31  New Year concert",
+        "input_register": "Your musical role, for example: guitarist.",
+        "input_language": "Interface language: ru or en.",
+        "input_group_language": "Group chat language: ru or en.",
+        "input_group_pause": "Average pause for new concerts in seconds, for example: 5. Existing concerts are unchanged.",
+        "input_pause": "Average pause in seconds: 30.\nLead-in: 2  10; another block: 1  2  10.\n0 means no lead-in; default instead of seconds restores the average.",
+        "input_move": "Block, original position and new position: 1  2  3",
+        "input_remove": "Block number and song position: 1  2",
+        "input_block": "New block title, for example: Second set.",
+        "input_break": "Block number and break duration after it, in seconds: 1  900",
+        "input_add": "Song title, for example: Comet. Optional block number: Comet  2. For several songs, enter one title per line.",
+        "input_add_ambiguous": "Several songs matched. Reply with the complete title to clarify:",
+        "input_add_encore": "Song titles for the encore, one per line.",
+        "input_remove_encore_song": "Enter the song position in the encore, for example: 1",
         "setlist_input": "Check block numbers, positions and arguments. See /help.",
         "concert_input": "Format: /concert YYYY-MM-DD  Optional title.",
         "group_name": "Use a group name between 1 and 200 characters.",

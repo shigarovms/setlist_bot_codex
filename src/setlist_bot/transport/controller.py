@@ -7,6 +7,7 @@ from uuid import UUID
 
 from setlist_bot.application.backup import Backup
 from setlist_bot.application.catalog import SONG_FIELDS, Catalog
+from setlist_bot.application.command_inputs import GROUP_INPUTS, SETLIST_INPUTS, CommandInputs
 from setlist_bot.application.exports import Exports
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.importing import Importer
@@ -71,6 +72,8 @@ class Response:
     delete_input: bool = False
     button_columns: int = 1
     group_creation_id: UUID | None = None
+    command_input_id: UUID | None = None
+    input_rejected: bool = False
     menu_card_id: UUID | None = None
     markup_only: bool = False
     callback_notice: str = ""
@@ -89,6 +92,7 @@ class Controller:
         self.setlists = Setlists(store, user)
         self.selection = SongSelection(store, user, chat_id)
         self.importer = Importer(store, user, chat_id)
+        self.inputs = CommandInputs(store, user, chat_id, private)
         self.trash = Trash(store, user)
         self.templates = Templates(store, user, chat_id)
         self.exports = Exports(store, user, chat_id)
@@ -193,6 +197,8 @@ class Controller:
         if command in ("start", "help"):
             return Response(self.t("welcome" if command == "start" else "help"))
         if command == "language":
+            if not args:
+                return await self._request_input(command)
             require(args in ("ru", "en"), "input")
             self.user.language = args
             self.language = args if self.private else self.language
@@ -286,9 +292,27 @@ class Controller:
         assert group_id is not None
         if command == "register":
             require(not self.private, "group_only")
+            if not args:
+                require(
+                    not await self.store.find(Membership, group_id=group_id, user_id=self.user.id),
+                    "already_member",
+                )
+                return await self._request_input(command, context)
             await self.groups.register(group_id, args)
             return Response(self.t("registered"))
         group = await self.groups.access(group_id)
+        if command in GROUP_INPUTS and not args:
+            if command in (
+                "concert",
+                "group_language",
+                "group_pause",
+                "import",
+                "archive",
+                "unarchive",
+            ):
+                await self.groups.access(group_id, admin=True)
+            if command not in ("archive", "unarchive") or context.selected_song_id is None:
+                return await self._request_input(command, context)
         if command in ("backup", "backup_group"):
             require(not args or UUID(args) == group_id, "not_found")
             return Response(
@@ -375,7 +399,7 @@ class Controller:
                 "confirmation",
             )
             data = json.loads(confirmation.command)
-            require("command" in data, "confirmation")
+            require("command" in data and data.get("kind") is None, "confirmation")
             require(data["group_id"] == str(context.group_id), "confirmation")
             require(data.get("group_epoch", 0) == group.lifecycle_version, "confirmation")
             require(
@@ -432,16 +456,7 @@ class Controller:
             selected = await self.catalog.song(group_id, UUID(args))
             context.selected_song_id = selected.id
             if command != "show_song":
-                return Response(
-                    self.t(
-                        command,
-                        title=selected.title,
-                        time=clock(selected.duration_seconds),
-                        bpm=selected.bpm or "-",
-                        lights=selected.lights or "-",
-                        comment=selected.comment or "-",
-                    )
-                )
+                return await self._request_input(command.removesuffix("_hint"), context)
             buttons = [
                 (self.t("song_edit"), f"edit_hint {selected.id}"),
                 (self.t("song_copy"), f"copy_hint {selected.id}"),
@@ -620,6 +635,8 @@ class Controller:
         require(context.concert_id is not None, "select_concert")
         concert_id = context.concert_id
         assert concert_id is not None
+        if command in SETLIST_INPUTS and not args:
+            return await self._request_input(command, context)
         if command in ("delete_concert", "delete_concert_final"):
             await self.groups.access(group_id, admin=True)
             require(
@@ -685,6 +702,8 @@ class Controller:
             ]
             require(len(enc_blocks) == 1, "encore_missing")
             enc_block = enc_blocks[0]
+            if not args and command in ("add_encore", "remove_encore_song"):
+                return await self._request_input(command, context)
             if command == "add_encore":
                 if args:
                     try:
@@ -786,7 +805,7 @@ class Controller:
                     lines.append(
                         self.t("song_list_line", number=number, title=title, reason=reason)
                     )
-                return Response("\n\n".join(lines))
+                return Response("\n\n".join(lines), input_rejected=True)
             previous = await self.selection.active() if self.private else None
             if self.private:
                 await self.selection.clear()
@@ -850,6 +869,7 @@ class Controller:
                                 (song_card(s).splitlines()[0], f"offer_add {s.id.hex} {block}")
                                 for s in songs
                             ],
+                            input_rejected=bool(selector.strip()) and not songs,
                         )
                     values = [block, str(songs[0].id)]
             lengths = {"add": 2, "move": 3, "pause": 3, "default_pause": 1, "break": 2, "remove": 2}
@@ -1121,7 +1141,93 @@ class Controller:
                 else self.t("song_list_missing")
             )
             lines.append(self.t("song_list_line", number=number, title=title, reason=reason))
-        return Response("\n\n".join(lines))
+        return Response("\n\n".join(lines), input_rejected=True)
+
+    async def _request_input(self, command: str, context: Context | None = None) -> Response:
+        version = None
+        prefix = ""
+        detail = self.t("input_" + command)
+        if context is not None and context.group_id is not None:
+            group = await self.store.get(Group, context.group_id)
+            prefix = group.name + "\n"
+            if command in SETLIST_INPUTS:
+                require(context.concert_id is not None, "select_concert")
+                assert context.concert_id is not None
+                snapshot, version, approved = await self.setlists.read(
+                    context.group_id, context.concert_id, private=self.private
+                )
+                require(not approved, "approved")
+                if command in ("move", "remove"):
+                    require(any(block["items"] for block in snapshot["blocks"]), "empty_setlist")
+                concert = await self.store.get(Concert, context.concert_id)
+                prefix += concert_label(concert) + "\n"
+                context.observed_version = version
+                if command in ("add_encore", "remove_encore_song"):
+                    encore = [b for b in snapshot["blocks"] if b["kind"] == "encore"]
+                    require(len(encore) == 1, "encore_missing")
+                    if command == "remove_encore_song":
+                        require(bool(encore[0]["items"]), "empty_setlist")
+                        detail += "\n" + "\n".join(
+                            f"{i}. {item['title']}" for i, item in enumerate(encore[0]["items"], 1)
+                        )
+            if command in ("edit", "copy", "alias") and context.selected_song_id is not None:
+                song = await self.catalog.song(context.group_id, context.selected_song_id)
+                detail = self.t(
+                    command + "_hint",
+                    title=song.title,
+                    time=clock(song.duration_seconds),
+                    bpm=song.bpm or "-",
+                    lights=song.lights or "-",
+                    comment=song.comment or "-",
+                )
+        prompt = (
+            prefix
+            + self.t("input_prompt", command=command)
+            + "\n\n"
+            + detail
+            + "\n\n"
+            + self.t("input_cancel")
+        )
+        row = await self.inputs.create(command, context, prompt, version=version)
+        return Response(prompt, force_reply=True, command_input_id=row.id)
+
+    async def command_input(self, row: Confirmation, value: str) -> Response:
+        target = self.inputs.data(row)
+        if target.get("group_id") and target.get("concert_id"):
+            self.reply_target = UUID(target["group_id"]), UUID(target["concert_id"])
+        data = await self.inputs.restore(row)
+        require(bool(value.strip()), "input")
+        if value.lstrip().startswith("/"):
+            response = await self.execute(value)
+        else:
+            join = "\n" if data["command"] in ("song", "import", "add") and "\n" in value else " "
+            response = await self.execute(f"/{data['command']}" + join + value.strip())
+        if data["command"] == "add" and any(
+            action.startswith("offer_add ") for _, action in response.buttons
+        ):
+            response.text = (
+                self.t("input_add_ambiguous")
+                + "\n"
+                + "\n".join(label for label, _ in response.buttons)
+            )
+            response.buttons = []
+            response.input_rejected = True
+        if response.input_rejected:
+            row.expires_at = now() + timedelta(minutes=10)
+            if response.buttons:
+                response.deliveries.append(
+                    (
+                        self.chat_id,
+                        Response(data["prompt"], force_reply=True, command_input_id=row.id),
+                    )
+                )
+            else:
+                response.text += "\n\n" + data["prompt"]
+                response.force_reply = True
+                response.command_input_id = row.id
+        else:
+            await self.store.delete(row)
+        return response
 
     async def _template_context(self, template_id: UUID) -> Context:
         template = await self.templates.load(template_id)
@@ -1426,6 +1532,7 @@ class Controller:
                 preview += "\n" + self.t("import_none")
             response = Response(preview, [(self.t("cancel_button"), "cancel")])
         response.buttons.insert(-1, (self.t("import_map"), f"map_start {job.id.hex}"))
+        response.input_rejected = bool(plan.errors or plan.parsed.error)
         return response
 
     def _mapping_step(self, job: CatalogImport) -> Response:
