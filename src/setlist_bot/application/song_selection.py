@@ -11,7 +11,7 @@ from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.domain.entities import Concert, Confirmation, Revision, Setlist, User, now
-from setlist_bot.domain.rules import normalize, require
+from setlist_bot.domain.rules import is_pause, normalize, require
 
 PAGE_SIZE = 40
 SESSION_TTL = timedelta(hours=24)
@@ -125,7 +125,10 @@ class SongSelection:
                 continue
             revision = await self.store.get(Revision, setlist.approved_revision_id)
             counts.update(
-                item["song_id"] for block in revision.snapshot["blocks"] for item in block["items"]
+                item["song_id"]
+                for block in revision.snapshot["blocks"]
+                for item in block["items"]
+                if not is_pause(item)
             )
         songs = await Catalog(self.store, self.user).list_songs(group_id)
         songs.sort(key=lambda s: (-counts[str(s.id)], normalize(s.title), str(s.id)))
@@ -144,7 +147,7 @@ class SongSelection:
         require(data["stage"] == "review" and bool(data["selected"]), "selection_expired")
         catalog = Catalog(self.store, self.user)
         roster = {s["id"]: s for s in data["songs"]}
-        for song_id in set(data["selected"]):
+        for song_id in {entry for entry in data["selected"] if isinstance(entry, str)}:
             song = await catalog.song(UUID(data["group_id"]), UUID(song_id))
             require(
                 not song.archived and song.version == roster[song_id]["version"],
@@ -154,8 +157,10 @@ class SongSelection:
             UUID(data["group_id"]),
             UUID(data["concert_id"]),
             data["version"],
-            [roster[i]["title"] for i in data["selected"]],
-            song_ids=[UUID(i) for i in data["selected"]],
+            [],
+            ordered=[
+                i["pause_seconds"] if isinstance(i, dict) else UUID(i) for i in data["selected"]
+            ],
             replace=True,
             private=True,
         )

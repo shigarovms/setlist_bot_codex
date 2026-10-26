@@ -2,6 +2,13 @@ from typing import Any
 
 MESSAGES = {
     "ru": {
+        "selection_pause": "⏸ Пауза",
+        "selection_pause_prompt": "Введите длительность паузы ответом на вопрос.",
+        "input_picker_pause": "Какой длины пауза? Например: 5 мин, 2:30, 1 час 13 минут 43 секунды. Число без единиц — секунды.",
+        "pause_duration": "Укажите положительную длительность до 24 часов: 5 мин, 2:30, 3 мин 30 сек.",
+        "flat_list_only": "Сет-лист теперь единый список песен и пауз. Введите паузу отдельной строкой, например 5 мин.",
+        "draft_publish": "Предложить этот вариант",
+        "draft_edit": "Изменить",
         "welcome": "Бот для репертуара и сет-листов. /help — команды.\nАдминистратор создаёт коллектив командой /group Название в общем чате. Участники: /register Ваша роль.",
         "help": (
             "В общем чате администратор создаёт коллектив: /group Название.\n"
@@ -21,21 +28,15 @@ MESSAGES = {
             "\n"
             "Концерт: /concert 2026-12-31  Название; выбор концерта: /concerts.\n"
             "Список: /setlist; общий вариант: /shared.\n"
-            "Добавить: /add Комета  2 — песня во второй блок; блок по умолчанию — первый.\n"
+            "Добавить: /add Комета. Для списка — одна песня или длительность паузы на строку: 5 мин, 2:30, 1 час 13 минут 43 секунды.\n"
             "Новый вариант: /suggestion Названия песен. История сохраняется.\n"
-            "В /add, /suggestion и /add_encore названия списка идут по одному на строку.\n"
-            "Удалить: /remove 1  2 — блок и позиция.\n"
-            "Переставить: /move 1  2  3 — блок, откуда, куда.\n"
-            "Новый блок: /block Название; бис: /encore.\n"
-            "Добавить в бис: /add_encore Названия песен; удалить из биса: /remove_encore_song 2.\n"
-            "Удалить бис: /remove_encore — с подтверждением.\n"
-            "Средняя пауза: /pause 30. Подводка: /pause 2  10; другой блок: /pause 1  2  10.\n"
-            "0 — без подводки; default вместо секунд возвращает среднюю.\n"
+            "Удалить песню или паузу: /remove 2.\n"
+            "Переставить песню или паузу: /move 2  3.\n"
+            "Средняя пауза: /pause 30. Явные паузы вводите длительностью на отдельной строке.\n"
             "Пауза для новых концертов: /group_pause 5 (администратор).\n"
-            "Перерыв после блока: /break 1  900.\n"
             "Стандартные паузы учитываются в итогах и не показываются перед песнями.\n"
             "\n"
-            "Под списком — «Предложить свой вариант» и «⚙️ Опции»; внутри — варианты и экспорт.\n"
+            "В личном черновике — «Предложить этот вариант», «Изменить», «⚙️ Опции». В группе — предложение, опции, утверждение.\n"
             "Экспорт: /export — PDF для музыкантов, световика или оба файла.\n"
             "Утвердить: /approve; вернуть в работу: /reopen (администратор).\n"
             "Участник кнопками запрашивает у администратора утверждение или редактирование.\n"
@@ -64,16 +65,11 @@ MESSAGES = {
         "draft": "Личный черновик",
         "working": "Общий рабочий сет-лист",
         "approved_title": "Утверждённый сет-лист",
-        "block_title": "Блок {number}",
         "version": "Версия {version}",
         "average_pause": "Средняя пауза: {time}.",
         "inherited_pause": "пауза {time} (средняя)",
         "custom_pause": "пауза {time} (индивидуальная)",
         "lead_in": "Подводка: {time}",
-        "block_duration": "Длительность блока: {time}",
-        "block_break": "Перерыв: {time}",
-        "encore": "Бис",
-        "add_encore": "Добавить бис",
         "copy_variant": "Предложить свой вариант",
         "menu_options": "⚙️ Опции",
         "menu_variants": "📋 Варианты",
@@ -126,7 +122,7 @@ MESSAGES = {
         "selection_pick_button": "🎵 Выбрать песни",
         "selection_title": "🎵 Ваш сет-лист",
         "selection_no_songs": "Пока нет выбранных песен.",
-        "selection_count": "Всего песен: {count}.",
+        "selection_count": "Всего позиций: {count}.",
         "selection_finish": "✅ Завершить",
         "selection_prev": "◀️ Назад",
         "selection_next": "Вперёд ▶️",
@@ -141,7 +137,6 @@ MESSAGES = {
         "selection_catalog_changed": "Выбранная песня изменилась или архивирована. Черновик не изменён. Отмените ввод и начните выбор заново.",
         "selection_unknown": "Нажмите песню на текущей странице клавиатуры. Для ввода списком откройте /suggestion; для отмены — /cancel.",
         "selection_keyboard_closed": "Выбор песен закрыт.",
-        "timing_net": "Чистое время: {time}",
         "timing_breaks": "Перерывы: {time}",
         "timing_total": "Итого: {time}",
         "template_expired": "Срок действия кнопки истёк. Откройте вариант заново и нажмите новую кнопку.",
@@ -165,21 +160,10 @@ MESSAGES = {
         "delete_concert_button": "Удалить концерт",
         "backup_button": "Скачать общие данные ZIP",
         "backup_ready": "ZIP содержит каталог, концерты, общие версии и опубликованные предложения в JSON и CSV. Личные черновики и Telegram ID не включены. Восстановление из корзины: /trash; обратный импорт ZIP пока не реализован.",
-        "encore_exists": "Бис уже добавлен. Используйте /add_encore для песен или /remove_encore для удаления биса.",
-        "encore_missing": "Бис ещё не добавлен. Сначала выполните /encore.",
-        "encore_add_button": "Добавить песни в бис",
-        "encore_remove_song_button": "Удалить песню из биса",
-        "encore_drop_button": "Удалить бис",
-        "encore_add_prompt": "Выберите песню для биса или отправьте /add_encore и названия по одному на строку.",
-        "encore_remove_prompt": "Выберите песню, которую нужно убрать из биса:",
-        "encore_drop_preview": "Бис будет удалён вместе с его песнями из рабочего варианта. Прежний вариант останется в истории.",
-        "encore_song_drop_preview": "Выбранная песня будет убрана из биса. Каталог и прежние версии сохраняются.",
-        "encore_private_drop_preview": "Изменение будет применено только к вашему личному черновику.",
-        "remove_block": "удаление блока",
         "variant_label": "{name} · вариант {number}",
         "revision_label": "{name} · версия {number}",
         "member_name": "Участник",
-        "song_list_input": "Отправьте /add или /suggestion, затем названия песен по одному на строку (от 1 до 200 песен).",
+        "song_list_input": "Отправьте /add или /suggestion, затем названия песен или длительности пауз по одному на строку (от 1 до 200 позиций).",
         "song_list_errors": "Список не применён. Исправьте указанные строки и отправьте его целиком ещё раз:",
         "song_list_missing": "песня не найдена в активном каталоге",
         "song_list_ambiguous": "несколько совпадений: {names}. Уточните название",
@@ -187,10 +171,8 @@ MESSAGES = {
         "add_list": "добавление списка песен",
         "suggestion": "новый вариант сет-листа",
         "group_pause_setting": "{name}\nПауза по умолчанию для новых концертов: {time}.\nТекущие концерты и черновики сохраняют свои настройки. Изменить: /group_pause секунды (администратор).",
-        "pause_usage": "Средняя пауза между песнями: /pause 30.\nПодводка: /pause 2 60 — 60 секунд перед второй песней первого блока; /pause 1 2 60 — с явным номером блока.\n0 — без подводки; default вместо секунд — вернуть среднюю.\nПеред первой песней учитывается только индивидуальная подводка. В личном чате меняется только ваш черновик.",
+        "pause_usage": "Средняя пауза: /pause 5. Явные паузы: отдельная строка длительности в /add или /suggestion.",
         "pause_input": "Укажите целое число секунд от 0 до 86400. Например, /pause 30 или /pause 1 2 0.",
-        "timing": "Чистое время: {net}. Перерывы: {breaks}. Полное время: {total}.",
-        "block_timing": "Длительность блока: {time}; перерыв после: {break_time}",
         "published": "Черновик опубликован в общем чате.",
         "submission": "Участник предложил сет-лист. Откройте предложение кнопкой ниже.",
         "restore_notice": "Будет восстановлен порядок выбранной версии. Параметры песен берутся из текущего каталога.",
@@ -226,16 +208,12 @@ MESSAGES = {
         "input_language": "Язык интерфейса: ru или en.",
         "input_group_language": "Язык общего чата: ru или en.",
         "input_group_pause": "Средняя пауза для новых концертов в секундах, например: 5. Старые концерты не изменятся.",
-        "input_pause": "Средняя пауза в секундах: 30.\nПодводка перед песней: 2  10; другой блок: 1  2  10.\n0 — без подводки; default вместо секунд возвращает среднюю.",
-        "input_move": "Блок, исходная и новая позиции: 1  2  3",
-        "input_remove": "Номер блока и позиция песни: 1  2",
-        "input_block": "Название нового блока, например: Второе отделение.",
-        "input_break": "Номер блока и длительность перерыва после него в секундах: 1  900",
-        "input_add": "Название песни, например: Комета. Номер блока необязателен: Комета  2. Несколько песен — по одному названию на строку.",
+        "input_pause": "Средняя пауза в секундах, например: 5. Явные паузы добавляются отдельной строкой списка: 5 мин или 2:30.",
+        "input_move": "Исходная и новая позиции песни или паузы: 2  3",
+        "input_remove": "Позиция песни или паузы, например: 2",
+        "input_add": "Название песни, например: Комета. Несколько песен — по одной на строку. Паузы — длительностью на отдельной строке: 5 мин, 2:30, 3 мин 30 сек.",
         "input_add_ambiguous": "Нашлось несколько песен. Уточните полное название ответом на этот вопрос:",
-        "input_add_encore": "Названия песен для биса — по одному на строку.",
-        "input_remove_encore_song": "Введите номер песни в бисе, например: 1",
-        "setlist_input": "Проверьте номера блоков, позиций и аргументы. /help — формат команды.",
+        "setlist_input": "Проверьте позиции и аргументы. /help — формат команды.",
         "concert_input": "Формат: /concert ГГГГ-ММ-ДД  Название (необязательно).",
         "group_name": "Укажите название коллектива от 1 до 200 символов.",
         "group_creation_prompt": "🎸 Создание нового коллектива\n\nВведите название вашего коллектива ответом на это сообщение.\n/cancel — отмена.",
@@ -311,7 +289,6 @@ MESSAGES = {
         "add": "добавление песни",
         "remove": "удаление из списка",
         "move": "перестановка",
-        "block": "новый блок",
         "pause": "пауза",
         "default_pause": "изменение средней паузы",
         "break": "перерыв",
@@ -321,6 +298,13 @@ MESSAGES = {
         "proposal_applied": "применение предложения",
     },
     "en": {
+        "selection_pause": "⏸ Pause",
+        "selection_pause_prompt": "Reply to the question with the pause duration.",
+        "input_picker_pause": "How long is the pause? For example: 5 min, 2:30, 1 hour 13 minutes 43 seconds. A number alone means seconds.",
+        "pause_duration": "Enter a positive duration up to 24 hours: 5 min, 2:30, 3 min 30 sec.",
+        "flat_list_only": "Setlists now contain a flat sequence of songs and pauses. Enter a pause as a duration-only line, for example 5 min.",
+        "draft_publish": "Propose this variant",
+        "draft_edit": "Edit",
         "welcome": "Repertoire and setlist bot. /help — commands.\nA Telegram chat administrator creates the group with /group Name in the group chat. Members: /register Your role.",
         "help": (
             "In the group chat, an administrator creates a musical group: /group Name.\n"
@@ -340,21 +324,15 @@ MESSAGES = {
             "\n"
             "Concert: /concert 2026-12-31  Title; select a concert: /concerts.\n"
             "Setlist: /setlist; shared version: /shared.\n"
-            "Add: /add Comet  2 — add to block two; the default block is one.\n"
+            "Add: /add Comet. For lists enter one song or pause duration per line: 5 min, 2:30, 1 hour 13 minutes 43 seconds.\n"
             "New variant: /suggestion Song titles. History is preserved.\n"
-            "In /add, /suggestion and /add_encore, enter one song title per line.\n"
-            "Remove: /remove 1  2 — block and position.\n"
-            "Move: /move 1  2  3 — block, from, to.\n"
-            "New block: /block Title; encore: /encore.\n"
-            "Add to encore: /add_encore Song titles; remove: /remove_encore_song 2.\n"
-            "Remove encore: /remove_encore — requires confirmation.\n"
-            "Average pause: /pause 30. Lead-in: /pause 2  10; another block: /pause 1  2  10.\n"
-            "0 means no lead-in; default instead of seconds restores the average.\n"
+            "Remove song or pause: /remove 2.\n"
+            "Move song or pause: /move 2  3.\n"
+            "Average pause: /pause 30. Enter explicit pauses as duration-only lines.\n"
             "Pause for new concerts: /group_pause 5 (administrator).\n"
-            "Break after a block: /break 1  900.\n"
             "Inherited pauses count in totals but are hidden before songs.\n"
             "\n"
-            "Current lists show “Propose your variant” and “⚙️ Options”; variants and export are inside.\n"
+            "Personal drafts show “Propose this variant”, “Edit”, “⚙️ Options”. Group lists show proposal, options, approval.\n"
             "Export: /export — PDF for musicians, lighting, or both files.\n"
             "Approve: /approve; reopen: /reopen (administrator).\n"
             "Members can request approval or reopening from the administrator using buttons.\n"
@@ -383,16 +361,11 @@ MESSAGES = {
         "draft": "Personal draft",
         "working": "Shared working setlist",
         "approved_title": "Approved setlist",
-        "block_title": "Block {number}",
         "version": "Version {version}",
         "average_pause": "Average pause: {time}.",
         "inherited_pause": "pause {time} (average)",
         "custom_pause": "pause {time} (custom)",
         "lead_in": "Lead-in: {time}",
-        "block_duration": "Block duration: {time}",
-        "block_break": "Break: {time}",
-        "encore": "Encore",
-        "add_encore": "Add encore",
         "copy_variant": "Propose your variant",
         "menu_options": "⚙️ Options",
         "menu_variants": "📋 Variants",
@@ -445,7 +418,7 @@ MESSAGES = {
         "selection_pick_button": "🎵 Choose songs",
         "selection_title": "🎵 Your setlist",
         "selection_no_songs": "No songs selected yet.",
-        "selection_count": "Total songs: {count}.",
+        "selection_count": "Total entries: {count}.",
         "selection_finish": "✅ Finish",
         "selection_prev": "◀️ Back",
         "selection_next": "Next ▶️",
@@ -460,7 +433,6 @@ MESSAGES = {
         "selection_catalog_changed": "A selected song changed or was archived. Your draft is unchanged. Cancel input and start a new selection.",
         "selection_unknown": "Tap a song on the current keyboard page. Open /suggestion to enter a list, or /cancel to cancel.",
         "selection_keyboard_closed": "Song selection closed.",
-        "timing_net": "Performance: {time}",
         "timing_breaks": "Breaks: {time}",
         "timing_total": "Total: {time}",
         "template_expired": "This button expired. Open the variant again and use its new button.",
@@ -484,21 +456,10 @@ MESSAGES = {
         "delete_concert_button": "Delete concert",
         "backup_button": "Download shared data ZIP",
         "backup_ready": "The ZIP contains the catalog, concerts, shared versions and published proposals as JSON and CSV. Private drafts and Telegram IDs are excluded. Restore from trash using /trash; ZIP import is not implemented yet.",
-        "encore_exists": "An encore already exists. Use /add_encore for songs or /remove_encore to remove it.",
-        "encore_missing": "No encore yet. Use /encore first.",
-        "encore_add_button": "Add songs to encore",
-        "encore_remove_song_button": "Remove song from encore",
-        "encore_drop_button": "Remove encore",
-        "encore_add_prompt": "Select a song for the encore or send /add_encore followed by one title per line.",
-        "encore_remove_prompt": "Select the song to remove from the encore:",
-        "encore_drop_preview": "The encore and its songs will be removed from the working variant. The previous variant stays in history.",
-        "encore_song_drop_preview": "The selected song will be removed from the encore. The catalog and previous versions are preserved.",
-        "encore_private_drop_preview": "This change will only affect your private draft.",
-        "remove_block": "block removed",
         "variant_label": "{name} · variant {number}",
         "revision_label": "{name} · version {number}",
         "member_name": "Member",
-        "song_list_input": "Send /add or /suggestion, followed by one song title per line (1 to 200 songs).",
+        "song_list_input": "Send /add or /suggestion, followed by one song title or pause duration per line (1 to 200 entries).",
         "song_list_errors": "The list was not applied. Correct these lines and send the entire list again:",
         "song_list_missing": "song not found in the active catalog",
         "song_list_ambiguous": "multiple matches: {names}. Specify the title",
@@ -506,10 +467,8 @@ MESSAGES = {
         "add_list": "song list added",
         "suggestion": "new setlist variant",
         "group_pause_setting": "{name}\nDefault pause for new concerts: {time}.\nExisting concerts and drafts keep their settings. Change: /group_pause seconds (administrator).",
-        "pause_usage": "Average pause between songs: /pause 30.\nLead-in: /pause 2 60 — 60 seconds before the second song in the first block; /pause 1 2 60 includes the block number.\n0 means no lead-in; use default instead of seconds to reset.\nOnly an explicit lead-in counts before the first song. Private chat changes only your draft.",
+        "pause_usage": "Average pause: /pause 5. Explicit pauses: duration-only lines in /add or /suggestion.",
         "pause_input": "Enter a whole number of seconds from 0 to 86400. For example, /pause 30 or /pause 1 2 0.",
-        "timing": "Performance: {net}. Breaks: {breaks}. Total: {total}.",
-        "block_timing": "Block duration: {time}; break after: {break_time}",
         "published": "Draft published in the group chat.",
         "submission": "A member proposed a setlist. Open the proposal using the button below.",
         "restore_notice": "Restores the selected order using current catalog parameters.",
@@ -545,16 +504,12 @@ MESSAGES = {
         "input_language": "Interface language: ru or en.",
         "input_group_language": "Group chat language: ru or en.",
         "input_group_pause": "Average pause for new concerts in seconds, for example: 5. Existing concerts are unchanged.",
-        "input_pause": "Average pause in seconds: 30.\nLead-in: 2  10; another block: 1  2  10.\n0 means no lead-in; default instead of seconds restores the average.",
-        "input_move": "Block, original position and new position: 1  2  3",
-        "input_remove": "Block number and song position: 1  2",
-        "input_block": "New block title, for example: Second set.",
-        "input_break": "Block number and break duration after it, in seconds: 1  900",
-        "input_add": "Song title, for example: Comet. Optional block number: Comet  2. For several songs, enter one title per line.",
+        "input_pause": "Average pause in seconds, for example: 5. Add explicit pauses as separate duration lines: 5 min or 2:30.",
+        "input_move": "Original and new song or pause position: 2  3",
+        "input_remove": "Song or pause position, for example: 2",
+        "input_add": "Song title, for example: Comet. Multiple songs: one per line. Pauses: separate duration lines such as 5 min, 2:30, 3 min 30 sec.",
         "input_add_ambiguous": "Several songs matched. Reply with the complete title to clarify:",
-        "input_add_encore": "Song titles for the encore, one per line.",
-        "input_remove_encore_song": "Enter the song position in the encore, for example: 1",
-        "setlist_input": "Check block numbers, positions and arguments. See /help.",
+        "setlist_input": "Check positions and arguments. See /help.",
         "concert_input": "Format: /concert YYYY-MM-DD  Optional title.",
         "group_name": "Use a group name between 1 and 200 characters.",
         "group_creation_prompt": "🎸 Create a new musical group\n\nReply to this message with the name of your group.\n/cancel — cancel.",
@@ -630,7 +585,6 @@ MESSAGES = {
         "add": "song added",
         "remove": "song removed",
         "move": "reordered",
-        "block": "block added",
         "pause": "pause",
         "default_pause": "average pause changed",
         "break": "break",

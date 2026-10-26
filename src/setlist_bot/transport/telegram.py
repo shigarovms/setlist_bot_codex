@@ -167,6 +167,8 @@ class Processor:
                         selection_before is not None
                         and response is not None
                         and response.selection_id is None
+                        and command.split(maxsplit=1)[0]
+                        not in ("input_cancel", "confirm_cancel", "import_cancel")
                         and not response.input_rejected
                         and (
                             is_callback
@@ -210,6 +212,8 @@ class Processor:
                         response.text += "\n\n" + data["prompt"]
                         response.force_reply = True
                         response.command_input_id = sessions[0].id
+                        response.cancel_action = f"input_cancel {sessions[0].id.hex}"
+                        response.cancel_label = tr(controller.language, "cancel_button")
                     elif sessions:
                         await uow.store.delete(sessions[0])
                 if is_callback and command.split(maxsplit=1)[0] in (
@@ -219,6 +223,7 @@ class Processor:
                     "slrev",
                     "slreq",
                     "slreturn",
+                    "sldraft",
                     "export_menu",
                     "export_back",
                     "export_file",
@@ -435,6 +440,10 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
         await delete_selection_message(bot, chat_id, identifier)
     for markup in markup_batches:
         await bot.send_message(chat_id, "…", reply_markup=markup)
+    if response.force_reply and response.cancel_action:
+        controls = [(response.cancel_label, response.cancel_action)]
+        async for cancel_markup in keyboards(controls):
+            await bot.send_message(chat_id, response.cancel_label, reply_markup=cancel_markup)
     for filename, data in response.files:
         await bot.send_document(chat_id, BufferedInputFile(data, filename=filename))
     return messages

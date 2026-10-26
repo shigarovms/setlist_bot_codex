@@ -193,13 +193,20 @@ table(
     "items",
     tenant(),
     col("block_id", Uuid),
-    col("song_id", Uuid),
+    col("song_id", Uuid, nullable=True),
     col("position", Integer),
     col("pause_before", Integer, nullable=True),
+    col("pause_duration_seconds", Integer, nullable=True),
     ForeignKeyConstraint(["group_id", "block_id"], ["blocks.group_id", "blocks.id"]),
     ForeignKeyConstraint(["group_id", "song_id"], ["songs.group_id", "songs.id"]),
     UniqueConstraint("block_id", "position", deferrable=True, initially="DEFERRED"),
     CheckConstraint("pause_before >= 0", name="pause"),
+    CheckConstraint(
+        "(song_id IS NOT NULL AND pause_duration_seconds IS NULL) OR "
+        "(song_id IS NULL AND pause_duration_seconds IS NOT NULL AND "
+        "pause_duration_seconds > 0 AND pause_duration_seconds <= 86400)",
+        name="entry_kind",
+    ),
 )
 table(
     e.Revision,

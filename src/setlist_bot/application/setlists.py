@@ -1,4 +1,3 @@
-from copy import deepcopy
 from datetime import date
 from typing import Any
 from uuid import UUID
@@ -17,7 +16,15 @@ from setlist_bot.domain.entities import (
     Submission,
     User,
 )
-from setlist_bot.domain.rules import pause_content, pause_seconds, require
+from setlist_bot.domain.rules import (
+    SongListError,
+    flat_content,
+    is_pause,
+    parse_pause,
+    pause_item,
+    pause_seconds,
+    require,
+)
 
 Document = dict[str, Any]
 
@@ -63,17 +70,23 @@ class Setlists:
                     "kind": block.kind,
                     "break_seconds": block.break_seconds,
                     "items": [
-                        {"song_id": str(item.song_id), "pause_before": item.pause_before}
+                        (
+                            pause_item(item.pause_duration_seconds)
+                            if item.pause_duration_seconds is not None
+                            else {"song_id": str(item.song_id), "pause_before": item.pause_before}
+                        )
                         for item in sorted(items, key=lambda item: item.position)
                     ],
                 }
             )
-        return result
+        return flat_content(result)
 
     async def _snapshot(self, group_id: UUID, content: Document) -> Document:
-        snapshot = pause_content(content)
+        snapshot = flat_content(content)
         for block in snapshot["blocks"]:
             for item in block["items"]:
+                if is_pause(item):
+                    continue
                 song = await self.store.get(Song, UUID(item["song_id"]))
                 require(song.group_id == group_id, "not_found")
                 item.update(
@@ -115,7 +128,7 @@ class Setlists:
         if setlist.approved:
             assert setlist.approved_revision_id is not None
             revision = await self.store.get(Revision, setlist.approved_revision_id)
-            return deepcopy(revision.snapshot), setlist.version, True
+            return flat_content(revision.snapshot), setlist.version, True
         return await self._snapshot(group_id, await self._working(setlist)), setlist.version, False
 
     async def edit(
@@ -132,26 +145,10 @@ class Setlists:
         draft = await self._draft(setlist) if private else None
         require((draft.version if draft else setlist.version) == expected, "conflict")
         require(private or not setlist.approved, "approved")
-        content = pause_content(draft.content) if draft else await self._working(setlist)
+        content = flat_content(draft.content) if draft else await self._working(setlist)
         blocks = content["blocks"]
         if operation == "default_pause":
             content["default_pause_seconds"] = pause_seconds(args[0])
-        elif operation in ("block", "encore"):
-            title = " ".join(args)
-            require(bool(title) and len(title) <= 200 and len(blocks) < 20, "setlist_input")
-            kind = (
-                "encore"
-                if operation == "encore" or title.casefold() in ("бис", "encore")
-                else "regular"
-            )
-            require(
-                kind != "encore" or not any(b["kind"] == "encore" for b in blocks), "encore_exists"
-            )
-            blocks.append({"title": title, "kind": kind, "break_seconds": 0, "items": []})
-        elif operation == "remove_block":
-            index = int(args[0]) - 1
-            require(0 < index < len(blocks), "setlist_input")
-            blocks.pop(index)
         else:
             index = int(args[0]) - 1
             require(0 <= index < len(blocks), "setlist_input")
@@ -163,10 +160,6 @@ class Setlists:
                 require(not song.archived, "archived")
                 require(sum(len(b["items"]) for b in blocks) < 200, "setlist_input")
                 items.append({"song_id": str(song.id), "pause_before": None})
-            elif operation == "break":
-                seconds = int(args[1])
-                require(0 <= seconds <= 86400 and index < len(blocks) - 1, "setlist_input")
-                block["break_seconds"] = seconds
             else:
                 pos = int(args[1]) - 1
                 require(0 <= pos < len(items), "setlist_input")
@@ -184,14 +177,14 @@ class Setlists:
                     require(False, "setlist_input")
         blocks[-1]["break_seconds"] = 0
         if draft:
-            draft.content = content
+            draft.content = flat_content(content)
             draft.version += 1
         else:
             await self._persist(setlist, content)
             await self._record(setlist, operation, content)
 
     async def _persist(self, setlist: Setlist, content: Document) -> None:
-        content = pause_content(content)
+        content = flat_content(content)
         setlist.default_pause_seconds = content["default_pause_seconds"]
         blocks = await self.store.find(Block, setlist_id=setlist.id)
         for block in blocks:
@@ -212,13 +205,14 @@ class Setlists:
             self.store.add(block)
             await self.store.flush()
             for position, item in enumerate(data["items"], 1):
-                song = await self.store.get(Song, UUID(item["song_id"]))
-                require(song.group_id == setlist.group_id, "not_found")
+                song = None if is_pause(item) else await self.store.get(Song, UUID(item["song_id"]))
+                require(song is None or song.group_id == setlist.group_id, "not_found")
                 self.store.add(
                     Item(
                         group_id=setlist.group_id,
                         block_id=block.id,
-                        song_id=song.id,
+                        song_id=song.id if song else None,
+                        pause_duration_seconds=item["duration_seconds"] if is_pause(item) else None,
                         position=position,
                         pause_before=item["pause_before"],
                     )
@@ -236,21 +230,50 @@ class Setlists:
         block: int = 1,
         private: bool = False,
         song_ids: list[UUID] | None = None,
+        ordered: list[UUID | int] | None = None,
     ) -> None:
         """Resolve every input before writing a single atomic setlist revision."""
         setlist = await self.load(group_id, concert_id)
         draft = await self._draft(setlist) if private else None
         require((draft.version if draft else setlist.version) == expected, "conflict")
         require(private or not setlist.approved, "approved")
-        content = pause_content(draft.content) if draft else await self._working(setlist)
+        content = flat_content(draft.content) if draft else await self._working(setlist)
         catalog = Catalog(self.store, self.user)
-        if song_ids is None:
-            songs = await catalog.resolve_list(group_id, titles)
+        if ordered is None and song_ids is None:
+            require(1 <= len(titles) <= 200, "song_list_input")
+            pauses = [parse_pause(title) for title in titles]
+            positions = [i for i, pause in enumerate(pauses) if pause is None]
+            try:
+                songs = (
+                    await catalog.resolve_list(group_id, [titles[i] for i in positions])
+                    if positions
+                    else []
+                )
+            except SongListError as exc:
+                raise SongListError(
+                    [
+                        (positions[n - 1] + 1, title, candidates)
+                        for n, title, candidates in exc.issues
+                    ]
+                ) from exc
+            iterator = iter(songs)
+            items = [
+                pause_item(pause)
+                if pause is not None
+                else {"song_id": str(next(iterator).id), "pause_before": None}
+                for pause in pauses
+            ]
         else:
-            require(1 <= len(song_ids) <= 200, "song_list_input")
-            songs = [await catalog.song(group_id, identifier) for identifier in song_ids]
-            require(all(not song.archived for song in songs), "selection_catalog_changed")
-        items = [{"song_id": str(song.id), "pause_before": None} for song in songs]
+            entries = ordered if ordered is not None else list(song_ids or [])
+            require(1 <= len(entries) <= 200, "song_list_input")
+            items = []
+            for entry in entries:
+                if isinstance(entry, int):
+                    items.append(pause_item(entry))
+                else:
+                    song = await catalog.song(group_id, entry)
+                    require(not song.archived, "selection_catalog_changed")
+                    items.append({"song_id": str(song.id), "pause_before": None})
         if replace:
             content["blocks"] = [{"title": "", "kind": "main", "break_seconds": 0, "items": items}]
         else:
@@ -260,7 +283,7 @@ class Setlists:
             )
             content["blocks"][block - 1]["items"].extend(items)
         if draft:
-            draft.content = content
+            draft.content = flat_content(content)
             draft.version += 1
         else:
             await self._persist(setlist, content)
@@ -362,6 +385,8 @@ class Setlists:
         require(not submission.applied, "already_done")
         for block in submission.snapshot["blocks"]:
             for item in block["items"]:
+                if is_pause(item):
+                    continue
                 song = await self.store.get(Song, UUID(item["song_id"]))
                 require(song.group_id == group_id, "not_found")
                 require(

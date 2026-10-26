@@ -35,19 +35,18 @@ GROUP_INPUTS = frozenset(
         "unarchive",
     }
 )
-SETLIST_INPUTS = frozenset(
+VERSION_INPUTS = frozenset(
     {
         "add",
         "move",
         "remove",
-        "block",
-        "break",
         "pause",
-        "add_encore",
-        "remove_encore_song",
+        "picker_pause",
+        "suggestion",
     }
 )
-COMMANDS = GROUP_INPUTS | SETLIST_INPUTS | {"language", "register"}
+SETLIST_INPUTS = VERSION_INPUTS - {"suggestion", "picker_pause"}
+COMMANDS = GROUP_INPUTS | VERSION_INPUTS | {"language", "register"}
 SELECTED_INPUTS = frozenset({"edit", "copy", "alias", "archive", "unarchive"})
 
 
@@ -63,16 +62,19 @@ class CommandInputs:
     def write(row: Confirmation, data: dict[str, Any]) -> None:
         row.command = json.dumps(data, ensure_ascii=False)
 
+    async def clear(self) -> None:
+        for old in await self.store.find(Confirmation, user_id=self.user.id, chat_id=self.chat_id):
+            if self.data(old).get("kind") == KIND:
+                await self.store.delete(old)
+
     async def create(
         self, command: str, context: Context | None, prompt: str, *, version: int | None = None
     ) -> Confirmation:
         require(command in COMMANDS, "input")
-        for old in await self.store.find(Confirmation, user_id=self.user.id, chat_id=self.chat_id):
-            if self.data(old).get("kind") == KIND:
-                await self.store.delete(old)
+        await self.clear()
         group_id = context.group_id if context is not None else None
         concert_id = (
-            context.concert_id if context is not None and command in SETLIST_INPUTS else None
+            context.concert_id if context is not None and command in VERSION_INPUTS else None
         )
         selected_id = (
             context.selected_song_id if context is not None and command in SELECTED_INPUTS else None

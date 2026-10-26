@@ -6,7 +6,7 @@ from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.domain.entities import ChatBinding, Concert, SongListTemplate, User, now
-from setlist_bot.domain.rules import require
+from setlist_bot.domain.rules import clock, flat_content, is_pause, require
 
 
 class Templates:
@@ -30,7 +30,11 @@ class Templates:
             concert_id=concert_id,
             chat_id=self.chat_id if chat_id is None else chat_id,
             owner_id=self.user.id if private else None,
-            titles=[i["title"] for b in snapshot["blocks"] for i in b["items"]],
+            titles=[
+                clock(i["duration_seconds"]) if is_pause(i) else i["title"]
+                for b in flat_content(snapshot)["blocks"]
+                for i in b["items"]
+            ],
             expires_at=now() + timedelta(days=30),
             version=version,
             group_epoch=group_epoch,

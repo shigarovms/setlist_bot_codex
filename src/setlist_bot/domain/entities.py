@@ -117,9 +117,10 @@ class Block(Entity):
 class Item(Entity):
     group_id: UUID
     block_id: UUID
-    song_id: UUID
+    song_id: UUID | None
     position: int
     pause_before: int | None = None
+    pause_duration_seconds: int | None = None
 
 
 @dataclass(kw_only=True)

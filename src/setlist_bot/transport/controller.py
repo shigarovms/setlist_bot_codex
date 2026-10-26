@@ -7,7 +7,12 @@ from uuid import UUID
 
 from setlist_bot.application.backup import Backup
 from setlist_bot.application.catalog import SONG_FIELDS, Catalog
-from setlist_bot.application.command_inputs import GROUP_INPUTS, SETLIST_INPUTS, CommandInputs
+from setlist_bot.application.command_inputs import (
+    GROUP_INPUTS,
+    SETLIST_INPUTS,
+    VERSION_INPUTS,
+    CommandInputs,
+)
 from setlist_bot.application.exports import Exports
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.importing import Importer
@@ -39,7 +44,9 @@ from setlist_bot.domain.rules import (
     SongListError,
     clock,
     duration,
+    is_pause,
     normalize,
+    parse_pause,
     require,
     validate_song,
 )
@@ -61,6 +68,8 @@ class Response:
     files: list[tuple[str, bytes]] = field(default_factory=list)
     monospace: bool = False
     suggestion_template_id: UUID | None = None
+    cancel_action: str = ""
+    cancel_label: str = "❌ Отмена"
     force_reply: bool = False
     selection_id: UUID | None = None
     reply_keyboard: list[list[str]] | None = None
@@ -133,6 +142,7 @@ class Controller:
                 item["song_id"]: item["song_version"]
                 for block in snapshot["blocks"]
                 for item in block["items"]
+                if not is_pause(item)
             }
         confirmation = Confirmation(
             user_id=self.user.id,
@@ -143,7 +153,7 @@ class Controller:
         self.store.add(confirmation)
         buttons = [
             (self.t("confirm_button"), f"confirm {confirmation.id}"),
-            (self.t("cancel_button"), "cancel"),
+            (self.t("cancel_button"), f"confirm_cancel {confirmation.id.hex}"),
         ]
         return Response(
             self.t("confirm") + "\n" + preview,
@@ -168,7 +178,69 @@ class Controller:
             if bindings:
                 group = await self.store.get(Group, bindings[0].group_id)
                 self.language = group.language
-        if command in ("slmenu", "slact", "slopt", "slrev", "slreq", "slreturn"):
+        if command in (
+            "block",
+            "break",
+            "encore",
+            "add_encore",
+            "remove_encore_song",
+            "remove_encore",
+            "manage_encore",
+            "encore_pick",
+        ):
+            return Response(self.t("flat_list_only"))
+        if command == "import_cancel":
+            import_rows = await self.store.find(
+                CatalogImport, id=UUID(args), owner_id=self.user.id, chat_id=self.chat_id
+            )
+            require(bool(import_rows) and import_rows[0].status == "pending", "input_expired")
+            import_rows[0].status = "cancelled"
+            return Response(self.t("ok"))
+        if command in ("input_cancel", "confirm_cancel"):
+            rows = await self.store.find(
+                Confirmation, id=UUID(args), user_id=self.user.id, chat_id=self.chat_id
+            )
+            require(bool(rows), "input_expired")
+            row = rows[0]
+            data = json.loads(row.command)
+            require(row.expires_at > now(), "input_expired")
+            require(
+                data.get("kind") == "command_input"
+                if command == "input_cancel"
+                else data.get("kind") is None,
+                "input_expired",
+            )
+            await self.store.delete(row)
+            if data.get("command") == "picker_pause":
+                session = await self.selection.active()
+                require(session is not None, "selection_expired")
+                assert session is not None
+                session, picked = await self.selection.load(session.id)
+                require(picked["stage"] == "pause", "selection_expired")
+                picked["stage"] = "choosing"
+                self.selection.write(session, picked)
+                return self._selection_view(session, picked, keyboard=True)
+            if data.get("command") == "suggestion" and self.private:
+                await self.selection.clear()
+                return await self._show(await self.groups.context(self.chat_id, True))
+            return Response(self.t("ok"))
+        if command == "picker_pause":
+            require(self.private, "private_only")
+            session = await self.selection.active()
+            require(session is not None, "selection_expired")
+            assert session is not None
+            session, picked = await self.selection.load(session.id)
+            require(picked["stage"] == "pause", "selection_expired")
+            seconds = parse_pause(args, bare_seconds=True)
+            require(seconds is not None, "pause_duration")
+            require(len(picked["selected"]) < 200, "song_list_input")
+            picked["selected"].append({"pause_seconds": seconds})
+            picked["stage"] = "choosing"
+            self.selection.write(session, picked)
+            response = self._selection_view(session, picked, keyboard=True)
+            response.delete_input = True
+            return response
+        if command in ("slmenu", "slact", "slopt", "slrev", "slreq", "slreturn", "sldraft"):
             return await self._menu_action(command, args)
         if command in ("pick_start", "pick_text", "pick_confirm", "pick_cancel"):
             require(self.private, "private_only")
@@ -678,111 +750,15 @@ class Controller:
         require(context.observed_version is not None, "view_first")
         expected = context.observed_version
         assert expected is not None
-        if command in ("add_encore", "remove_encore_song", "remove_encore", "manage_encore"):
-            if command == "manage_encore":
-                identifier, raw_version, action = args.split()
-                require(UUID(identifier) == concert_id, "confirmation")
-                require(int(raw_version) == expected, "conflict")
-                require(action in ("add", "remove", "drop"), "input")
-                command = {
-                    "add": "add_encore",
-                    "remove": "remove_encore_song",
-                    "drop": "remove_encore",
-                }[action]
-                args = ""
-            snapshot, version, approved = await self.setlists.read(
-                group_id, concert_id, private=self.private
-            )
-            require(version == expected, "conflict")
-            require(not approved, "approved")
-            enc_blocks = [
-                i
-                for i, block_data in enumerate(snapshot["blocks"], 1)
-                if block_data["kind"] == "encore"
-            ]
-            require(len(enc_blocks) == 1, "encore_missing")
-            enc_block = enc_blocks[0]
-            if not args and command in ("add_encore", "remove_encore_song"):
-                return await self._request_input(command, context)
-            if command == "add_encore":
-                if args:
-                    try:
-                        await self.setlists.edit_songs(
-                            group_id,
-                            concert_id,
-                            expected,
-                            [line.strip() for line in args.splitlines() if line.strip()],
-                            block=enc_block,
-                            private=self.private,
-                        )
-                    except SongListError as exc:
-                        return self._song_list_errors(exc)
-                    return await self._show(context)
-                return Response(
-                    self.t("encore_add_prompt"),
-                    [
-                        (song_card(song).splitlines()[0], f"offer_add {song.id.hex} {enc_block}")
-                        for song in await self.catalog.list_songs(group_id)
-                    ],
-                )
-            if command == "remove_encore_song" and not args:
-                return Response(
-                    self.t("encore_remove_prompt"),
-                    [
-                        (
-                            f"{pos}. {item['title']}",
-                            f"encore_pick {concert_id.hex} {expected} {pos}",
-                        )
-                        for pos, item in enumerate(snapshot["blocks"][enc_block - 1]["items"], 1)
-                    ],
-                )
-            if command == "remove_encore_song":
-                pos = int(args)
-                require(
-                    1 <= pos <= len(snapshot["blocks"][enc_block - 1]["items"]), "setlist_input"
-                )
-                operation, encore_values = "remove", f"{enc_block} {pos}"
-            else:
-                operation, encore_values = "remove_block", str(enc_block)
-            return await self.confirm(
-                context,
-                f"edit_list {operation} {expected} {encore_values}",
-                self.t(
-                    "encore_private_drop_preview"
-                    if self.private
-                    else (
-                        "encore_drop_preview"
-                        if command == "remove_encore"
-                        else "encore_song_drop_preview"
-                    )
-                )
-                + "\n"
-                + render_setlist(
-                    snapshot,
-                    await self.store.get(Concert, concert_id),
-                    self.language,
-                    version,
-                    private=self.private,
-                ),
-                concert=True,
-                monospace=True,
-            )
-        if command == "encore_pick":
-            identifier, raw_version, position = args.split()
-            require(UUID(identifier) == concert_id and int(raw_version) == expected, "confirmation")
-            return await self.execute(f"remove_encore_song {position}")
         if command == "suggestion" and not args:
             shown = await self._show(context)
             require(shown.suggestion_template_id is not None, "approved")
             assert shown.suggestion_template_id is not None
             return await self._suggestion_prompt(shown.suggestion_template_id)
-        if command == "suggestion" or (command == "add" and "\n" in message[len(head) :]):
+        if command == "suggestion" or (
+            command == "add" and ("\n" in message[len(head) :] or parse_pause(args) is not None)
+        ):
             body = args
-            batch_block = 1
-            inline = message[len(head) :].split("\n", 1)[0].strip()
-            if command == "add" and inline.isdecimal():
-                batch_block = int(inline)
-                body = message[len(head) :].split("\n", 1)[1]
             titles = [line.strip() for line in body.splitlines() if line.strip()]
             try:
                 await self.setlists.edit_songs(
@@ -791,7 +767,6 @@ class Controller:
                     expected,
                     titles,
                     replace=command == "suggestion",
-                    block=batch_block,
                     private=self.private,
                 )
             except SongListError as exc:
@@ -815,15 +790,6 @@ class Controller:
             )
             response.keyboard_text = self.t("selection_keyboard_closed")
             return response
-        if command == "encore":
-            if args:
-                identifier, raw_version = args.split()
-                require(UUID(identifier) == concert_id, "confirmation")
-                expected = int(raw_version)
-            await self.setlists.edit(
-                group_id, concert_id, expected, "encore", [self.t("encore")], private=self.private
-            )
-            return await self._show(context)
         if command == "offer_add":
             values = args.split()
             target = await self.catalog.song(group_id, UUID(values[0]))
@@ -836,19 +802,19 @@ class Controller:
                 preview,
                 concert=True,
             )
-        if command in ("add", "move", "block", "pause", "break", "remove"):
+        if command in ("add", "move", "pause", "remove"):
             values = args.split()
             operation = command
             if command == "pause" and len(values) == 1:
                 operation = "default_pause"
-            elif command == "pause" and len(values) == 2:
+            elif command in ("move", "remove", "pause"):
                 values.insert(0, "1")
             if command == "add":
                 require("|" not in args, "field_separator")
                 fields = command_fields(args, maxsplit=1)
                 selector = fields[0]
-                block = fields[1] if len(fields) == 2 else "1"
-                require(block.isdigit() and 1 <= int(block) <= 20, "setlist_input")
+                require(len(fields) == 1, "setlist_input")
+                block = "1"
                 try:
                     legacy_song_id = UUID(values[0]) if values else None
                 except ValueError:
@@ -873,14 +839,14 @@ class Controller:
                         )
                     values = [block, str(songs[0].id)]
             lengths = {"add": 2, "move": 3, "pause": 3, "default_pause": 1, "break": 2, "remove": 2}
-            require(command == "block" or len(values) == lengths[operation], "setlist_input")
+            require(len(values) == lengths[operation], "setlist_input")
             if command == "remove" and not confirmed:
                 snapshot, version, approved = await self.setlists.read(
                     group_id, concert_id, private=self.private
                 )
                 return await self.confirm(
                     context,
-                    f"edit_list {command} {expected} {args}",
+                    f"edit_list {command} {expected} {' '.join(values)}",
                     render_setlist(
                         snapshot,
                         await self.store.get(Concert, concert_id),
@@ -1150,7 +1116,7 @@ class Controller:
         if context is not None and context.group_id is not None:
             group = await self.store.get(Group, context.group_id)
             prefix = group.name + "\n"
-            if command in SETLIST_INPUTS:
+            if command in VERSION_INPUTS:
                 require(context.concert_id is not None, "select_concert")
                 assert context.concert_id is not None
                 snapshot, version, approved = await self.setlists.read(
@@ -1162,14 +1128,6 @@ class Controller:
                 concert = await self.store.get(Concert, context.concert_id)
                 prefix += concert_label(concert) + "\n"
                 context.observed_version = version
-                if command in ("add_encore", "remove_encore_song"):
-                    encore = [b for b in snapshot["blocks"] if b["kind"] == "encore"]
-                    require(len(encore) == 1, "encore_missing")
-                    if command == "remove_encore_song":
-                        require(bool(encore[0]["items"]), "empty_setlist")
-                        detail += "\n" + "\n".join(
-                            f"{i}. {item['title']}" for i, item in enumerate(encore[0]["items"], 1)
-                        )
             if command in ("edit", "copy", "alias") and context.selected_song_id is not None:
                 song = await self.catalog.song(context.group_id, context.selected_song_id)
                 detail = self.t(
@@ -1189,7 +1147,13 @@ class Controller:
             + self.t("input_cancel")
         )
         row = await self.inputs.create(command, context, prompt, version=version)
-        return Response(prompt, force_reply=True, command_input_id=row.id)
+        return Response(
+            prompt,
+            force_reply=True,
+            command_input_id=row.id,
+            cancel_action=f"input_cancel {row.id.hex}",
+            cancel_label=self.t("cancel_button"),
+        )
 
     async def command_input(self, row: Confirmation, value: str) -> Response:
         target = self.inputs.data(row)
@@ -1218,13 +1182,21 @@ class Controller:
                 response.deliveries.append(
                     (
                         self.chat_id,
-                        Response(data["prompt"], force_reply=True, command_input_id=row.id),
+                        Response(
+                            data["prompt"],
+                            force_reply=True,
+                            command_input_id=row.id,
+                            cancel_action=f"input_cancel {row.id.hex}",
+                            cancel_label=self.t("cancel_button"),
+                        ),
                     )
                 )
             else:
                 response.text += "\n\n" + data["prompt"]
                 response.force_reply = True
                 response.command_input_id = row.id
+                response.cancel_action = f"input_cancel {row.id.hex}"
+                response.cancel_label = self.t("cancel_button")
         else:
             await self.store.delete(row)
         return response
@@ -1252,6 +1224,7 @@ class Controller:
         if template.titles:
             text += "\n\n" + "\n".join(template.titles)
         if self.private:
+            await self.inputs.clear()
             previous = await self.selection.active()
             previous_data = self.selection.data(previous) if previous else {}
             session = await self.selection.create(
@@ -1262,6 +1235,7 @@ class Controller:
                 [
                     (self.t("selection_text_button"), f"pick_text {session.id.hex}"),
                     (self.t("selection_pick_button"), f"pick_start {session.id.hex}"),
+                    (self.t("cancel_button"), f"pick_cancel {session.id.hex}"),
                 ],
                 suggestion_template_id=template_id,
                 selection_id=session.id,
@@ -1269,13 +1243,22 @@ class Controller:
                 keyboard_text=self.t("selection_keyboard_closed"),
                 previous_keyboard_id=previous_data.get("keyboard_message_id"),
             )
-        return Response(text, suggestion_template_id=template_id, force_reply=True)
+        row = await self.inputs.create("suggestion", context, text, version=version)
+        return Response(
+            text,
+            force_reply=True,
+            command_input_id=row.id,
+            cancel_action=f"input_cancel {row.id.hex}",
+            cancel_label=self.t("cancel_button"),
+        )
 
     def _group_name_prompt(self, session: Confirmation, *, invalid: bool = False) -> Response:
         return Response(
             (self.t("group_name") + "\n\n" if invalid else "") + self.t("group_creation_prompt"),
             force_reply=True,
             group_creation_id=session.id,
+            cancel_action=f"group_create_cancel {session.id.hex}",
+            cancel_label=self.t("cancel_button"),
         )
 
     async def group_name_input(self, session: Confirmation, value: str) -> Response:
@@ -1300,10 +1283,19 @@ class Controller:
         self, session: Confirmation, data: dict[str, Any], *, keyboard: bool = False
     ) -> Response:
         roster = {s["id"]: s for s in data["songs"]}
-        titles = [roster[i]["title"] for i in data["selected"]]
+        titles = [
+            clock(i["pause_seconds"]) if isinstance(i, dict) else roster[i]["title"]
+            for i in data["selected"]
+        ]
         reviewing = data["stage"] == "review"
+        live_titles = [
+            ("пауза " if self.language == "ru" else "pause ") + title
+            if isinstance(entry, dict)
+            else title
+            for entry, title in zip(data["selected"], titles, strict=True)
+        ]
         body = "\n".join(
-            titles if reviewing else [f"{i}. {title}" for i, title in enumerate(titles, 1)]
+            titles if reviewing else [f"{i}. {title}" for i, title in enumerate(live_titles, 1)]
         )
         response = Response(
             self.t("selection_title")
@@ -1326,7 +1318,7 @@ class Controller:
         elif keyboard:
             start = data["page"] * PAGE_SIZE
             labels = [s["label"] for s in data["songs"][start : start + PAGE_SIZE]]
-            rows = [[self.t("selection_finish")]]
+            rows = [[self.t("selection_finish"), self.t("selection_pause")]]
             rows += [labels[i : i + 2] for i in range(0, len(labels), 2)]
             navigation = []
             if data["page"]:
@@ -1335,6 +1327,7 @@ class Controller:
                 navigation.append(self.t("selection_next"))
             if navigation:
                 rows.append(navigation)
+            rows.append([self.t("selection_cancel")])
             response.reply_keyboard = rows
             response.keyboard_text = self.t(
                 "selection_page",
@@ -1360,6 +1353,7 @@ class Controller:
                 "selection_expired",
             )
             await self.store.delete(session)
+            await self.inputs.clear()
             context = await self.groups.context(self.chat_id, True)
             was_choosing = data["stage"] == "choosing"
             response = Response(self.t("selection_cancelled"), remove_keyboard=was_choosing)
@@ -1367,10 +1361,7 @@ class Controller:
                 if context.group_id == UUID(data["group_id"]) and context.concert_id == UUID(
                     data["concert_id"]
                 ):
-                    # Fresh prompt with the current version, not the cancelled snapshot.
-                    shown = await self._show(context)
-                    assert shown.suggestion_template_id is not None
-                    response = await self._suggestion_prompt(shown.suggestion_template_id)
+                    response = await self._show(context)
                     response.text = self.t("selection_cancelled") + "\n\n" + response.text
                     response.remove_keyboard = was_choosing
             except AppError:
@@ -1386,12 +1377,16 @@ class Controller:
             require(data["stage"] == "method", "selection_expired")
             data["stage"] = "text"
             self.selection.write(session, data)
-            template_id = UUID(data["template_id"])
+            context = await self.groups.context(self.chat_id, True)
+            prompt = self.t("suggestion_prompt") + "\n" + self.t("suggestion_private")
+            row = await self.inputs.create("suggestion", context, prompt, version=data["version"])
             return Response(
-                self.t("suggestion_prompt") + "\n" + self.t("suggestion_private"),
-                suggestion_template_id=template_id,
+                prompt,
                 force_reply=True,
+                command_input_id=row.id,
                 selection_id=session.id,
+                cancel_action=f"input_cancel {row.id.hex}",
+                cancel_label=self.t("cancel_button"),
             )
         await self.selection.save(identifier)
         context = await self.groups.context(self.chat_id, True)
@@ -1417,6 +1412,22 @@ class Controller:
         ):
             return None
         keyboard = False
+        if value == self.t("selection_cancel"):
+            response = await self._selection_action("pick_cancel", session.id)
+            response.delete_input = True
+            return response
+        if value == self.t("selection_pause"):
+            require(len(data["selected"]) < 200, "song_list_input")
+            data["stage"] = "pause"
+            self.selection.write(session, data)
+            context = await self.groups.context(self.chat_id, True)
+            response = await self._request_input("picker_pause", context)
+            response.selection_id = session.id
+            response.remove_keyboard = True
+            response.previous_keyboard_id = data["keyboard_message_id"]
+            response.keyboard_text = self.t("selection_pause_prompt")
+            response.delete_input = True
+            return response
         if value == self.t("selection_finish"):
             require(bool(data["selected"]), "empty_setlist")
             data["stage"] = "review"
@@ -1530,7 +1541,7 @@ class Controller:
         else:
             if not plan.new and not plan.errors and not plan.parsed.error:
                 preview += "\n" + self.t("import_none")
-            response = Response(preview, [(self.t("cancel_button"), "cancel")])
+            response = Response(preview, [(self.t("cancel_button"), f"import_cancel {job.id.hex}")])
         response.buttons.insert(-1, (self.t("import_map"), f"map_start {job.id.hex}"))
         response.input_rejected = bool(plan.errors or plan.parsed.error)
         return response
@@ -1549,6 +1560,7 @@ class Controller:
             buttons.append((f"{index + 1}. {label[:60]}", f"map_col {job.id.hex} {step} {index}"))
         if step > 1:
             buttons.append((self.t("import_skip"), f"map_col {job.id.hex} {step} -1"))
+        buttons.append((self.t("cancel_button"), f"import_cancel {job.id.hex}"))
         return Response(
             self.t("import_column_prompt", field=self.t("import_field_" + FIELDS[step])), buttons
         )
@@ -1588,6 +1600,12 @@ class Controller:
                         f"slact {key} {'reopen' if data['approved'] else 'approve'}",
                     )
                 )
+            if data["personal"]:
+                buttons = [
+                    (self.t("draft_publish"), f"sldraft {key} publish"),
+                    (self.t("draft_edit"), proposal),
+                    (self.t("menu_options"), f"slmenu {key} options"),
+                ]
             return buttons
         variants = (
             []
@@ -1691,6 +1709,11 @@ class Controller:
             )
             return response
         row, data = await self.menus.load(identifier, self.source_message_id)
+        if command == "sldraft":
+            require(data["personal"] and self.private and values[1] == "publish", "private_only")
+            await self.menus.validate(data, fresh=True)
+            await self._card_context(data)
+            return await self.execute("publish")
         if command == "slmenu":
             return Response(
                 "",
@@ -1862,18 +1885,6 @@ class Controller:
             approved=approved,
             back="shared" if shared else "setlist",
         )
-        if not shared and not approved:
-            if any(block["kind"] == "encore" for block in snapshot["blocks"]):
-                for label, action in (
-                    ("encore_add_button", "add"),
-                    ("encore_remove_song_button", "remove"),
-                    ("encore_drop_button", "drop"),
-                ):
-                    buttons.append(
-                        (self.t(label), f"manage_encore {concert.id.hex} {version} {action}")
-                    )
-            else:
-                buttons.append((self.t("add_encore"), f"encore {concert.id.hex} {version}"))
         text = (
             group.name
             + "\n"

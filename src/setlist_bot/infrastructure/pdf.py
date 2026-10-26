@@ -15,7 +15,6 @@ from reportlab.platypus import (
     Flowable,
     KeepTogether,
     LongTable,
-    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -24,7 +23,7 @@ from reportlab.platypus import (
 from unidecode import unidecode
 
 from setlist_bot.application.exports import Audience
-from setlist_bot.domain.rules import clock, pause_content, totals
+from setlist_bot.domain.rules import clock, flat_content, is_pause, totals
 from setlist_bot.transport.i18n import tr
 
 FONT = "SetlistNoto"
@@ -83,7 +82,7 @@ class PdfDocuments:
             title=f"{payload['group_name']} — {payload['concert_date']} — v{payload['version']}",
             author="Setlist Bot",
         )
-        snapshot = pause_content(payload["snapshot"])
+        snapshot = flat_content(payload["snapshot"])
         story = (
             self._musicians(snapshot, language, transliterate)
             if audience == "musicians"
@@ -127,40 +126,17 @@ class PdfDocuments:
             text = text[:-1]
         return text + "…"
 
-    @staticmethod
-    def _block_title(block: dict[str, Any], number: int, language: str) -> str:
-        if block["kind"] == "encore":
-            return tr(language, "encore")
-        return block["title"] or tr(language, "block_title", number=number)
-
     def _musicians(
         self, snapshot: dict[str, Any], language: str, transliterate: bool
     ) -> list[Flowable]:
         story: list[Flowable] = []
-        blocks = snapshot["blocks"]
-        multiple = len(blocks) > 1
-        for number, block in enumerate(blocks, 1):
-            if not block["items"]:
-                continue
-            if story:
-                story.append(PageBreak())
-            if multiple or block["title"]:
-                heading = paragraph(self._block_title(block, number, language), 28, bold=True)
-                heading.keepWithNext = True
-                story += [heading, Spacer(1, 18)]
-            for position, item in enumerate(block["items"], 1):
-                prefix = f"{number}.{position}" if multiple else str(position)
-                title = " ".join(title_text(item["title"], transliterate).split())
-                # Keep an entire song together when it fits on one page. Extremely long
-                # titles may span pages, keeping the same 52 pt size and all their words.
-                story.append(
-                    KeepTogether(
-                        [
-                            paragraph(f"{prefix}. {title}", 52, bold=True),
-                            Spacer(1, 22),
-                        ]
-                    )
-                )
+        for position, item in enumerate(snapshot["blocks"][0]["items"], 1):
+            title = " ".join(title_text(item["title"], transliterate).split())
+            if is_pause(item):
+                title += "  " + clock(item["duration_seconds"])
+            story.append(
+                KeepTogether([paragraph(f"{position}. {title}", 52, bold=True), Spacer(1, 22)])
+            )
         return story
 
     def _lights(
@@ -168,12 +144,9 @@ class PdfDocuments:
     ) -> list[Flowable]:
         story: list[Flowable] = []
         blocks = snapshot["blocks"]
-        block_times, net, total = totals(snapshot)
+        _, _, total = totals(snapshot)
         columns = (32, 170, 65, 45, 215, width - 527)
         for number, block in enumerate(blocks, 1):
-            heading = paragraph(self._block_title(block, number, language), 20, bold=True)
-            heading.keepWithNext = True
-            story += [heading, Spacer(1, 10)]
             rows = [
                 [
                     paragraph(tr(language, "pdf_col_" + name), 13, bold=True)
@@ -217,30 +190,8 @@ class PdfDocuments:
                     ]
                 )
             )
-            story += [
-                table,
-                Spacer(1, 10),
-                paragraph(
-                    tr(language, "block_duration", time=clock(block_times[number - 1])),
-                    14,
-                    bold=True,
-                ),
-            ]
-            if number < len(blocks) and block["break_seconds"]:
-                story += [
-                    Spacer(1, 8),
-                    paragraph(
-                        tr(language, "block_break", time=clock(block["break_seconds"])),
-                        16,
-                        bold=True,
-                    ),
-                ]
-            story.append(Spacer(1, 22))
-        summary: list[Flowable] = [
-            paragraph(tr(language, "timing_net", time=clock(net)), 17, bold=True)
-        ]
-        if total > net:
-            summary.append(paragraph(tr(language, "timing_breaks", time=clock(total - net)), 16))
+            story += [table, Spacer(1, 22)]
+        summary: list[Flowable] = []
         summary += [
             paragraph(tr(language, "timing_total", time=clock(total)), 20, bold=True),
             Spacer(1, 8),
