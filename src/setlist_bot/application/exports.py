@@ -37,6 +37,7 @@ class Exports:
         private: bool,
         back: str,
     ) -> ExportSnapshot:
+        require(approved, "export_approved_only")
         group = await Groups(self.store, self.user).access(group_id)
         await Setlists(self.store, self.user).load(group_id, concert_id)
         concert = await self.store.get(Concert, concert_id)
@@ -68,6 +69,7 @@ class Exports:
         require(export.chat_id == self.chat_id, "not_found")
         require(export.owner_id is None or export.owner_id == self.user.id, "not_found")
         require(export.expires_at > now(), "export_expired")
+        require(export.payload.get("approved") is True, "export_approved_only")
         group = await Groups(self.store, self.user).access(export.group_id)
         await Setlists(self.store, self.user).load(export.group_id, export.concert_id)
         concert = await self.store.get(Concert, export.concert_id)

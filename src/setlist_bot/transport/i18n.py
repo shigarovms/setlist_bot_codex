@@ -37,7 +37,7 @@ MESSAGES = {
             "Стандартные паузы учитываются в итогах и не показываются перед песнями.\n"
             "\n"
             "В личном черновике — «Предложить этот вариант», «Изменить», «⚙️ Опции». В группе — предложение, опции, утверждение.\n"
-            "Экспорт: /export — PDF для музыкантов, световика или оба файла.\n"
+            "Экспорт утверждённого сет-листа: /export — PDF для музыкантов, световика или оба файла.\n"
             "Утвердить: /approve; вернуть в работу: /reopen (администратор).\n"
             "Участник кнопками запрашивает у администратора утверждение или редактирование.\n"
             "История и восстановление: /history, /versions.\n"
@@ -102,6 +102,7 @@ MESSAGES = {
         "export_latin_off": "Транслитерация: выключена",
         "export_ready": "PDF готовы к печати на А4.",
         "export_expired": "Срок действия экспорта истёк. Откройте нужный сет-лист и нажмите «Экспорт» заново.",
+        "export_approved_only": "Экспорт доступен только для утверждённого сет-листа.",
         "export_empty": "Сет-лист пуст. Добавьте песни перед экспортом.",
         "back_button": "Назад",
         "pdf_musicians": "Для музыкантов",
@@ -116,7 +117,7 @@ MESSAGES = {
         "pdf_col_lights": "Свет",
         "pdf_col_comment": "Комментарий",
         "suggestion_prompt": "Какой вариант вы предлагаете? Ответьте на это сообщение списком песен — по одному названию на строку.",
-        "suggestion_private": "Это изменит только ваш личный черновик. Для публикации используйте /publish.",
+        "suggestion_private": "Это изменит только ваш личный черновик.",
         "selection_method": "Выберите способ ввода. Можно сразу отправить список песен одним сообщением или вставить его из буфера обмена.",
         "selection_text_button": "📝 Ввести списком",
         "selection_pick_button": "🎵 Выбрать песни",
@@ -127,7 +128,7 @@ MESSAGES = {
         "selection_prev": "◀️ Назад",
         "selection_next": "Вперёд ▶️",
         "selection_page": "Выберите песни · страница {page}/{pages}. Порядок нажатий сохраняется, повторы разрешены. /cancel — отмена; другая команда завершит режим выбора без сохранения.",
-        "selection_review": "Выбор завершён. Подтвердите список ниже или отмените ввод. Это сохранение личного черновика, без публикации группе.",
+        "selection_review": "Выбор завершён. Подтвердите список выше или отмените ввод. Это сохранение личного черновика, без публикации группе.",
         "selection_confirm": "✅ Подтвердить",
         "selection_cancel": "❌ Отменить",
         "selection_cancelled": "Ввод отменён. Сохранённый черновик не изменён.",
@@ -333,7 +334,7 @@ MESSAGES = {
             "Inherited pauses count in totals but are hidden before songs.\n"
             "\n"
             "Personal drafts show “Propose this variant”, “Edit”, “⚙️ Options”. Group lists show proposal, options, approval.\n"
-            "Export: /export — PDF for musicians, lighting, or both files.\n"
+            "Approved setlist export: /export — PDF for musicians, lighting, or both files.\n"
             "Approve: /approve; reopen: /reopen (administrator).\n"
             "Members can request approval or reopening from the administrator using buttons.\n"
             "History and restoration: /history, /versions.\n"
@@ -398,6 +399,7 @@ MESSAGES = {
         "export_latin_off": "Transliteration: off",
         "export_ready": "PDFs are ready to print on A4.",
         "export_expired": "This export has expired. Open the setlist and press Export again.",
+        "export_approved_only": "Export is only available for approved setlists.",
         "export_empty": "The setlist is empty. Add songs before exporting.",
         "back_button": "Back",
         "pdf_musicians": "For musicians",
@@ -412,7 +414,7 @@ MESSAGES = {
         "pdf_col_lights": "Lights",
         "pdf_col_comment": "Comment",
         "suggestion_prompt": "What variant do you propose? Reply to this message with one song title per line.",
-        "suggestion_private": "This only changes your personal draft. Use /publish to share it.",
+        "suggestion_private": "This only changes your personal draft.",
         "selection_method": "Choose an input method. You can also send or paste a multiline song list immediately.",
         "selection_text_button": "📝 Enter a list",
         "selection_pick_button": "🎵 Choose songs",
@@ -423,7 +425,7 @@ MESSAGES = {
         "selection_prev": "◀️ Back",
         "selection_next": "Next ▶️",
         "selection_page": "Choose songs · page {page}/{pages}. Tap order is preserved; repeats are allowed. /cancel discards input; another command exits without saving.",
-        "selection_review": "Selection finished. Confirm the list below or cancel input. This only saves your private draft, without publishing it.",
+        "selection_review": "Selection finished. Confirm the list above or cancel input. This only saves your private draft, without publishing it.",
         "selection_confirm": "✅ Confirm",
         "selection_cancel": "❌ Cancel",
         "selection_cancelled": "Input cancelled. Your saved draft is unchanged.",

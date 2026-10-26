@@ -79,6 +79,8 @@ class Response:
     previous_keyboard_id: int | None = None
     edit_message_ids: list[int] = field(default_factory=list)
     delete_input: bool = False
+    delete_message_ids: list[int] = field(default_factory=list)
+    auxiliary_message_ids: list[int] = field(default_factory=list)
     button_columns: int = 1
     group_creation_id: UUID | None = None
     command_input_id: UUID | None = None
@@ -219,7 +221,9 @@ class Controller:
                 require(picked["stage"] == "pause", "selection_expired")
                 picked["stage"] = "choosing"
                 self.selection.write(session, picked)
-                return self._selection_view(session, picked, keyboard=True)
+                response = self._selection_view(session, picked, keyboard=True)
+                response.delete_message_ids = list(data.get("transient_message_ids", []))
+                return response
             if data.get("command") == "suggestion" and self.private:
                 await self.selection.clear()
                 return await self._show(await self.groups.context(self.chat_id, True))
@@ -323,17 +327,25 @@ class Controller:
             )
             return Response(self.t("concert_restored", name=concert_label(restored_concert)))
         if command == "cancel":
+            cleanup = []
             for item in await self.store.find(
                 Confirmation, user_id=self.user.id, chat_id=self.chat_id
             ):
-                if json.loads(item.command).get("kind") in (CARD, REQUEST):
+                pending = json.loads(item.command)
+                if pending.get("kind") in (CARD, REQUEST):
                     continue
+                if (
+                    self.private
+                    and pending.get("kind") == "command_input"
+                    and pending.get("command") == "picker_pause"
+                ):
+                    cleanup.extend(pending.get("transient_message_ids", []))
                 await self.store.delete(item)
             for job in await self.store.find(
                 CatalogImport, owner_id=self.user.id, chat_id=self.chat_id, status="pending"
             ):
                 job.status = "cancelled"
-            return Response(self.t("ok"))
+            return Response(self.t("ok"), delete_message_ids=cleanup)
         if command == "group":
             require(not self.private, "group_only")
             await self.groups.check_creation_chat(self.chat_id)
@@ -676,19 +688,22 @@ class Controller:
             context.concert_id = UUID(args)
             context.observed_version = None
             return await self._show(context)
+        if command == "apply_submission":
+            require(not self.private, "group_only")
+            submitted = await self.store.get(Submission, UUID(args))
+            require(submitted.group_id == group_id, "not_found")
+            require(not submitted.applied, "already_done")
+            context.concert_id = submitted.concert_id
+            _, context.observed_version, approved = await self.setlists.read(
+                group_id, submitted.concert_id
+            )
+            require(not approved, "approved")
+            return await self.execute(f"apply {submitted.id}")
         if command == "view_submission":
             submission = await self.store.get(Submission, UUID(args))
             require(submission.group_id == group_id, "not_found")
             context.concert_id = submission.concert_id
             await self._show(context)
-            export_buttons = await self._export_buttons(
-                group_id,
-                submission.concert_id,
-                submission.snapshot,
-                0,
-                approved=False,
-                back=f"view_submission {submission.id}",
-            )
             return Response(
                 render_setlist(
                     submission.snapshot,
@@ -700,8 +715,7 @@ class Controller:
                     [(self.t("submission_apply"), f"apply {submission.id}")]
                     if not self.private
                     else []
-                )
-                + export_buttons,
+                ),
                 monospace=True,
             )
         require(context.concert_id is not None, "select_concert")
@@ -731,8 +745,9 @@ class Controller:
             return await self._show(context, shared=command == "shared")
         if command == "export":
             snapshot, version, approved = await self.setlists.read(
-                group_id, concert_id, private=self.private
+                group_id, concert_id, private=False
             )
+            require(approved, "export_approved_only")
             export = await self.exports.create(
                 group_id,
                 concert_id,
@@ -740,7 +755,7 @@ class Controller:
                 version,
                 approved=approved,
                 private=self.private,
-                back="setlist",
+                back="shared" if self.private else "setlist",
             )
             return self._export_menu(export.id, export.payload, export.payload["language"], False)
         if command == "pause" and not args:
@@ -1003,17 +1018,6 @@ class Controller:
                     private=True,
                 )
             )
-            export_buttons = await self._export_buttons(
-                group_id,
-                concert_id,
-                snapshot,
-                version,
-                approved=False,
-                back=f"view_submission {submission.id}",
-                chat_id=bindings[0].chat_id,
-                private=False,
-                language=group.language,
-            )
             self.store.add(
                 Outbox(
                     chat_id=bindings[0].chat_id,
@@ -1022,9 +1026,11 @@ class Controller:
                     concert_id=concert_id,
                     monospace=True,
                     buttons=[
-                        [tr(group.language, "submission_open"), f"view_submission {submission.id}"]
-                    ]
-                    + [list(button) for button in export_buttons],
+                        [
+                            tr(group.language, "submission_apply"),
+                            f"apply_submission {submission.id}",
+                        ]
+                    ],
                 )
             )
             return Response(self.t("published"))
@@ -1054,7 +1060,7 @@ class Controller:
         private: bool | None = None,
         language: str | None = None,
     ) -> list[tuple[str, str]]:
-        if not any(block["items"] for block in snapshot["blocks"]):
+        if not approved or not any(block["items"] for block in snapshot["blocks"]):
             return []
         service = self.exports if chat_id is None else Exports(self.store, self.user, chat_id)
         export = await service.create(
@@ -1198,6 +1204,8 @@ class Controller:
                 response.cancel_action = f"input_cancel {row.id.hex}"
                 response.cancel_label = self.t("cancel_button")
         else:
+            if self.private and data["command"] == "picker_pause":
+                response.delete_message_ids.extend(data.get("transient_message_ids", []))
             await self.store.delete(row)
         return response
 
@@ -1353,6 +1361,16 @@ class Controller:
                 "selection_expired",
             )
             await self.store.delete(session)
+            pending_cleanup = []
+            for pending_input in await self.store.find(
+                Confirmation, user_id=self.user.id, chat_id=self.chat_id
+            ):
+                input_data = self.inputs.data(pending_input)
+                if (
+                    input_data.get("kind") == "command_input"
+                    and input_data.get("command") == "picker_pause"
+                ):
+                    pending_cleanup.extend(input_data.get("transient_message_ids", []))
             await self.inputs.clear()
             context = await self.groups.context(self.chat_id, True)
             was_choosing = data["stage"] == "choosing"
@@ -1368,6 +1386,7 @@ class Controller:
                 pass
             response.previous_keyboard_id = data["keyboard_message_id"]
             response.keyboard_text = self.t("selection_keyboard_closed")
+            response.delete_message_ids.extend(pending_cleanup)
             return response
         if action == "pick_start":
             session, data = await self.selection.start(identifier)
@@ -1621,7 +1640,8 @@ class Controller:
         if level == "options":
             buttons = [
                 (label, f"slopt {key} {i}")
-                for i, (label, _) in enumerate(await self._card_options(data))
+                for i, (label, action) in enumerate(await self._card_options(data))
+                if data["approved"] or not action.startswith("export_menu ")
             ]
             if variants:
                 buttons.append((self.t("menu_variants"), f"slmenu {key} variants"))

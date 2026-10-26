@@ -214,7 +214,14 @@ class Processor:
                         response.command_input_id = sessions[0].id
                         response.cancel_action = f"input_cancel {sessions[0].id.hex}"
                         response.cancel_label = tr(controller.language, "cancel_button")
+                        if private and data.get("command") == "picker_pause":
+                            response.delete_input = True
                     elif sessions:
+                        data = CommandInputs.data(sessions[0])
+                        if private and data.get("command") == "picker_pause":
+                            response.delete_message_ids.extend(
+                                data.get("transient_message_ids", [])
+                            )
                         await uow.store.delete(sessions[0])
                 if is_callback and command.split(maxsplit=1)[0] in (
                     "slmenu",
@@ -265,7 +272,17 @@ class Processor:
                 if rows:
                     data = CommandInputs.data(rows[0])
                     if data.get("kind") == "command_input":
-                        CommandInputs.write(rows[0], {**data, "prompt_id": messages[-1].message_id})
+                        data["prompt_id"] = messages[-1].message_id
+                        if data.get("private") and data.get("command") == "picker_pause":
+                            identifiers = [
+                                *data.get("transient_message_ids", []),
+                                *[m.message_id for m in messages],
+                                *response.auxiliary_message_ids,
+                            ]
+                            if response.keyboard_message_id is not None:
+                                identifiers.append(response.keyboard_message_id)
+                            data["transient_message_ids"] = list(dict.fromkeys(identifiers))
+                        CommandInputs.write(rows[0], data)
             if response.menu_card_id is not None and messages:
                 cards = await uow.store.find(
                     Confirmation, id=response.menu_card_id, chat_id=chat_id
@@ -443,9 +460,14 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
     if response.force_reply and response.cancel_action:
         controls = [(response.cancel_label, response.cancel_action)]
         async for cancel_markup in keyboards(controls):
-            await bot.send_message(chat_id, response.cancel_label, reply_markup=cancel_markup)
+            control = await bot.send_message(
+                chat_id, response.cancel_label, reply_markup=cancel_markup
+            )
+            response.auxiliary_message_ids.append(control.message_id)
     for filename, data in response.files:
         await bot.send_document(chat_id, BufferedInputFile(data, filename=filename))
+    for identifier in dict.fromkeys(response.delete_message_ids):
+        await delete_selection_message(bot, chat_id, identifier)
     return messages
 
 
