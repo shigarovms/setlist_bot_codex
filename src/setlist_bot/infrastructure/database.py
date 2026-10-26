@@ -68,6 +68,7 @@ table(
     col("telegram_id", BigInteger, unique=True),
     col("language", String(2)),
     col("display_name", String(200)),
+    col("export_settings", JSONB, server_default=text("'{}'::jsonb")),
 )
 table(
     e.Group,
@@ -113,6 +114,7 @@ table(
     e.Song,
     "songs",
     tenant(),
+    col("created_at", DateTime(timezone=True), server_default=text("now()")),
     col("title", String(200)),
     col("duration_seconds", Integer),
     col("bpm", Integer, nullable=True),
@@ -150,6 +152,14 @@ table(
     tenant(),
     col("date", Date),
     col("title", String(200)),
+    col("performance_duration_seconds", Integer, nullable=True),
+    col("city", String(200), server_default=""),
+    col("extra_info", Text, server_default=""),
+    col("metadata_version", Integer, server_default="0"),
+    CheckConstraint(
+        "performance_duration_seconds > 0 AND performance_duration_seconds <= 86400",
+        name="performance_duration",
+    ),
     col("deleted_at", DateTime(timezone=True), nullable=True, index=True),
     col("lifecycle_version", Integer),
     UniqueConstraint("group_id", "id"),
@@ -260,6 +270,7 @@ table(
     col("text", Text),
     col("sent", Boolean),
     col("monospace", Boolean, server_default=text("false")),
+    col("monospace_offset", Integer, server_default="0"),
     col("buttons", JSONB),
     col("group_id", Uuid, ForeignKey("groups.id"), nullable=True),
     col("concert_id", Uuid, nullable=True),

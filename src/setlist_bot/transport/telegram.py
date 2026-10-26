@@ -231,6 +231,7 @@ class Processor:
                     "slreq",
                     "slreturn",
                     "sldraft",
+                    "slformat",
                     "export_menu",
                     "export_back",
                     "export_file",
@@ -247,6 +248,7 @@ class Processor:
                             response.text += "\n\n" + current.text
                             response.buttons = current.buttons
                             response.monospace = current.monospace
+                            response.monospace_body = current.monospace_body
                             response.suggestion_template_id = current.suggestion_template_id
                             response.menu_card_id = current.menu_card_id
                     except AppError:
@@ -377,7 +379,15 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
         return []
     if response.callback_notice and not response.buttons and not response.files:
         return []
-    pieces = chunks(response.text)
+    output_text = response.text
+    body = response.monospace_body or response.text
+    body_start = output_text.find(body) if response.monospace else -1
+    if body_start > 0:
+        prefix = output_text[:body_start].rstrip() + "\n\n"
+        output_text = prefix + output_text[body_start:]
+        body_start = len(prefix)
+    body_end = body_start + len(body)
+    pieces = chunks(output_text)
     markup_batches = [
         markup async for markup in keyboards(response.buttons, response.button_columns)
     ]
@@ -402,13 +412,21 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
         if response.previous_keyboard_id is not None:
             await delete_selection_message(bot, chat_id, response.previous_keyboard_id)
     messages = []
+    text_offset = 0
     for i, piece in enumerate(pieces):
         markup = markup_batches.pop(0) if i == len(pieces) - 1 and markup_batches else None
-        entities = (
-            [MessageEntity(type="pre", offset=0, length=len(piece.encode("utf-16-le")) // 2)]
-            if response.monospace
-            else None
-        )
+        start = max(0, body_start - text_offset)
+        end = min(len(piece), body_end - text_offset)
+        entities = None
+        if response.monospace and body_start >= 0 and start < end:
+            entities = [
+                MessageEntity(
+                    type="pre",
+                    offset=len(piece[:start].encode("utf-16-le")) // 2,
+                    length=len(piece[start:end].encode("utf-16-le")) // 2,
+                )
+            ]
+        text_offset += len(piece)
         if i < len(response.edit_message_ids):
             identifier = response.edit_message_ids[i]
             try:

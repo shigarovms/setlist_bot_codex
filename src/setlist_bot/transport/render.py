@@ -1,6 +1,7 @@
 from textwrap import wrap
 from typing import Any
 
+from setlist_bot.domain.concerts import compact_duration, date_label
 from setlist_bot.domain.entities import Concert, Song
 from setlist_bot.domain.rules import clock, flat_content, totals
 from setlist_bot.transport.i18n import tr
@@ -17,8 +18,12 @@ def song_card(song: Song | dict[str, Any]) -> str:
     return result
 
 
-def concert_label(concert: Concert) -> str:
-    return f"{concert.date.isoformat()} {concert.title}".strip()
+def concert_label(concert: Concert, language: str = "ru", *, button: bool = False) -> str:
+    title = concert.title[:50] if button else concert.title
+    text = f"{date_label(concert.date, language)} {title}".strip()
+    if button and concert.performance_duration_seconds:
+        text += " · " + compact_duration(concert.performance_duration_seconds, language)
+    return text
 
 
 def render_setlist(
@@ -32,7 +37,21 @@ def render_setlist(
 ) -> str:
     status = "draft" if private else "approved_title" if approved else "working"
     snapshot = flat_content(snapshot)
-    lines = [concert_label(concert), tr(language, status), tr(language, "version", version=version)]
+    lines = [
+        concert_label(concert, language),
+        tr(language, status),
+        tr(language, "version", version=version),
+    ]
+    if concert.performance_duration_seconds:
+        lines.append(
+            tr(language, "concert_duration_label")
+            + ": "
+            + compact_duration(concert.performance_duration_seconds, language)
+        )
+    if concert.city:
+        lines.append(tr(language, "concert_city_label") + ": " + concert.city)
+    if concert.extra_info:
+        lines.append(concert.extra_info)
     lines.append(tr(language, "average_pause", time=clock(snapshot["default_pause_seconds"])))
     _, _, total = totals(snapshot)
     items = snapshot["blocks"][0]["items"]

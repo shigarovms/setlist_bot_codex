@@ -109,7 +109,12 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
                 bot,
                 event.chat_id,
                 Response(
-                    event.text, [(b[0], b[1]) for b in event.buttons], monospace=event.monospace
+                    event.text,
+                    [(b[0], b[1]) for b in event.buttons],
+                    monospace=event.monospace,
+                    monospace_body=event.text[event.monospace_offset :]
+                    if event.monospace
+                    else None,
                 ),
             )
         except (TelegramForbiddenError, TelegramBadRequest) as exc:

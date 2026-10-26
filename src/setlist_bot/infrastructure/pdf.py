@@ -1,5 +1,7 @@
 import re
-from functools import lru_cache
+from contextvars import ContextVar
+from datetime import date
+from functools import lru_cache, partial
 from html import escape
 from io import BytesIO
 from pathlib import Path
@@ -23,11 +25,25 @@ from reportlab.platypus import (
 from unidecode import unidecode
 
 from setlist_bot.application.exports import Audience
+from setlist_bot.domain.concerts import date_label
+from setlist_bot.domain.export_settings import settings
 from setlist_bot.domain.rules import clock, flat_content, is_pause, totals
 from setlist_bot.transport.i18n import tr
 
 FONT = "SetlistNoto"
 BOLD = "SetlistNotoBold"
+TYPEFACES = {
+    "noto": "NotoSans",
+    "open": "OpenSans",
+    "dejavu": "DejaVuSans",
+    "liberation": "LiberationSans",
+    "serif": "NotoSerif",
+}
+PDF_STYLE: ContextVar[dict[str, Any] | None] = ContextVar("pdf_style", default=None)
+
+
+def style() -> dict[str, Any]:
+    return PDF_STYLE.get() or settings({})
 
 
 @lru_cache(maxsize=1)
@@ -35,6 +51,11 @@ def register_fonts() -> None:
     fonts = Path(__file__).parents[1] / "assets" / "fonts"
     pdfmetrics.registerFont(TTFont(FONT, str(fonts / "NotoSans-Regular.ttf")))
     pdfmetrics.registerFont(TTFont(BOLD, str(fonts / "NotoSans-Bold.ttf")))
+    for key, stem in TYPEFACES.items():
+        for weight in ("Regular", "Bold"):
+            pdfmetrics.registerFont(
+                TTFont(f"Setlist-{key}-{weight}", str(fonts / f"{stem}-{weight}.ttf"))
+            )
 
 
 def title_text(title: str, transliterate: bool) -> str:
@@ -49,7 +70,8 @@ def paragraph(text: str, size: int = 14, *, bold: bool = False) -> Paragraph:
         escape(clean).replace("\n", "<br/>"),
         ParagraphStyle(
             "text",
-            fontName=BOLD if bold else FONT,
+            fontName=f"Setlist-{style()['font']}-{'Bold' if bold else 'Regular'}",
+            alignment=1 if style()["align"] == "center" else 0,
             fontSize=size,
             leading=size * 1.2,
             spaceAfter=0,
@@ -68,6 +90,15 @@ class PdfDocuments:
     def render(
         self, payload: dict[str, Any], audience: Audience, language: str, transliterate: bool
     ) -> bytes:
+        token = PDF_STYLE.set(settings(payload.get("settings", {})))
+        try:
+            return self._render(payload, audience, language, transliterate)
+        finally:
+            PDF_STYLE.reset(token)
+
+    def _render(
+        self, payload: dict[str, Any], audience: Audience, language: str, transliterate: bool
+    ) -> bytes:
         buffer = BytesIO()
         page_size = A4 if audience == "musicians" else landscape(A4)
         document = SimpleDocTemplate(
@@ -79,7 +110,12 @@ class PdfDocuments:
             bottomMargin=36,
             pageCompression=1,
             invariant=1,
-            title=f"{payload['group_name']} — {payload['concert_date']} — v{payload['version']}",
+            title=(
+                payload["group_name"]
+                + " — "
+                + date_label(date.fromisoformat(payload["concert_date"]), language)
+                + f" — v{payload['version']}"
+            ),
             author="Setlist Bot",
         )
         snapshot = flat_content(payload["snapshot"])
@@ -98,7 +134,13 @@ class PdfDocuments:
             group = self._shorten(payload["group_name"], width - 210, BOLD, 14)
             canvas.drawString(28, height - 30, group)
             canvas.setFont(FONT, 11)
-            concert = f"{payload['concert_date']} · {payload['concert_title']}".rstrip(" ·")
+            concert = (
+                date_label(date.fromisoformat(payload["concert_date"]), language)
+                + " · "
+                + payload["concert_title"]
+            ).rstrip(" ·")
+            if payload.get("city"):
+                concert += " · " + payload["city"]
             canvas.drawString(28, height - 49, self._shorten(concert, width - 56, FONT, 11))
             canvas.drawString(
                 28,
@@ -135,7 +177,12 @@ class PdfDocuments:
             if is_pause(item):
                 title += "  " + clock(item["duration_seconds"])
             story.append(
-                KeepTogether([paragraph(f"{position}. {title}", 52, bold=True), Spacer(1, 22)])
+                KeepTogether(
+                    [
+                        paragraph(f"{position}. {title}", style()["size"], bold=True),
+                        Spacer(1, 22),
+                    ]
+                )
             )
         return story
 
@@ -145,11 +192,12 @@ class PdfDocuments:
         story: list[Flowable] = []
         blocks = snapshot["blocks"]
         _, _, total = totals(snapshot)
-        columns = (32, 170, 65, 45, 215, width - 527)
+        columns = (55, 200, 90, 80, 175, width - 600)
+        cell = partial(paragraph, size=style()["size"])
         for number, block in enumerate(blocks, 1):
             rows = [
                 [
-                    paragraph(tr(language, "pdf_col_" + name), 13, bold=True)
+                    cell(tr(language, "pdf_col_" + name), bold=True)
                     for name in (
                         "number",
                         "title",
@@ -168,12 +216,12 @@ class PdfDocuments:
                     title = tr(language, "lead_in", time=clock(lead_in)) + "\n" + title
                 rows.append(
                     [
-                        paragraph(prefix, 14),
-                        paragraph(title, 17, bold=True),
-                        paragraph(clock(item["duration_seconds"])),
-                        paragraph(str(item["bpm"]) if item.get("bpm") else ""),
-                        paragraph(item.get("lights", ""), 16),
-                        paragraph(item.get("comment", ""), 14),
+                        cell(prefix),
+                        cell(title, bold=True),
+                        cell(clock(item["duration_seconds"])),
+                        cell(str(item["bpm"]) if item.get("bpm") else ""),
+                        cell(item.get("lights", "")),
+                        cell(item.get("comment", "")),
                     ]
                 )
             table = LongTable(rows, colWidths=columns, repeatRows=1, splitInRow=1)
@@ -193,11 +241,9 @@ class PdfDocuments:
             story += [table, Spacer(1, 22)]
         summary: list[Flowable] = []
         summary += [
-            paragraph(tr(language, "timing_total", time=clock(total)), 20, bold=True),
+            cell(tr(language, "timing_total", time=clock(total)), bold=True),
             Spacer(1, 8),
-            paragraph(
-                tr(language, "average_pause", time=clock(snapshot["default_pause_seconds"])), 13
-            ),
+            cell(tr(language, "average_pause", time=clock(snapshot["default_pause_seconds"]))),
         ]
         story.append(KeepTogether(summary))
         return story

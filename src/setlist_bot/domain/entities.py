@@ -18,6 +18,7 @@ class User(Entity):
     telegram_id: int
     language: str = "ru"
     display_name: str = ""
+    export_settings: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(kw_only=True)
@@ -57,6 +58,7 @@ class Context(Entity):
 
 @dataclass(kw_only=True)
 class Song(Entity):
+    created_at: datetime = field(default_factory=now)
     group_id: UUID
     title: str
     duration_seconds: int
@@ -89,6 +91,10 @@ class Concert(Entity):
     group_id: UUID
     date: date
     title: str = ""
+    performance_duration_seconds: int | None = None
+    city: str = ""
+    extra_info: str = ""
+    metadata_version: int = 0
     deleted_at: datetime | None = None
     lifecycle_version: int = 0
 
@@ -163,6 +169,7 @@ class Outbox(Entity):
     group_id: UUID | None = None
     concert_id: UUID | None = None
     monospace: bool = False
+    monospace_offset: int = 0
 
 
 @dataclass(kw_only=True)

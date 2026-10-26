@@ -10,7 +10,9 @@ from unidecode import unidecode
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
+from setlist_bot.domain.concerts import date_label
 from setlist_bot.domain.entities import ChatBinding, Concert, ExportFile, ExportSnapshot, User, now
+from setlist_bot.domain.export_settings import settings
 from setlist_bot.domain.rules import require
 
 Audience = Literal["musicians", "lights"]
@@ -53,6 +55,11 @@ class Exports:
             payload={
                 "group_name": group.name,
                 "concert_date": concert.date.isoformat(),
+                "concert_label": date_label(concert.date, group.language),
+                "city": concert.city,
+                "extra_info": concert.extra_info,
+                "performance_duration_seconds": concert.performance_duration_seconds,
+                "settings": settings(self.user.export_settings),
                 "concert_title": concert.title,
                 "version": version,
                 "approved": approved,
@@ -63,6 +70,24 @@ class Exports:
         )
         self.store.add(export)
         return export
+
+    async def configured(self, source: ExportSnapshot) -> ExportSnapshot:
+        """A new immutable cache key for the requesting user's current typography."""
+        config = settings(self.user.export_settings)
+        if source.payload.get("settings") == config:
+            return source
+        result = ExportSnapshot(
+            group_id=source.group_id,
+            concert_id=source.concert_id,
+            chat_id=source.chat_id,
+            owner_id=source.owner_id,
+            group_epoch=source.group_epoch,
+            concert_epoch=source.concert_epoch,
+            expires_at=source.expires_at,
+            payload={**deepcopy(source.payload), "settings": config},
+        )
+        self.store.add(result)
+        return result
 
     async def load(self, export_id: UUID) -> ExportSnapshot:
         export = await self.store.get(ExportSnapshot, export_id)

@@ -2,6 +2,27 @@ from typing import Any
 
 MESSAGES = {
     "ru": {
+        "concert_duration_label": "Длительность выступления",
+        "concert_city_label": "Город",
+        "concert_info_label": "Доп. информация",
+        "concert_create_preview": "Создать мероприятие {date} {title}?",
+        "concert_details_intro": "Эти поля необязательны. Их можно задать сейчас или позже в Опциях сет-листа этого мероприятия.",
+        "concert_created": "Мероприятие создано.",
+        "set_field": "Задать: {field}",
+        "change_field": "Изменить: {field}",
+        "concert_settings": "Параметры мероприятия",
+        "open_setlist": "Открыть сет-лист",
+        "past_concerts": "Прошедшие",
+        "new_concert": "Новый концерт",
+        "input_concert_duration": "Введите длительность выступления: 1ч 42мин, 90 мин или 1:42:00. Число без единиц — минуты. Знак - убирает значение.",
+        "input_concert_city": "Введите город. Знак - убирает значение.",
+        "input_concert_info": "Введите дополнительную информацию (до 2000 символов). Знак - убирает значение.",
+        "export_settings": "Параметры экспорта",
+        "export_font": "Шрифт: {value}",
+        "export_size": "Размер: {value} pt",
+        "export_align": "Выравнивание: {value}",
+        "align_left": "По левому краю",
+        "align_center": "По центру",
         "selection_pause": "⏸ Пауза",
         "selection_pause_prompt": "Введите длительность паузы ответом на вопрос.",
         "input_picker_pause": "Какой длины пауза? Например: 5 мин, 2:30, 1 час 13 минут 43 секунды. Число без единиц — секунды.",
@@ -44,7 +65,7 @@ MESSAGES = {
             "Удаление: /delete_concert, /delete_group; ZIP общих данных: /backup.\n"
             "Корзина и восстановление: /trash. Срок хранения удалённых данных — 30 дней.\n"
             "\n"
-            "В личке правки меняют только личный черновик. Публикация группе: /publish.\n"
+            "В личке правки меняют только личный черновик. Отправить свой вариант группе: /publish.\n"
             "Ответ списком на рабочий сет-лист или приглашение — предложение нового варианта.\n"
             "Выбор песен и действий доступен также кнопками. /cancel — отмена текущего ввода и подтверждений.\n"
         ),
@@ -204,7 +225,7 @@ MESSAGES = {
         "input_alias": "Название песни  Альтернативное название",
         "input_archive": "Название песни для архивирования.",
         "input_unarchive": "Название песни из архива для восстановления.",
-        "input_concert": "Дата и необязательное название: 2026-12-31  Новогодний концерт",
+        "input_concert": "Дата и необязательное название: 22 декабря, 22 дек, 22.12, 13 янв 2028, 2025/08/21. После даты можно написать название. Проверьте дату в подтверждении.",
         "input_register": "Укажите свою музыкальную роль, например: гитарист.",
         "input_language": "Язык интерфейса: ru или en.",
         "input_group_language": "Язык общего чата: ru или en.",
@@ -215,7 +236,7 @@ MESSAGES = {
         "input_add": "Название песни, например: Комета. Несколько песен — по одной на строку. Паузы — длительностью на отдельной строке: 5 мин, 2:30, 3 мин 30 сек.",
         "input_add_ambiguous": "Нашлось несколько песен. Уточните полное название ответом на этот вопрос:",
         "setlist_input": "Проверьте позиции и аргументы. /help — формат команды.",
-        "concert_input": "Формат: /concert ГГГГ-ММ-ДД  Название (необязательно).",
+        "concert_input": "Дата и необязательное название: 22 декабря, 22 дек, 22.12, 13 янв 2028, 2025/08/21. После даты можно написать название. Проверьте дату в подтверждении.",
         "group_name": "Укажите название коллектива от 1 до 200 символов.",
         "group_creation_prompt": "🎸 Создание нового коллектива\n\nВведите название вашего коллектива ответом на это сообщение.\n/cancel — отмена.",
         "group_creation_review": "Вы хотите создать коллектив с названием «{name}»?\n\nВсё правильно?",
@@ -299,6 +320,27 @@ MESSAGES = {
         "proposal_applied": "применение предложения",
     },
     "en": {
+        "concert_duration_label": "Performance duration",
+        "concert_city_label": "City",
+        "concert_info_label": "Additional information",
+        "concert_create_preview": "Create event on {date} {title}?",
+        "concert_details_intro": "These fields are optional. Set them now or later in this event’s setlist Options.",
+        "concert_created": "Event created.",
+        "set_field": "Set: {field}",
+        "change_field": "Change: {field}",
+        "concert_settings": "Event details",
+        "open_setlist": "Open setlist",
+        "past_concerts": "Past concerts",
+        "new_concert": "New concert",
+        "input_concert_duration": "Enter performance duration: 1h 42min, 90 min or 1:42:00. A number alone means minutes. Use - to clear.",
+        "input_concert_city": "Enter city. Use - to clear.",
+        "input_concert_info": "Enter additional information (up to 2000 characters). Use - to clear.",
+        "export_settings": "Export settings",
+        "export_font": "Font: {value}",
+        "export_size": "Size: {value} pt",
+        "export_align": "Alignment: {value}",
+        "align_left": "Left",
+        "align_center": "Center",
         "selection_pause": "⏸ Pause",
         "selection_pause_prompt": "Reply to the question with the pause duration.",
         "input_picker_pause": "How long is the pause? For example: 5 min, 2:30, 1 hour 13 minutes 43 seconds. A number alone means seconds.",
@@ -341,7 +383,7 @@ MESSAGES = {
             "Delete: /delete_concert, /delete_group; ZIP of shared data: /backup.\n"
             "Trash and restoration: /trash. Deleted data is retained for 30 days.\n"
             "\n"
-            "In private chat edits change only your personal draft. Publish to the group: /publish.\n"
+            "In private chat edits change only your personal draft. Send your variant to the group: /publish.\n"
             "Replying with a list to a working setlist or invitation proposes a new variant.\n"
             "Song selection and actions are also available through buttons. /cancel cancels input and pending confirmations.\n"
         ),
@@ -501,7 +543,7 @@ MESSAGES = {
         "input_alias": "Song title  Alternative title",
         "input_archive": "Title of the song to archive.",
         "input_unarchive": "Title of the archived song to restore.",
-        "input_concert": "Date and optional title: 2026-12-31  New Year concert",
+        "input_concert": "Date and optional title: 22 December, 22 Dec, 22.12, 13 Jan 2028, 2025/08/21. Add a title after the date. Check the confirmation.",
         "input_register": "Your musical role, for example: guitarist.",
         "input_language": "Interface language: ru or en.",
         "input_group_language": "Group chat language: ru or en.",
@@ -512,7 +554,7 @@ MESSAGES = {
         "input_add": "Song title, for example: Comet. Multiple songs: one per line. Pauses: separate duration lines such as 5 min, 2:30, 3 min 30 sec.",
         "input_add_ambiguous": "Several songs matched. Reply with the complete title to clarify:",
         "setlist_input": "Check positions and arguments. See /help.",
-        "concert_input": "Format: /concert YYYY-MM-DD  Optional title.",
+        "concert_input": "Date and optional title: 22 December, 22 Dec, 22.12, 13 Jan 2028, 2025/08/21. Add a title after the date. Check the confirmation.",
         "group_name": "Use a group name between 1 and 200 characters.",
         "group_creation_prompt": "🎸 Create a new musical group\n\nReply to this message with the name of your group.\n/cancel — cancel.",
         "group_creation_review": "Create a musical group named “{name}”?\n\nIs this correct?",

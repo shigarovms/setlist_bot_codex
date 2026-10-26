@@ -5,6 +5,7 @@ from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
+from setlist_bot.application.concert_details import FIELDS as CONCERT_INPUTS
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
@@ -46,7 +47,7 @@ VERSION_INPUTS = frozenset(
     }
 )
 SETLIST_INPUTS = VERSION_INPUTS - {"suggestion", "picker_pause"}
-COMMANDS = GROUP_INPUTS | VERSION_INPUTS | {"language", "register"}
+COMMANDS = GROUP_INPUTS | VERSION_INPUTS | CONCERT_INPUTS | {"language", "register"}
 SELECTED_INPUTS = frozenset({"edit", "copy", "alias", "archive", "unarchive"})
 
 
@@ -74,7 +75,9 @@ class CommandInputs:
         await self.clear()
         group_id = context.group_id if context is not None else None
         concert_id = (
-            context.concert_id if context is not None and command in VERSION_INPUTS else None
+            context.concert_id
+            if context is not None and command in (VERSION_INPUTS | CONCERT_INPUTS)
+            else None
         )
         selected_id = (
             context.selected_song_id if context is not None and command in SELECTED_INPUTS else None
@@ -101,6 +104,7 @@ class CommandInputs:
                 "group_epoch": group.lifecycle_version if group else None,
                 "concert_epoch": concert.lifecycle_version if concert else None,
                 "version": version,
+                "metadata_version": concert.metadata_version if concert else None,
                 "selected_song_id": str(selected_id) if selected_id else None,
                 "selected_version": selected.version if selected else None,
             },
@@ -157,11 +161,16 @@ class CommandInputs:
                 and concert.lifecycle_version == data["concert_epoch"],
                 "input_expired",
             )
-            _, version, _ = await Setlists(self.store, self.user).read(
-                group_id, concert_id, private=self.private
-            )
-            require(version == data["version"], "conflict")
-            context.concert_id, context.observed_version = concert_id, version
+            context.concert_id = concert_id
+            if data["command"] in CONCERT_INPUTS:
+                await Groups(self.store, self.user).access(group_id, admin=True)
+                require(concert.metadata_version == data["metadata_version"], "conflict")
+            else:
+                _, version, _ = await Setlists(self.store, self.user).read(
+                    group_id, concert_id, private=self.private
+                )
+                require(version == data["version"], "conflict")
+                context.observed_version = version
         if data["command"] in SELECTED_INPUTS:
             context.selected_song_id = (
                 UUID(data["selected_song_id"]) if data["selected_song_id"] else None
