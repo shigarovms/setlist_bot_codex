@@ -10,8 +10,8 @@ from setlist_bot.application.catalog import Catalog
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
-from setlist_bot.domain.entities import Concert, Confirmation, Revision, Setlist, User, now
-from setlist_bot.domain.rules import is_pause, normalize, require
+from setlist_bot.domain.entities import Concert, Confirmation, Revision, Setlist, Song, User, now
+from setlist_bot.domain.rules import clock, is_pause, normalize, require
 
 PAGE_SIZE = 40
 SESSION_TTL = timedelta(hours=24)
@@ -106,10 +106,24 @@ class SongSelection:
             context.group_id == group_id and context.concert_id == concert_id,
             "selection_expired",
         )
-        _, version, _ = await Setlists(self.store, self.user).read(
+        snapshot, version, _ = await Setlists(self.store, self.user).read(
             group_id, concert_id, private=True
         )
         require(version == data["version"], "conflict")
+        data["default_pause_seconds"] = snapshot["default_pause_seconds"]
+        data["planned_duration_seconds"] = concert.performance_duration_seconds
+        if any("duration_seconds" not in song for song in data["songs"]):
+            catalog = {
+                str(song.id): song for song in await self.store.find(Song, group_id=group_id)
+            }
+            for item in data["songs"]:
+                song = catalog.get(item["id"])
+                require(song is not None, "selection_catalog_changed")
+                assert song is not None
+                if "duration_seconds" not in item:
+                    item["duration_seconds"] = song.duration_seconds
+                    item["previous_label"] = item["label"]
+                    item["label"] = f"{clock(song.duration_seconds)} {song.title}"
         return session, data
 
     async def start(self, identifier: UUID) -> tuple[Confirmation, dict[str, Any]]:
@@ -133,10 +147,16 @@ class SongSelection:
         songs = await Catalog(self.store, self.user).list_songs(group_id)
         songs.sort(key=lambda s: (-counts[str(s.id)], normalize(s.title), str(s.id)))
         require(bool(songs), "selection_empty_catalog")
-        # Numbered labels distinguish equal titles and titles resembling controls/commands.
+        # Duration prefixes distinguish titles from controls without song numbering.
         data["songs"] = [
-            {"id": str(s.id), "title": s.title, "version": s.version, "label": f"{i}. {s.title}"}
-            for i, s in enumerate(songs, 1)
+            {
+                "id": str(s.id),
+                "title": s.title,
+                "version": s.version,
+                "duration_seconds": s.duration_seconds,
+                "label": f"{clock(s.duration_seconds)} {s.title}",
+            }
+            for s in songs
         ]
         data["stage"] = "choosing"
         self.write(session, data)

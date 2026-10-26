@@ -27,6 +27,9 @@ GROUP_INPUTS = frozenset(
         "song",
         "import",
         "edit",
+        "edit_bpm",
+        "edit_lights",
+        "edit_comment",
         "copy",
         "alias",
         "concert",
@@ -48,7 +51,9 @@ VERSION_INPUTS = frozenset(
 )
 SETLIST_INPUTS = VERSION_INPUTS - {"suggestion", "picker_pause"}
 COMMANDS = GROUP_INPUTS | VERSION_INPUTS | CONCERT_INPUTS | {"language", "register"}
-SELECTED_INPUTS = frozenset({"edit", "copy", "alias", "archive", "unarchive"})
+SELECTED_INPUTS = frozenset(
+    {"edit", "copy", "alias", "archive", "unarchive", "edit_bpm", "edit_lights", "edit_comment"}
+)
 
 
 class CommandInputs:

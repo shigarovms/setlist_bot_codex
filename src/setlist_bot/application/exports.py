@@ -11,9 +11,17 @@ from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.domain.concerts import date_label
-from setlist_bot.domain.entities import ChatBinding, Concert, ExportFile, ExportSnapshot, User, now
+from setlist_bot.domain.entities import (
+    ChatBinding,
+    Concert,
+    ExportFile,
+    ExportSnapshot,
+    Song,
+    User,
+    now,
+)
 from setlist_bot.domain.export_settings import settings
-from setlist_bot.domain.rules import require
+from setlist_bot.domain.rules import flat_content, is_pause, require
 
 Audience = Literal["musicians", "lights"]
 
@@ -28,6 +36,20 @@ class Exports:
     def __init__(self, store: Store, user: User, chat_id: int, *, bot_username: str = "") -> None:
         self.store, self.user, self.chat_id = store, user, chat_id
         self.bot_username = bot_username
+
+    async def _lighting_snapshot(self, group_id: UUID, snapshot: dict[str, Any]) -> dict[str, Any]:
+        result = flat_content(snapshot)
+        songs = {str(song.id): song for song in await self.store.find(Song, group_id=group_id)}
+        for block in result["blocks"]:
+            for item in block["items"]:
+                if is_pause(item):
+                    continue
+                song = songs.get(item["song_id"])
+                require(song is not None, "not_found")
+                assert song is not None
+                for field in ("bpm", "lights", "comment"):
+                    item[field] = getattr(song, field)
+        return result
 
     async def create(
         self,
@@ -67,6 +89,7 @@ class Exports:
                 "version": version,
                 "approved": approved,
                 "snapshot": deepcopy(snapshot),
+                "lighting_snapshot": await self._lighting_snapshot(group_id, snapshot),
                 "back": back,
                 "language": group.language,
             },
@@ -77,10 +100,12 @@ class Exports:
     async def configured(self, source: ExportSnapshot) -> ExportSnapshot:
         """A new immutable cache key for the requesting user's current typography."""
         config = settings(self.user.export_settings)
+        lighting = await self._lighting_snapshot(source.group_id, source.payload["snapshot"])
         if (
             source.payload.get("settings") == config
             and source.payload.get("layout_version") == 2
             and source.payload.get("bot_username") == self.bot_username
+            and source.payload.get("lighting_snapshot") == lighting
         ):
             return source
         result = ExportSnapshot(
@@ -96,6 +121,7 @@ class Exports:
                 "settings": config,
                 "layout_version": 2,
                 "bot_username": self.bot_username,
+                "lighting_snapshot": lighting,
             },
         )
         self.store.add(result)
@@ -129,7 +155,7 @@ class Exports:
         renderer: PdfRenderer,
     ) -> list[tuple[str, bytes]]:
         require(audience in ("musicians", "lights", "all") and language in ("ru", "en"), "input")
-        export = await self.load(export_id)
+        export = await self.configured(await self.load(export_id))
         result = []
         targets: tuple[Audience, ...] = (
             ("musicians", "lights")
@@ -147,8 +173,11 @@ class Exports:
             if existing:
                 result.append((existing[0].filename, existing[0].content))
                 continue
+            payload = deepcopy(export.payload)
+            if target == "lights":
+                payload["snapshot"] = payload["lighting_snapshot"]
             content = await asyncio.to_thread(
-                renderer.render, export.payload, target, language, transliterate
+                renderer.render, payload, target, language, transliterate
             )
             group_name = (
                 re.sub(r"[^a-z0-9]+", "-", unidecode(export.payload["group_name"]).lower()).strip(

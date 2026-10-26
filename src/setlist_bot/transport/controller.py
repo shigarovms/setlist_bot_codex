@@ -603,18 +603,46 @@ class Controller:
                 + ("\n\n".join(self._song_card(s) for s in songs) or self.t("empty")),
                 [(self.t("song_open", name=s.title), f"show_song {s.id}") for s in songs],
             )
-        if command in ("show_song", "edit_hint", "copy_hint", "alias_hint"):
-            selected = await self.catalog.song(group_id, UUID(args))
+        if command in (
+            "show_song",
+            "edit_hint",
+            "copy_hint",
+            "alias_hint",
+            "song_edit_menu",
+            "song_field",
+        ):
+            values = args.split()
+            selected = await self.catalog.song(group_id, UUID(values[0]))
             context.selected_song_id = selected.id
+            if command == "song_field":
+                require(len(values) == 2 and values[1] in ("bpm", "lights", "comment"), "input")
+                return await self._request_input("edit_" + values[1], context)
+            if command == "song_edit_menu":
+                return Response(
+                    self._song_card(selected),
+                    [
+                        (
+                            self.t(
+                                "song_field_change"
+                                if getattr(selected, field)
+                                else "song_field_add",
+                                field=self.t("song_field_" + field),
+                            ),
+                            f"song_field {selected.id.hex} {field}",
+                        )
+                        for field in ("bpm", "lights", "comment")
+                    ]
+                    + [
+                        (self.t("song_edit_title_duration"), f"edit_hint {selected.id}"),
+                        (self.t("menu_back"), f"show_song {selected.id}"),
+                    ],
+                )
             if command != "show_song":
                 return await self._request_input(command.removesuffix("_hint"), context)
             buttons = [
-                (self.t("song_edit"), f"edit_hint {selected.id}"),
-                (self.t("song_copy"), f"copy_hint {selected.id}"),
+                (self.t("song_edit"), f"song_edit_menu {selected.id}"),
                 (self.t("song_alias"), f"alias_hint {selected.id}"),
             ]
-            if not selected.archived:
-                buttons.insert(0, (self.t("song_add"), f"offer_add {selected.id}"))
             member = (await self.store.find(Membership, group_id=group_id, user_id=self.user.id))[0]
             if member.role == "admin":
                 action = "unarchive" if selected.archived else "archive"
@@ -625,6 +653,27 @@ class Controller:
                     )
                 )
             return Response(self._song_card(selected), buttons)
+        if command in ("edit_bpm", "edit_lights", "edit_comment"):
+            require(context.selected_song_id is not None, "song_input")
+            assert context.selected_song_id is not None
+            selected_field_song = await self.catalog.song(group_id, context.selected_song_id)
+            field = command.removeprefix("edit_")
+            data = {key: getattr(selected_field_song, key) for key in SONG_FIELDS}
+            data[field] = (
+                (None if args == "-" else int(args))
+                if field == "bpm"
+                else ("" if args == "-" else args)
+            )
+            validate_song(data)
+            payload = {
+                "data": data,
+                "song_id": str(selected_field_song.id),
+                "expected": selected_field_song.version,
+                "return_to_edit": True,
+            }
+            return await self.confirm(
+                context, "save_song " + json.dumps(payload), self._song_card(data)
+            )
         if command in ("song", "edit", "copy"):
             parts = command_fields(args, maxsplit=2 if command == "copy" else 4)
             song_id: UUID | None = None
@@ -681,6 +730,17 @@ class Controller:
                 UUID(payload["song_id"]) if payload["song_id"] else None,
                 payload["expected"],
             )
+            if payload.get("return_to_edit"):
+                response = await self.execute(f"song_edit_menu {payload['song_id']}")
+                response.text = (
+                    self.t(
+                        "proposed" if isinstance(result, CatalogProposal) else "saved_song",
+                        name=payload["data"]["title"],
+                    )
+                    + "\n\n"
+                    + response.text
+                )
+                return response
             return Response(
                 self.t(
                     "proposed" if isinstance(result, CatalogProposal) else "saved_song",
@@ -1287,6 +1347,12 @@ class Controller:
                     lights=song.lights or "-",
                     comment=song.comment or "-",
                 )
+        if command in ("edit_bpm", "edit_lights", "edit_comment"):
+            assert context is not None and context.group_id is not None
+            require(context.selected_song_id is not None, "song_input")
+            assert context.selected_song_id is not None
+            editing_song = await self.catalog.song(context.group_id, context.selected_song_id)
+            prefix += self._song_card(editing_song) + "\n"
         if command in CONCERT_INPUTS:
             assert context is not None and context.concert_id is not None
             prefix += (
@@ -1295,7 +1361,12 @@ class Controller:
             )
         prompt = (
             prefix
-            + ("" if command in CONCERT_INPUTS else self.t("input_prompt", command=command))
+            + (
+                ""
+                if command in CONCERT_INPUTS
+                or command in ("edit_bpm", "edit_lights", "edit_comment")
+                else self.t("input_prompt", command=command)
+            )
             + "\n\n"
             + detail
             + "\n\n"
@@ -1505,8 +1576,28 @@ class Controller:
         body = "\n".join(
             titles if reviewing else [f"{i}. {title}" for i, title in enumerate(live_titles, 1)]
         )
+        entries = [
+            {"kind": "pause", "duration_seconds": entry["pause_seconds"], "pause_before": 0}
+            if isinstance(entry, dict)
+            else {"duration_seconds": roster[entry]["duration_seconds"], "pause_before": None}
+            for entry in data["selected"]
+        ]
+        duration = totals(
+            {
+                "default_pause_seconds": data.get("default_pause_seconds", 5),
+                "blocks": [{"items": entries, "break_seconds": 0}],
+            }
+        )[2]
+        planned = data.get("planned_duration_seconds")
         response = Response(
             self.t("selection_title")
+            + " · "
+            + clock(duration)
+            + "\n"
+            + self.t(
+                "selection_planned",
+                time=clock(planned) if planned is not None else self.t("unknown_duration"),
+            )
             + "\n\n"
             + (body or self.t("selection_no_songs"))
             + "\n\n"
@@ -1526,7 +1617,10 @@ class Controller:
         elif keyboard:
             start = data["page"] * PAGE_SIZE
             labels = [s["label"] for s in data["songs"][start : start + PAGE_SIZE]]
-            rows = [[self.t("selection_finish"), self.t("selection_pause")]]
+            rows = [
+                [self.t("selection_finish"), self.t("selection_pause")],
+                [self.t("selection_remove_last")],
+            ]
             rows += [labels[i : i + 2] for i in range(0, len(labels), 2)]
             navigation = []
             if data["page"]:
@@ -1656,6 +1750,11 @@ class Controller:
         if value == self.t("selection_finish"):
             require(bool(data["selected"]), "empty_setlist")
             data["stage"] = "review"
+        elif value == self.t("selection_remove_last"):
+            for index in range(len(data["selected"]) - 1, -1, -1):
+                if isinstance(data["selected"][index], str):
+                    data["selected"].pop(index)
+                    break
         elif value in (self.t("selection_prev"), self.t("selection_next")):
             page = data["page"] + (-1 if value == self.t("selection_prev") else 1)
             require(0 <= page * PAGE_SIZE < len(data["songs"]), "selection_expired")
@@ -1663,9 +1762,14 @@ class Controller:
             keyboard = True
         else:
             start = data["page"] * PAGE_SIZE
-            matches = [s for s in data["songs"][start : start + PAGE_SIZE] if s["label"] == value]
+            matches = [
+                s
+                for s in data["songs"][start : start + PAGE_SIZE]
+                if s["label"] == value or s.get("previous_label") == value
+            ]
             if not matches:
                 return Response(self.t("selection_unknown"))
+            require(len(matches) == 1, "selection_ambiguous")
             require(len(data["selected"]) < 200, "song_list_input")
             data["selected"] = [*data["selected"], matches[0]["id"]]
         self.selection.write(session, data)
@@ -2145,7 +2249,6 @@ class Controller:
                     (self.t("menu_return_yes"), f"slreturn {challenge.id.hex} yes"),
                     (self.t("menu_cancel"), f"slreturn {challenge.id.hex} no"),
                 ],
-                callback_notice=self.t("menu_reopen_prompt"),
                 markup_only=True,
                 edit_message_ids=list(data["message_ids"]),
             )
