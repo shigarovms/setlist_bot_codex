@@ -192,7 +192,9 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
             dispatcher = Dispatcher()
             dispatcher.include_router(
                 make_router(
-                    Processor(engine), me.username or "", diagnostics=settings.telegram_diagnostics
+                    Processor(engine, bot_username=me.username or ""),
+                    me.username or "",
+                    diagnostics=settings.telegram_diagnostics,
                 )
             )
             workers = [

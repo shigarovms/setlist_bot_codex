@@ -64,8 +64,9 @@ def chunks(value: str, limit: int = 3500) -> list[str]:
 
 
 class Processor:
-    def __init__(self, engine: AsyncEngine) -> None:
+    def __init__(self, engine: AsyncEngine, *, bot_username: str = "") -> None:
         self.engine = engine
+        self.bot_username = bot_username
 
     async def process(
         self,
@@ -104,7 +105,12 @@ class Processor:
                 user.display_name = display_name[:200]
             await uow.store.flush()
             controller = Controller(
-                uow.store, user, chat_id, private=private, chat_admin=chat_admin
+                uow.store,
+                user,
+                chat_id,
+                private=private,
+                chat_admin=chat_admin,
+                bot_username=self.bot_username,
             )
             controller.source_message_id = message_id if is_callback else None
             response: Response | None
@@ -210,6 +216,8 @@ class Processor:
                         data = CommandInputs.data(sessions[0])
                         sessions[0].expires_at = now() + timedelta(minutes=10)
                         response.text += "\n\n" + data["prompt"]
+                        response.monospace = bool(data.get("monospace_body"))
+                        response.monospace_body = data.get("monospace_body")
                         response.force_reply = True
                         response.command_input_id = sessions[0].id
                         response.cancel_action = f"input_cancel {sessions[0].id.hex}"
@@ -232,6 +240,7 @@ class Processor:
                     "slreturn",
                     "sldraft",
                     "slformat",
+                    "export_settings",
                     "export_menu",
                     "export_back",
                     "export_file",

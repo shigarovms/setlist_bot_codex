@@ -1,6 +1,7 @@
 """A copyable starting list, using only the group's approved past performances."""
 
 from collections import Counter
+from dataclasses import dataclass
 
 from setlist_bot.application.catalog import Catalog
 from setlist_bot.application.ports import Store
@@ -9,7 +10,14 @@ from setlist_bot.domain.entities import Concert, Revision, Setlist, User
 from setlist_bot.domain.rules import clock, flat_content, is_pause, normalize, totals
 
 
-async def suggested_titles(store: Store, user: User, concert: Concert) -> list[str]:
+@dataclass
+class Suggestion:
+    titles: list[str]
+    new: list[str]
+    popular: list[str]
+
+
+async def suggested_titles(store: Store, user: User, concert: Concert) -> Suggestion:
     songs = await Catalog(store, user).list_songs(concert.group_id)
     active = {str(song.id): song for song in songs}
     concerts = await store.find(Concert, group_id=concert.group_id, deleted_at=None)
@@ -58,8 +66,4 @@ async def suggested_titles(store: Store, user: User, concert: Concert) -> list[s
     used.update(str(song.id) for song in new)
     popular = sorted(songs, key=lambda song: (-counts[str(song.id)], normalize(song.title)))
     top = [song for song in popular if counts[str(song.id)] and str(song.id) not in used][:3]
-    return [
-        "\n".join(section)
-        for section in (base, [s.title for s in new], [s.title for s in top])
-        if section
-    ]
+    return Suggestion(base, [s.title for s in new], [s.title for s in top])

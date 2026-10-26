@@ -25,8 +25,9 @@ class PdfRenderer(Protocol):
 
 
 class Exports:
-    def __init__(self, store: Store, user: User, chat_id: int) -> None:
+    def __init__(self, store: Store, user: User, chat_id: int, *, bot_username: str = "") -> None:
         self.store, self.user, self.chat_id = store, user, chat_id
+        self.bot_username = bot_username
 
     async def create(
         self,
@@ -60,6 +61,8 @@ class Exports:
                 "extra_info": concert.extra_info,
                 "performance_duration_seconds": concert.performance_duration_seconds,
                 "settings": settings(self.user.export_settings),
+                "layout_version": 2,
+                "bot_username": self.bot_username,
                 "concert_title": concert.title,
                 "version": version,
                 "approved": approved,
@@ -74,7 +77,11 @@ class Exports:
     async def configured(self, source: ExportSnapshot) -> ExportSnapshot:
         """A new immutable cache key for the requesting user's current typography."""
         config = settings(self.user.export_settings)
-        if source.payload.get("settings") == config:
+        if (
+            source.payload.get("settings") == config
+            and source.payload.get("layout_version") == 2
+            and source.payload.get("bot_username") == self.bot_username
+        ):
             return source
         result = ExportSnapshot(
             group_id=source.group_id,
@@ -84,7 +91,12 @@ class Exports:
             group_epoch=source.group_epoch,
             concert_epoch=source.concert_epoch,
             expires_at=source.expires_at,
-            payload={**deepcopy(source.payload), "settings": config},
+            payload={
+                **deepcopy(source.payload),
+                "settings": config,
+                "layout_version": 2,
+                "bot_username": self.bot_username,
+            },
         )
         self.store.add(result)
         return result

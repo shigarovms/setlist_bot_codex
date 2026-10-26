@@ -2,25 +2,28 @@ from textwrap import wrap
 from typing import Any
 
 from setlist_bot.domain.concerts import compact_duration, date_label
+from setlist_bot.domain.display import english_colors, pause_title, position_label
 from setlist_bot.domain.entities import Concert, Song
-from setlist_bot.domain.rules import clock, flat_content, totals
+from setlist_bot.domain.rules import clock, flat_content, is_pause, totals
 from setlist_bot.transport.i18n import tr
 
 
-def song_card(song: Song | dict[str, Any]) -> str:
+def song_card(song: Song | dict[str, Any], language: str = "ru") -> str:
     data = song if isinstance(song, dict) else vars(song)
     result = f"{data['title']} · {clock(data['duration_seconds'])}"
     if data.get("bpm"):
         result += f" · {data['bpm']} BPM"
     for key in ("lights", "comment"):
         if data.get(key):
-            result += f"\n{data[key]}"
+            result += "\n" + english_colors(data[key], language)
     return result
 
 
 def concert_label(concert: Concert, language: str = "ru", *, button: bool = False) -> str:
     title = concert.title[:50] if button else concert.title
-    text = f"{date_label(concert.date, language)} {title}".strip()
+    text = " · ".join(
+        part for part in (date_label(concert.date, language), title, concert.city) if part
+    )
     if button and concert.performance_duration_seconds:
         text += " · " + compact_duration(concert.performance_duration_seconds, language)
     return text
@@ -39,8 +42,7 @@ def render_setlist(
     snapshot = flat_content(snapshot)
     lines = [
         concert_label(concert, language),
-        tr(language, status),
-        tr(language, "version", version=version),
+        tr(language, status) + " " + tr(language, "version", version=version),
     ]
     if concert.performance_duration_seconds:
         lines.append(
@@ -48,21 +50,25 @@ def render_setlist(
             + ": "
             + compact_duration(concert.performance_duration_seconds, language)
         )
-    if concert.city:
-        lines.append(tr(language, "concert_city_label") + ": " + concert.city)
     if concert.extra_info:
         lines.append(concert.extra_info)
     lines.append(tr(language, "average_pause", time=clock(snapshot["default_pause_seconds"])))
     _, _, total = totals(snapshot)
     items = snapshot["blocks"][0]["items"]
-    labels = [f"{pos}. {' '.join(item['title'].split())}" for pos, item in enumerate(items, 1)]
-    width = min(27, max((len(label) for label in labels), default=20))
-    separator = "─" * (width + 7)
+    labels = []
+    for pos, item in enumerate(items, 1):
+        title = pause_title(language) if is_pause(item) else item["title"]
+        labels.append(f"{position_label(pos, len(items))}. {' '.join(title.split())}")
+    total_label = tr(language, "timing_total", time="").rstrip()
+    width = max(len(total_label), min(27, max((len(label) for label in labels), default=20)))
+    time_width = max([len(clock(total)), *[len(clock(item["duration_seconds"])) for item in items]])
+    separator = "─" * (width + 2 + time_width)
     lines.append(separator)
     for pos, item in enumerate(items, 1):
-        label = f"{pos}. {' '.join(item['title'].split())}"
-        title_lines = wrap(label, width=width, subsequent_indent=" " * (len(str(pos)) + 2))
-        lines.append(f"{title_lines[0]:<{width}}  {clock(item['duration_seconds'])}")
+        label = labels[pos - 1]
+        number = position_label(pos, len(items))
+        title_lines = wrap(label, width=width, subsequent_indent=" " * (len(number) + 2))
+        lines.append(f"{title_lines[0]:<{width}}  {clock(item['duration_seconds']):>{time_width}}")
         lines.extend(title_lines[1:])
-    lines += [separator, tr(language, "timing_total", time=clock(total))]
+    lines += [separator, f"{total_label:<{width}}  {clock(total):>{time_width}}"]
     return "\n".join(lines)

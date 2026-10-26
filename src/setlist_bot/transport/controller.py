@@ -53,6 +53,7 @@ from setlist_bot.domain.rules import (
     normalize,
     parse_pause,
     require,
+    totals,
     validate_song,
 )
 from setlist_bot.infrastructure.pdf import PdfDocuments
@@ -99,9 +100,17 @@ class Response:
 
 class Controller:
     def __init__(
-        self, store: Store, user: User, chat_id: int, *, private: bool, chat_admin: bool = False
+        self,
+        store: Store,
+        user: User,
+        chat_id: int,
+        *,
+        private: bool,
+        chat_admin: bool = False,
+        bot_username: str = "",
     ) -> None:
         self.store, self.user, self.chat_id = store, user, chat_id
+        self.bot_username = bot_username
         self.private, self.chat_admin = private, chat_admin
         self.language = user.language
         self.groups = Groups(store, user)
@@ -112,13 +121,16 @@ class Controller:
         self.inputs = CommandInputs(store, user, chat_id, private)
         self.trash = Trash(store, user)
         self.templates = Templates(store, user, chat_id)
-        self.exports = Exports(store, user, chat_id)
+        self.exports = Exports(store, user, chat_id, bot_username=bot_username)
         self.menus = SetlistMenus(store, user, chat_id)
         self.source_message_id: int | None = None
         self.reply_target: tuple[UUID, UUID] | None = None
 
     def t(self, key: str, **values: Any) -> str:
         return tr(self.language, key, **values)
+
+    def _song_card(self, song: Song | dict[str, Any]) -> str:
+        return song_card(song, self.language)
 
     async def confirm(
         self,
@@ -317,12 +329,23 @@ class Controller:
             self.user.language = args
             self.language = args if self.private else self.language
             return Response(self.t("ok"))
+        if command == "export_settings":
+            export = await self.exports.load(UUID(args))
+            context = await self.groups.context(self.chat_id, self.private)
+            context.group_id, context.concert_id = export.group_id, export.concert_id
+            shown = await self._show(context, shared=self.private)
+            assert shown.menu_card_id is not None
+            row, data = await self.menus.load(shown.menu_card_id)
+            if self.source_message_id is not None:
+                data["message_ids"] = [self.source_message_id]
+                self.menus.write(row, data)
+            return await self._menu_action("slformat", f"{row.id.hex} main")
         if command == "copy_list":
             return await self._suggestion_prompt(UUID(args))
         if command in ("export_menu", "export_file", "export_back"):
             values = args.split()
             export = await self.exports.load(UUID(values[0]))
-            if command == "export_menu" and len(values) == 1:
+            if command in ("export_menu", "export_file"):
                 export = await self.exports.configured(export)
             if command == "export_back":
                 if export.payload.get("menu_card_id"):
@@ -575,7 +598,9 @@ class Controller:
                 else await self.catalog.list_songs(group_id, archived=command == "archived")
             )
             return Response(
-                group.name + "\n\n" + ("\n\n".join(song_card(s) for s in songs) or self.t("empty")),
+                group.name
+                + "\n\n"
+                + ("\n\n".join(self._song_card(s) for s in songs) or self.t("empty")),
                 [(self.t("song_open", name=s.title), f"show_song {s.id}") for s in songs],
             )
         if command in ("show_song", "edit_hint", "copy_hint", "alias_hint"):
@@ -599,7 +624,7 @@ class Controller:
                         f"{action} {selected.id}",
                     )
                 )
-            return Response(song_card(selected), buttons)
+            return Response(self._song_card(selected), buttons)
         if command in ("song", "edit", "copy"):
             parts = command_fields(args, maxsplit=2 if command == "copy" else 4)
             song_id: UUID | None = None
@@ -644,7 +669,9 @@ class Controller:
                 "song_id": str(song_id) if song_id else None,
                 "expected": expected,
             }
-            return await self.confirm(context, "save_song " + json.dumps(payload), song_card(data))
+            return await self.confirm(
+                context, "save_song " + json.dumps(payload), self._song_card(data)
+            )
         if command == "save_song":
             require(confirmed, "confirmation")
             payload = json.loads(args)
@@ -679,7 +706,7 @@ class Controller:
             )
             await self.groups.access(group_id, admin=True)
             return await self.confirm(
-                context, f"set_archive {song.id} {song.version} {command}", song_card(song)
+                context, f"set_archive {song.id} {song.version} {command}", self._song_card(song)
             )
         if command == "set_archive":
             require(confirmed, "confirmation")
@@ -693,7 +720,7 @@ class Controller:
             proposals = await self.store.find(CatalogProposal, group_id=group_id, status="pending")
             lines, buttons = [], []
             for proposal in proposals:
-                preview = proposal.payload.get("alias") or song_card(proposal.payload)
+                preview = proposal.payload.get("alias") or self._song_card(proposal.payload)
                 author = await self.store.get(User, proposal.author_id)
                 lines.append(f"{author.display_name or author.telegram_id}\n{preview}")
                 for action, key in (("yes", "approve_button"), ("no", "reject_button")):
@@ -756,7 +783,7 @@ class Controller:
             if past:
                 buttons.append((self.t("menu_back"), "concerts"))
             else:
-                buttons.append((self.t("past_concerts"), "past_concerts"))
+                buttons.insert(0, (self.t("past_concerts"), "past_concerts"))
             buttons.append((self.t("new_concert"), "concert"))
             return Response(self.t("past_concerts" if past else "choose_concert"), buttons)
         if command == "use_concert":
@@ -887,7 +914,7 @@ class Controller:
             values = args.split()
             target = await self.catalog.song(group_id, UUID(values[0]))
             block = values[1] if len(values) > 1 else "1"
-            preview = (await self._show(context)).text + "\n\n" + song_card(target)
+            preview = (await self._show(context)).text + "\n\n" + self._song_card(target)
             assert context.observed_version is not None
             return await self.confirm(
                 context,
@@ -925,7 +952,10 @@ class Controller:
                         return Response(
                             self.t("add_choose") if songs else self.t("empty"),
                             [
-                                (song_card(s).splitlines()[0], f"offer_add {s.id.hex} {block}")
+                                (
+                                    self._song_card(s).splitlines()[0],
+                                    f"offer_add {s.id.hex} {block}",
+                                )
                                 for s in songs
                             ],
                             input_rejected=bool(selector.strip()) and not songs,
@@ -1136,7 +1166,11 @@ class Controller:
     ) -> list[tuple[str, str]]:
         if not approved or not any(block["items"] for block in snapshot["blocks"]):
             return []
-        service = self.exports if chat_id is None else Exports(self.store, self.user, chat_id)
+        service = (
+            self.exports
+            if chat_id is None
+            else Exports(self.store, self.user, chat_id, bot_username=self.bot_username)
+        )
         export = await service.create(
             group_id,
             concert_id,
@@ -1170,6 +1204,12 @@ class Controller:
             ),
             (self.t("back_button"), f"export_back {export_id.hex}"),
         ]
+        if payload.get("menu_card_id"):
+            buttons.insert(
+                0, (self.t("export_settings"), f"slformat {UUID(payload['menu_card_id']).hex} main")
+            )
+        else:
+            buttons.insert(0, (self.t("export_settings"), f"export_settings {export_id.hex}"))
         status = self.t("pdf_approved" if payload["approved"] else "pdf_draft")
         label = date_label(date.fromisoformat(payload["concert_date"]), self.language)
         return Response(
@@ -1299,6 +1339,8 @@ class Controller:
                         self.chat_id,
                         Response(
                             data["prompt"],
+                            monospace=bool(data.get("monospace_body")),
+                            monospace_body=data.get("monospace_body"),
                             force_reply=True,
                             command_input_id=row.id,
                             cancel_action=f"input_cancel {row.id.hex}",
@@ -1308,6 +1350,8 @@ class Controller:
                 )
             else:
                 response.text += "\n\n" + data["prompt"]
+                response.monospace = bool(data.get("monospace_body"))
+                response.monospace_body = data.get("monospace_body")
                 response.force_reply = True
                 response.command_input_id = row.id
                 response.cancel_action = f"input_cancel {row.id.hex}"
@@ -1326,25 +1370,60 @@ class Controller:
         context.observed_version = template.version
         return context
 
-    async def _suggestion_prompt(self, template_id: UUID) -> Response:
+    async def _suggestion_parts(self, template_id: UUID) -> tuple[str, Response, Context, int]:
+        template = await self.templates.load(template_id)
         context = await self._template_context(template_id)
         assert context.group_id is not None and context.concert_id is not None
-        _, version, approved = await self.setlists.read(
+        snapshot, version, approved = await self.setlists.read(
             context.group_id, context.concert_id, private=self.private
         )
         require(version == context.observed_version, "conflict")
         require(not approved, "approved")
-        template = await self.templates.load(template_id)
-        text = self.t("suggestion_prompt")
+        comment = self.t("suggestion_prompt")
         if self.private:
-            text += "\n" + self.t("suggestion_private")
-        if template.titles:
-            text += "\n\n" + "\n".join(template.titles)
-        else:
-            current_concert = await self.store.get(Concert, context.concert_id)
-            sections = await suggested_titles(self.store, self.user, current_concert)
-            if sections:
-                text += "\n\n" + "\n\n".join(sections)
+            comment += "\n" + self.t("suggestion_private")
+        titles = list(template.titles)
+        if not titles:
+            concert = await self.store.get(Concert, context.concert_id)
+            suggestion = await suggested_titles(self.store, self.user, concert)
+            titles = suggestion.titles
+            for label, names in (
+                ("suggested_new", suggestion.new),
+                ("suggested_popular", suggestion.popular),
+            ):
+                if names:
+                    comment += "\n\n" + self.t(label) + "\n" + "\n".join(names)
+        catalog = {
+            normalize(song.title): song
+            for song in await self.store.find(Song, group_id=context.group_id)
+        }
+        entries = []
+        for title in titles:
+            pause = parse_pause(title)
+            song = catalog.get(normalize(title))
+            if pause is not None:
+                entries.append({"kind": "pause", "duration_seconds": pause, "pause_before": 0})
+            elif song is not None:
+                entries.append({"duration_seconds": song.duration_seconds, "pause_before": None})
+        duration = totals(
+            {
+                "default_pause_seconds": snapshot["default_pause_seconds"],
+                "blocks": [{"items": entries, "break_seconds": 0}],
+            }
+        )[2]
+        body = "\n".join(titles)
+        heading = self.t("suggested_duration", time=clock(duration))
+        copied = Response(
+            heading + "\n\n" + (body or self.t("selection_no_songs")),
+            monospace=bool(body),
+            monospace_body=body or None,
+        )
+        copied.suggestion_template_id = template_id
+        return comment, copied, context, version
+
+    async def _suggestion_prompt(self, template_id: UUID) -> Response:
+        comment, copied, context, version = await self._suggestion_parts(template_id)
+        assert context.group_id is not None and context.concert_id is not None
         if self.private:
             await self.inputs.clear()
             previous = await self.selection.active()
@@ -1352,27 +1431,34 @@ class Controller:
             session = await self.selection.create(
                 context.group_id, context.concert_id, version, template_id
             )
-            return Response(
-                text + "\n\n" + self.t("selection_method"),
+            copied.suggestion_template_id = template_id
+            response = Response(
+                comment + "\n\n" + self.t("selection_method"),
                 [
                     (self.t("selection_text_button"), f"pick_text {session.id.hex}"),
                     (self.t("selection_pick_button"), f"pick_start {session.id.hex}"),
                     (self.t("cancel_button"), f"pick_cancel {session.id.hex}"),
                 ],
-                suggestion_template_id=template_id,
                 selection_id=session.id,
                 remove_keyboard=previous_data.get("stage") == "choosing",
                 keyboard_text=self.t("selection_keyboard_closed"),
                 previous_keyboard_id=previous_data.get("keyboard_message_id"),
             )
-        row = await self.inputs.create("suggestion", context, text, version=version)
-        return Response(
-            text,
-            force_reply=True,
-            command_input_id=row.id,
-            cancel_action=f"input_cancel {row.id.hex}",
-            cancel_label=self.t("cancel_button"),
-        )
+        else:
+            row = await self.inputs.create(
+                "suggestion",
+                context,
+                copied.text,
+                version=version,
+                monospace_body=copied.monospace_body,
+            )
+            copied.force_reply = True
+            copied.command_input_id = row.id
+            copied.cancel_action = f"input_cancel {row.id.hex}"
+            copied.cancel_label = self.t("cancel_button")
+            response = Response(comment)
+        response.deliveries.append((self.chat_id, copied))
+        return response
 
     def _group_name_prompt(self, session: Confirmation, *, invalid: bool = False) -> Response:
         return Response(
@@ -1510,25 +1596,23 @@ class Controller:
             require(data["stage"] == "method", "selection_expired")
             data["stage"] = "text"
             self.selection.write(session, data)
-            context = await self.groups.context(self.chat_id, True)
-            prompt = self.t("suggestion_prompt") + "\n" + self.t("suggestion_private")
-            template = await self.templates.load(UUID(data["template_id"]))
-            if template.titles:
-                prompt += "\n\n" + "\n".join(template.titles)
-            else:
-                target = await self.store.get(Concert, UUID(data["concert_id"]))
-                sections = await suggested_titles(self.store, self.user, target)
-                if sections:
-                    prompt += "\n\n" + "\n\n".join(sections)
-            row = await self.inputs.create("suggestion", context, prompt, version=data["version"])
-            return Response(
-                prompt,
-                force_reply=True,
-                command_input_id=row.id,
-                selection_id=session.id,
-                cancel_action=f"input_cancel {row.id.hex}",
-                cancel_label=self.t("cancel_button"),
+            comment, response, context, version = await self._suggestion_parts(
+                UUID(data["template_id"])
             )
+            row = await self.inputs.create(
+                "suggestion",
+                context,
+                response.text,
+                version=version,
+                monospace_body=response.monospace_body,
+            )
+            response.force_reply = True
+            response.command_input_id = row.id
+            response.suggestion_template_id = UUID(data["template_id"])
+            response.selection_id = session.id
+            response.cancel_action = f"input_cancel {row.id.hex}"
+            response.cancel_label = self.t("cancel_button")
+            return response
         await self.selection.save(identifier)
         context = await self.groups.context(self.chat_id, True)
         response = await self._show(context)
@@ -1667,7 +1751,7 @@ class Controller:
         if plan.parsed.error:
             lines.append(self.t(plan.parsed.error))
         for data in plan.new:
-            lines.append(self.t("import_new") + ": " + song_card(data))
+            lines.append(self.t("import_new") + ": " + self._song_card(data))
         for row in plan.duplicates:
             lines.append(f"{row.title}: {self.t('import_duplicate')}")
         for row in plan.errors:
@@ -1846,7 +1930,13 @@ class Controller:
                 self.t("request_accepted" if values[1] == "yes" else "request_rejected")
             )
             if values[1] == "yes":
-                source = Controller(self.store, self.user, data["source_chat_id"], private=False)
+                source = Controller(
+                    self.store,
+                    self.user,
+                    data["source_chat_id"],
+                    private=False,
+                    bot_username=self.bot_username,
+                )
                 source.language = (await self.store.get(Group, UUID(data["group_id"]))).language
                 rows = await self.store.find(Confirmation, id=UUID(data["card_id"]))
                 if rows:
@@ -1891,6 +1981,13 @@ class Controller:
                     f"slformat {identifier.hex} alignment",
                 ),
             ]
+            if data["approved"]:
+                export_actions = [
+                    (label, action)
+                    for label, action in data["options"]
+                    if action.startswith("export_menu ")
+                ]
+                buttons = export_actions + buttons
             if values[1] == "fonts":
                 buttons = [
                     (name, f"slformat {identifier.hex} font {key}") for key, name in FONTS.items()

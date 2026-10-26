@@ -2,6 +2,10 @@ from typing import Any
 
 MESSAGES = {
     "ru": {
+        "suggested_duration": "Длительность предлагаемого сет-листа: {time}",
+        "suggested_new": "Новые песни:",
+        "suggested_popular": "Популярные песни вне списка:",
+        "pdf_created_with": "Создано с помощью {bot}",
         "concert_duration_label": "Длительность выступления",
         "concert_city_label": "Город",
         "concert_info_label": "Доп. информация",
@@ -14,7 +18,7 @@ MESSAGES = {
         "open_setlist": "Открыть сет-лист",
         "past_concerts": "Прошедшие",
         "new_concert": "Новый концерт",
-        "input_concert_duration": "Введите длительность выступления: 1ч 42мин, 90 мин или 1:42:00. Число без единиц — минуты. Знак - убирает значение.",
+        "input_concert_duration": "Введите длительность выступления: 1ч 42мин, 90 мин или 1:15 (1 час 15 минут). Число без единиц — минуты. Знак - убирает значение.",
         "input_concert_city": "Введите город. Знак - убирает значение.",
         "input_concert_info": "Введите дополнительную информацию (до 2000 символов). Знак - убирает значение.",
         "export_settings": "Параметры экспорта",
@@ -320,6 +324,10 @@ MESSAGES = {
         "proposal_applied": "применение предложения",
     },
     "en": {
+        "suggested_duration": "Suggested setlist duration: {time}",
+        "suggested_new": "New songs:",
+        "suggested_popular": "Popular songs outside this list:",
+        "pdf_created_with": "Created with {bot}",
         "concert_duration_label": "Performance duration",
         "concert_city_label": "City",
         "concert_info_label": "Additional information",
@@ -332,7 +340,7 @@ MESSAGES = {
         "open_setlist": "Open setlist",
         "past_concerts": "Past concerts",
         "new_concert": "New concert",
-        "input_concert_duration": "Enter performance duration: 1h 42min, 90 min or 1:42:00. A number alone means minutes. Use - to clear.",
+        "input_concert_duration": "Enter performance duration: 1h 42min, 90 min or 1:15 (1 hour 15 minutes). A number alone means minutes. Use - to clear.",
         "input_concert_city": "Enter city. Use - to clear.",
         "input_concert_info": "Enter additional information (up to 2000 characters). Use - to clear.",
         "export_settings": "Export settings",

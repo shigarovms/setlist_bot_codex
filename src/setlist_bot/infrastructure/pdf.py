@@ -1,7 +1,7 @@
 import re
 from contextvars import ContextVar
 from datetime import date
-from functools import lru_cache, partial
+from functools import lru_cache
 from html import escape
 from io import BytesIO
 from pathlib import Path
@@ -26,6 +26,7 @@ from unidecode import unidecode
 
 from setlist_bot.application.exports import Audience
 from setlist_bot.domain.concerts import date_label
+from setlist_bot.domain.display import english_colors, pause_title, position_label
 from setlist_bot.domain.export_settings import settings
 from setlist_bot.domain.rules import clock, flat_content, is_pause, totals
 from setlist_bot.transport.i18n import tr
@@ -90,7 +91,12 @@ class PdfDocuments:
     def render(
         self, payload: dict[str, Any], audience: Audience, language: str, transliterate: bool
     ) -> bytes:
-        token = PDF_STYLE.set(settings(payload.get("settings", {})))
+        config = (
+            settings(payload.get("settings", {}))
+            if audience == "musicians"
+            else {"font": "noto", "size": 16, "align": "left"}
+        )
+        token = PDF_STYLE.set(config)
         try:
             return self._render(payload, audience, language, transliterate)
         finally:
@@ -106,7 +112,7 @@ class PdfDocuments:
             pagesize=page_size,
             leftMargin=28,
             rightMargin=28,
-            topMargin=96,
+            topMargin=65,
             bottomMargin=36,
             pageCompression=1,
             invariant=1,
@@ -129,28 +135,30 @@ class PdfDocuments:
             width, height = page_size
             canvas.saveState()
             status = tr(language, "pdf_approved" if payload["approved"] else "pdf_draft")
-            canvas.setFont(BOLD, 14)
-            canvas.drawRightString(width - 28, height - 30, status)
-            group = self._shorten(payload["group_name"], width - 210, BOLD, 14)
-            canvas.drawString(28, height - 30, group)
-            canvas.setFont(FONT, 11)
-            concert = (
-                date_label(date.fromisoformat(payload["concert_date"]), language)
-                + " · "
-                + payload["concert_title"]
-            ).rstrip(" ·")
-            if payload.get("city"):
-                concert += " · " + payload["city"]
-            canvas.drawString(28, height - 49, self._shorten(concert, width - 56, FONT, 11))
-            canvas.drawString(
-                28,
-                height - 67,
-                f"{tr(language, 'pdf_' + audience)} · "
-                + tr(language, "version", version=payload["version"]),
+            status_width = pdfmetrics.stringWidth(status, BOLD, 10)
+            info = " · ".join(
+                part
+                for part in (
+                    payload["group_name"],
+                    date_label(date.fromisoformat(payload["concert_date"]), language),
+                    payload["concert_title"],
+                    payload.get("city", ""),
+                )
+                if part
             )
-            canvas.setLineWidth(0.7)
-            canvas.line(28, height - 78, width - 28, height - 78)
             canvas.setFont(FONT, 10)
+            canvas.drawString(
+                28, height - 26, self._shorten(info, width - 76 - status_width, FONT, 10)
+            )
+            canvas.setFont(BOLD, 10)
+            canvas.drawRightString(width - 28, height - 26, status)
+            username = str(payload.get("bot_username", "")).lstrip("@")
+            credit = tr(
+                language, "pdf_created_with", bot="@" + username if username else "Telegram bot"
+            )
+            canvas.setFont(FONT, 7)
+            canvas.drawRightString(width - 28, height - 40, credit)
+            canvas.setFont(FONT, 6)
             canvas.drawRightString(
                 width - 28, 18, tr(language, "pdf_page", number=canvas.getPageNumber())
             )
@@ -172,14 +180,18 @@ class PdfDocuments:
         self, snapshot: dict[str, Any], language: str, transliterate: bool
     ) -> list[Flowable]:
         story: list[Flowable] = []
-        for position, item in enumerate(snapshot["blocks"][0]["items"], 1):
+        items = snapshot["blocks"][0]["items"]
+        for position, item in enumerate(items, 1):
             title = " ".join(title_text(item["title"], transliterate).split())
             if is_pause(item):
-                title += "  " + clock(item["duration_seconds"])
+                title = (
+                    pause_title(language, transliterate) + "  " + clock(item["duration_seconds"])
+                )
+            number = position_label(position, len(items))
             story.append(
                 KeepTogether(
                     [
-                        paragraph(f"{position}. {title}", style()["size"], bold=True),
+                        paragraph(f"{number}. {title}", style()["size"], bold=True),
                         Spacer(1, 22),
                     ]
                 )
@@ -192,12 +204,11 @@ class PdfDocuments:
         story: list[Flowable] = []
         blocks = snapshot["blocks"]
         _, _, total = totals(snapshot)
-        columns = (55, 200, 90, 80, 175, width - 600)
-        cell = partial(paragraph, size=style()["size"])
-        for number, block in enumerate(blocks, 1):
+        columns = (45, 190, 80, 52, 200, width - 567)
+        for block in blocks:
             rows = [
                 [
-                    cell(tr(language, "pdf_col_" + name), bold=True)
+                    paragraph(tr(language, "pdf_col_" + name), 13, bold=True)
                     for name in (
                         "number",
                         "title",
@@ -209,19 +220,23 @@ class PdfDocuments:
                 ]
             ]
             for position, item in enumerate(block["items"], 1):
-                prefix = f"{number}.{position}" if len(blocks) > 1 else str(position)
-                title = title_text(item["title"], transliterate)
+                prefix = position_label(position, len(block["items"]))
+                title = (
+                    pause_title(language, transliterate)
+                    if is_pause(item)
+                    else title_text(item["title"], transliterate)
+                )
                 lead_in = item.get("pause_before")
                 if lead_in:
                     title = tr(language, "lead_in", time=clock(lead_in)) + "\n" + title
                 rows.append(
                     [
-                        cell(prefix),
-                        cell(title, bold=True),
-                        cell(clock(item["duration_seconds"])),
-                        cell(str(item["bpm"]) if item.get("bpm") else ""),
-                        cell(item.get("lights", "")),
-                        cell(item.get("comment", "")),
+                        paragraph(prefix, 16),
+                        paragraph(title, 18, bold=True),
+                        paragraph(clock(item["duration_seconds"]), 16),
+                        paragraph(str(item["bpm"]) if item.get("bpm") else "", 16),
+                        paragraph(english_colors(item.get("lights", ""), language), 16),
+                        paragraph(english_colors(item.get("comment", ""), language), 14),
                     ]
                 )
             table = LongTable(rows, colWidths=columns, repeatRows=1, splitInRow=1)
@@ -239,11 +254,33 @@ class PdfDocuments:
                 )
             )
             story += [table, Spacer(1, 22)]
-        summary: list[Flowable] = []
-        summary += [
-            cell(tr(language, "timing_total", time=clock(total)), bold=True),
-            Spacer(1, 8),
-            cell(tr(language, "average_pause", time=clock(snapshot["default_pause_seconds"]))),
-        ]
-        story.append(KeepTogether(summary))
+        summary = LongTable(
+            [
+                [
+                    "",
+                    paragraph(tr(language, "timing_total", time="").rstrip(), 16, bold=True),
+                    paragraph(clock(total), 16, bold=True),
+                    "",
+                    "",
+                    "",
+                ],
+            ],
+            colWidths=columns,
+        )
+        summary.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+        story.append(summary)
+        story.append(Spacer(1, 8))
+        story.append(
+            paragraph(
+                tr(language, "average_pause", time=clock(snapshot["default_pause_seconds"])), 13
+            )
+        )
         return story

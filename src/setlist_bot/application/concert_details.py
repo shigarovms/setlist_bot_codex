@@ -1,3 +1,4 @@
+import re
 from uuid import UUID
 
 from setlist_bot.application.groups import Groups
@@ -19,6 +20,8 @@ class ConcertDetails:
         require(field in FIELDS, "input")
         text = value.strip()
         if field == "concert_duration":
+            if re.fullmatch(r"\d{1,2}:\d{2}", text):
+                text += ":00"
             seconds = (
                 None
                 if text == "-"

@@ -69,7 +69,13 @@ class CommandInputs:
                 await self.store.delete(old)
 
     async def create(
-        self, command: str, context: Context | None, prompt: str, *, version: int | None = None
+        self,
+        command: str,
+        context: Context | None,
+        prompt: str,
+        *,
+        version: int | None = None,
+        monospace_body: str | None = None,
     ) -> Confirmation:
         require(command in COMMANDS, "input")
         await self.clear()
@@ -97,6 +103,7 @@ class CommandInputs:
                 "kind": KIND,
                 "command": command,
                 "prompt": prompt,
+                "monospace_body": monospace_body,
                 "prompt_id": None,
                 "private": self.private,
                 "group_id": str(group_id) if group_id else None,
