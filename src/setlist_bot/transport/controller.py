@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
@@ -31,7 +32,7 @@ from setlist_bot.domain.entities import (
     User,
     now,
 )
-from setlist_bot.domain.importing import FIELDS, read_table
+from setlist_bot.domain.importing import FIELDS, SPACED_SEPARATOR, TIME_CELL, read_table
 from setlist_bot.domain.rules import (
     AppError,
     SongListError,
@@ -44,6 +45,12 @@ from setlist_bot.domain.rules import (
 from setlist_bot.infrastructure.pdf import PdfDocuments
 from setlist_bot.transport.i18n import tr
 from setlist_bot.transport.render import concert_label, render_setlist, song_card
+
+COMMAND_SEPARATOR = re.compile(r"\t+|" + SPACED_SEPARATOR.pattern)
+
+
+def command_fields(value: str, *, maxsplit: int = 0) -> list[str]:
+    return [part.strip() for part in COMMAND_SEPARATOR.split(value.strip(), maxsplit=maxsplit)]
 
 
 @dataclass
@@ -321,9 +328,7 @@ class Controller:
                 )
             )
         table_input = "\t" in raw_args or (
-            bool(raw_args)
-            and (body_on_new_line or "\n" in raw_args)
-            and "|" not in raw_args.splitlines()[0]
+            bool(raw_args) and (body_on_new_line or "\n" in raw_args)
         )
         if command == "import" or (command == "song" and table_input):
             job = await self.importer.create(group_id, raw_args)
@@ -432,9 +437,9 @@ class Controller:
                         command,
                         title=selected.title,
                         time=clock(selected.duration_seconds),
-                        bpm=selected.bpm or "",
-                        lights=selected.lights,
-                        comment=selected.comment,
+                        bpm=selected.bpm or "-",
+                        lights=selected.lights or "-",
+                        comment=selected.comment or "-",
                     )
                 )
             buttons = [
@@ -455,10 +460,12 @@ class Controller:
                 )
             return Response(song_card(selected), buttons)
         if command in ("song", "edit", "copy"):
-            parts = [part.strip() for part in args.split("|")]
+            parts = command_fields(args, maxsplit=2 if command == "copy" else 4)
             song_id: UUID | None = None
             expected: int | None = None
             if command == "copy":
+                if len(parts) == 2:
+                    parts.insert(0, "")
                 require(len(parts) == 3, "song_input")
                 original = await self._resolve_song(group_id, parts[0], context)
                 data = {key: getattr(original, key) for key in SONG_FIELDS}
@@ -466,12 +473,20 @@ class Controller:
             else:
                 original = None
                 if command == "edit":
+                    prefix = command_fields(args, maxsplit=2)
+                    using_selected_song = (
+                        len(prefix) >= 2 and TIME_CELL.fullmatch(prefix[1]) is not None
+                    )
+                    parts = command_fields(args, maxsplit=4 if using_selected_song else 5)
+                    if using_selected_song:
+                        parts.insert(0, "")
                     original = await self._resolve_song(group_id, parts.pop(0), context)
                     song_id = original.id
                     expected = original.version
                 require(2 <= len(parts) <= 5, "song_input")
                 provided = len(parts)
                 parts += [""] * (5 - len(parts))
+                parts[2:] = ["" if part == "-" else part for part in parts[2:]]
                 data = {
                     "title": parts[0],
                     "duration_seconds": duration(parts[1]),
@@ -505,7 +520,11 @@ class Controller:
                 )
             )
         if command == "alias":
-            identifier, title = [part.strip() for part in args.split("|", 1)]
+            require("|" not in args, "field_separator")
+            parts = command_fields(args, maxsplit=1)
+            if len(parts) == 1:
+                parts.insert(0, "")
+            identifier, title = parts
             target = await self._resolve_song(group_id, identifier, context)
             alias_result = await self.catalog.alias(group_id, target.id, title)
             return Response(
@@ -550,7 +569,7 @@ class Controller:
             await self.catalog.decide(group_id, UUID(identifier), action == "yes")
             return Response(self.t("ok"))
         if command == "concert":
-            parts = [part.strip() for part in args.split("|", 1)]
+            parts = command_fields(args, maxsplit=1)
             concert = await self.setlists.create(
                 group_id, date.fromisoformat(parts[0]), parts[1] if len(parts) > 1 else ""
             )
@@ -741,7 +760,7 @@ class Controller:
         if command == "suggestion" or (command == "add" and "\n" in message[len(head) :]):
             body = args
             batch_block = 1
-            inline = message[len(head) :].split("\n", 1)[0].strip().lstrip("|").strip()
+            inline = message[len(head) :].split("\n", 1)[0].strip()
             if command == "add" and inline.isdecimal():
                 batch_block = int(inline)
                 body = message[len(head) :].split("\n", 1)[1]
@@ -806,8 +825,10 @@ class Controller:
             elif command == "pause" and len(values) == 2:
                 values.insert(0, "1")
             if command == "add":
-                selector, _, block = args.partition("|")
-                block = block.strip() or "1"
+                require("|" not in args, "field_separator")
+                fields = command_fields(args, maxsplit=1)
+                selector = fields[0]
+                block = fields[1] if len(fields) == 2 else "1"
                 require(block.isdigit() and 1 <= int(block) <= 20, "setlist_input")
                 try:
                     legacy_song_id = UUID(values[0]) if values else None

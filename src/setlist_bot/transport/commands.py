@@ -80,8 +80,8 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     ),
     "proposals": ("Предложения по каталогу (админ)", "Catalog proposals (admin)"),
     "concert": (
-        "Создать концерт: дата | название (админ)",
-        "Create a concert: date | title (admin)",
+        "Создать концерт: дата  название (админ)",
+        "Create a concert: date  title (admin)",
     ),
     "approve": ("Утвердить общий сет-лист (админ)", "Approve the shared setlist (admin)"),
     "reopen": ("Вернуть сет-лист в работу (админ)", "Reopen the shared setlist (admin)"),

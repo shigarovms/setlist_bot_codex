@@ -9,21 +9,22 @@ MESSAGES = {
             "В личном чате: /groups — выбор коллектива кнопками. Можно состоять в нескольких коллективах.\n"
             "Язык: /language ru или en; язык коллектива: /group_language ru или en.\n\n"
             "Каталог: /catalog [поиск], /archived.\n"
-            "Создать: /song Название | 03:38 | 110 | свет | комментарий\n"
+            "Создать: /song Название  03:38  110  свет  комментарий\n"
             "Последние три поля необязательны.\n"
+            "Между полями — два и более пробела. Для пустого необязательного поля укажите -; в /edit это очищает поле.\n"
             "Таблица: /song на первой строке, затем вставьте ячейки из Sheets/Excel.\n"
             "Без заголовков: название, время, свет, BPM, комментарий. Сохранение — после предпросмотра.\n"
-            "Изменить: /edit Название | Новое название | 03:38 | 110 | свет | комментарий\n"
-            "Копировать все параметры: /copy Название | Новое название | 05:00\n"
-            "Алиас: /alias Название | Альтернативное название\n"
+            "Изменить: /edit Название  Новое название  03:38  110  свет  комментарий\n"
+            "Копировать все параметры: /copy Название  Новое название  05:00\n"
+            "Алиас: /alias Название  Альтернативное название\n"
             "Архивирование и восстановление — кнопками карточки песни; заявки: /proposals.\n"
             "Участники предлагают изменения каталога, администратор одобряет.\n\n"
-            "Концерты: /concert 2026-12-31 | Название, /concerts.\n"
+            "Концерты: /concert 2026-12-31  Название, /concerts.\n"
             "Выбирайте концерт кнопками /concerts.\n"
             "Сет-лист: /setlist; общий вариант: /shared.\n"
             "Экспорт: кнопка «Экспорт» или /export — PDF для музыкантов, световика или оба файла.\n"
             "А4: музыкантам — крупные названия, световику — таблица. До утверждения — «Черновик».\n"
-            "Добавить: /add — выбор песни кнопками; /add Комета | 2 — во второй блок.\n"
+            "Добавить: /add — выбор песни кнопками; /add Комета  2 — во второй блок.\n"
             "Списком: /add на первой строке, затем названия песен по одному на строку.\n"
             "Новый вариант целиком: /suggestion и список песен. Старый остаётся в истории.\n"
             "/suggestion без списка спрашивает ваш вариант; ответьте списком на сообщение бота.\n"
@@ -215,8 +216,9 @@ MESSAGES = {
         "empty_setlist": "Нельзя утвердить пустой сет-лист.",
         "duration": "Длительность должна быть положительной в формате ММ:СС, например 00:05.",
         "song_input": "Проверьте поля песни. /help — формат команды.",
+        "field_separator": "Разделитель полей — два и более пробела вместо вертикальной черты. Примеры: /help.",
         "setlist_input": "Проверьте номера блоков, позиций и аргументы. /help — формат команды.",
-        "concert_input": "Формат: /concert ГГГГ-ММ-ДД | Название (необязательно).",
+        "concert_input": "Формат: /concert ГГГГ-ММ-ДД  Название (необязательно).",
         "group_name": "Укажите название коллектива от 1 до 200 символов.",
         "group_creation_prompt": "🎸 Создание нового коллектива\n\nВведите название вашего коллектива ответом на это сообщение.\n/cancel — отмена.",
         "group_creation_review": "Вы хотите создать коллектив с названием «{name}»?\n\nВсё правильно?",
@@ -250,9 +252,9 @@ MESSAGES = {
         "song_alias": "Добавить алиас",
         "song_archive": "В архив",
         "song_unarchive": "Восстановить песню",
-        "edit_hint": "Для выбранной песни отправьте изменённую карточку:\n/edit | {title} | {time} | {bpm} | {lights} | {comment}",
-        "copy_hint": "Для копии выбранной песни отправьте:\n/copy | Новое название | 05:00",
-        "alias_hint": "Для выбранной песни отправьте:\n/alias | Альтернативное название",
+        "edit_hint": "Для выбранной песни отправьте изменённую карточку:\n/edit {title}  {time}  {bpm}  {lights}  {comment}",
+        "copy_hint": "Для копии выбранной песни отправьте:\n/copy Новое название  05:00",
+        "alias_hint": "Для выбранной песни отправьте:\n/alias Альтернативное название",
         "add_choose": "Выберите песню для добавления:",
         "revision_open": "Открыть версию {number}",
         "revision_restore": "Восстановить этот порядок",
@@ -308,21 +310,22 @@ MESSAGES = {
             "In private chat: /groups to select a group using buttons. Multiple memberships are supported.\n"
             "Language: /language ru or en; group language: /group_language ru or en.\n\n"
             "Catalog: /catalog [query], /archived.\n"
-            "Create: /song Title | 03:38 | 110 | lights | comment\n"
+            "Create: /song Title  03:38  110  lights  comment\n"
             "The last three fields are optional.\n"
+            "Separate fields with two or more spaces. Use - for an empty optional field; in /edit this clears it.\n"
             "Table: /song on the first line, then paste cells from Sheets/Excel.\n"
             "Without headers: title, time, lights, BPM, comment. Review before saving.\n"
-            "Edit: /edit Title | New title | 03:38 | 110 | lights | comment\n"
-            "Copy all parameters: /copy Title | New title | 05:00\n"
-            "Alias: /alias Title | Alternative title\n"
+            "Edit: /edit Title  New title  03:38  110  lights  comment\n"
+            "Copy all parameters: /copy Title  New title  05:00\n"
+            "Alias: /alias Title  Alternative title\n"
             "Archive and restore songs using card buttons; proposals: /proposals.\n"
             "Members propose catalog changes; administrators approve them.\n\n"
-            "Concerts: /concert 2026-12-31 | Title, /concerts.\n"
+            "Concerts: /concert 2026-12-31  Title, /concerts.\n"
             "Select a concert using /concerts buttons.\n"
             "Setlist: /setlist; shared version: /shared.\n"
             "Export: the Export button or /export — PDFs for musicians, lighting, or both files.\n"
             "A4: large song titles for musicians, a table for lighting. Unapproved files are marked DRAFT.\n"
-            "Add: /add to select a song; /add Comet | 2 for the second block.\n"
+            "Add: /add to select a song; /add Comet  2 for the second block.\n"
             "List: /add on the first line, then one song title per line.\n"
             "Replace the entire setlist: /suggestion and a list of songs. History is preserved.\n"
             "/suggestion without a list asks for your variant; reply to that message with your list.\n"
@@ -514,8 +517,9 @@ MESSAGES = {
         "empty_setlist": "Cannot approve an empty setlist.",
         "duration": "Use a positive MM:SS duration, for example 00:05.",
         "song_input": "Check the song fields. See /help for the command format.",
+        "field_separator": "Separate fields with two or more spaces instead of a vertical bar. See /help for examples.",
         "setlist_input": "Check block numbers, positions and arguments. See /help.",
-        "concert_input": "Format: /concert YYYY-MM-DD | Optional title.",
+        "concert_input": "Format: /concert YYYY-MM-DD  Optional title.",
         "group_name": "Use a group name between 1 and 200 characters.",
         "group_creation_prompt": "🎸 Create a new musical group\n\nReply to this message with the name of your group.\n/cancel — cancel.",
         "group_creation_review": "Create a musical group named “{name}”?\n\nIs this correct?",
@@ -549,9 +553,9 @@ MESSAGES = {
         "song_alias": "Add alias",
         "song_archive": "Archive",
         "song_unarchive": "Restore song",
-        "edit_hint": "Send the modified card for the selected song:\n/edit | {title} | {time} | {bpm} | {lights} | {comment}",
-        "copy_hint": "To copy the selected song send:\n/copy | New title | 05:00",
-        "alias_hint": "For the selected song send:\n/alias | Alternative title",
+        "edit_hint": "Send the modified card for the selected song:\n/edit {title}  {time}  {bpm}  {lights}  {comment}",
+        "copy_hint": "To copy the selected song send:\n/copy New title  05:00",
+        "alias_hint": "For the selected song send:\n/alias Alternative title",
         "add_choose": "Select a song to add:",
         "revision_open": "Open version {number}",
         "revision_restore": "Restore this order",
