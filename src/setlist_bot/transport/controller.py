@@ -606,6 +606,7 @@ class Controller:
         if command in (
             "show_song",
             "edit_hint",
+            "edit_full_hint",
             "copy_hint",
             "alias_hint",
             "song_edit_menu",
@@ -614,6 +615,10 @@ class Controller:
             values = args.split()
             selected = await self.catalog.song(group_id, UUID(values[0]))
             context.selected_song_id = selected.id
+            if command == "edit_hint":
+                command = "song_edit_menu"
+            if command == "edit_full_hint":
+                return await self._request_input("edit", context)
             if command == "song_field":
                 require(len(values) == 2 and values[1] in ("bpm", "lights", "comment"), "input")
                 return await self._request_input("edit_" + values[1], context)
@@ -633,7 +638,7 @@ class Controller:
                         for field in ("bpm", "lights", "comment")
                     ]
                     + [
-                        (self.t("song_edit_title_duration"), f"edit_hint {selected.id}"),
+                        (self.t("song_edit_title_duration"), f"edit_full_hint {selected.id}"),
                         (self.t("menu_back"), f"show_song {selected.id}"),
                     ],
                 )
