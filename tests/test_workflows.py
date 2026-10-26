@@ -204,7 +204,7 @@ async def test_processor_idempotency_and_group_admin_check(engine):
 async def test_confirmation_bound_to_actor_chat_group_and_concert(engine, world):
     processor = Processor(engine)
     await processor.process(1, 1, -100, f"/use_concert {world.concert.id}", private=False)
-    preview = await processor.process(2, 1, -100, "/song Новая | 00:05", private=False)
+    preview = await processor.process(2, 1, -100, "/song Новая  00:05", private=False)
     confirmation = preview.buttons[0][1]
     denied = await processor.process(3, 2, -100, confirmation, private=False)
     assert "Подтверждение" in denied.text
@@ -212,7 +212,7 @@ async def test_confirmation_bound_to_actor_chat_group_and_concert(engine, world)
     assert "сохранена" in accepted.text
     assert "не найден" in (await processor.process(5, 1, -100, confirmation, private=False)).text
     await processor.process(6, 1, -100, f"/add {world.song.id}", private=False)
-    remove = await processor.process(7, 1, -100, "/remove 1 1", private=False)
+    remove = await processor.process(7, 1, -100, "/remove 1", private=False)
     await processor.process(8, 1, -100, f"/use_concert {world.concert2.id}", private=False)
     wrong = await processor.process(9, 1, -100, remove.buttons[0][1], private=False)
     assert "Подтверждение" in wrong.text
@@ -237,8 +237,7 @@ async def test_private_publish_is_explicit_and_uses_outbox(engine, world):
     await processor.process(3, 2, 2, f"/add {world.song.id}", private=True)
     async with PostgresUnitOfWork(engine) as uow:
         assert not await uow.store.find(Outbox)
-    preview = await processor.process(4, 2, 2, "/publish", private=True)
-    await processor.process(5, 2, 2, preview.buttons[0][1], private=True)
+    await processor.process(4, 2, 2, "/publish", private=True)
     async with PostgresUnitOfWork(engine) as uow:
         events = await uow.store.find(Outbox)
         assert len(events) == 1 and events[0].chat_id == -100 and "Комета" in events[0].text
@@ -262,7 +261,7 @@ async def test_unknown_identifiers_do_not_leak_other_group(engine, world):
 async def test_copy_is_independent_and_previewed(engine, world):
     processor = Processor(engine)
     result = await processor.process(
-        1, 1, -100, f"/copy {world.song.id} | Комета расширенная версия | 05:00", private=False
+        1, 1, -100, f"/copy {world.song.id}  Комета расширенная версия  05:00", private=False
     )
     assert "05:00" in result.text and "110 BPM" in result.text and result.buttons
     await processor.process(2, 1, -100, result.buttons[0][1], private=False)

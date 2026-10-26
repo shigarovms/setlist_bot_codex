@@ -162,6 +162,7 @@ class Submission(Entity):
 
 @dataclass(kw_only=True)
 class Outbox(Entity):
+    support_kind: str = ""
     chat_id: int
     text: str
     sent: bool = False
@@ -237,3 +238,18 @@ class Confirmation(Entity):
     chat_id: int
     command: str
     expires_at: datetime
+
+
+@dataclass(kw_only=True)
+class SupportSettings(Entity):
+    key: str = "main"
+    owner_telegram_id: int
+    chat_id: int
+
+
+@dataclass(kw_only=True)
+class SupportMessage(Entity):
+    outbox_id: UUID
+    user_id: UUID
+    chat_id: int
+    message_id: int | None = None

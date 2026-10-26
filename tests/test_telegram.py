@@ -22,6 +22,16 @@ from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.transport.telegram import Processor, make_router
 
 
+def latest_message(session):
+    # RU/EN: Отмена отправляется отдельно от ForceReply / cancel is a separate carrier.
+    last = session.sent[-1]
+    if last.text in ("Отмена", "Cancel") and len(session.sent) > 1:
+        previous = session.sent[-2]
+        if getattr(previous.reply_markup, "force_reply", False):
+            return previous
+    return last
+
+
 class FakeTelegram(BaseSession):
     def __init__(self):
         super().__init__()
@@ -118,10 +128,12 @@ async def test_aiogram_end_to_end_with_fake_telegram_and_real_postgres(engine, t
         pending = await send("/members")
         assert "Гитарист" in pending.text
         await send(pending.reply_markup.inline_keyboard[0][0].callback_data, callback=True)
-        preview = await send("/song Комета | 03:38 | 110 | белый, красный")
+        preview = await send("/song Комета  03:38  110  белый, красный")
         assert "Проверьте" in preview.text
         await send(preview.reply_markup.inline_keyboard[0][0].callback_data, callback=True)
-        assert "рабочий" in (await send("/concert 2026-12-31 | Первый концерт")).text
+        question = await send("/concert 2026-12-31  Первый концерт")
+        assert "Создать мероприятие" in question.text
+        await send(question.reply_markup.inline_keyboard[0][0].callback_data, callback=True)
         async with PostgresUnitOfWork(engine) as uow:
             song = (await uow.store.find(Song))[0]
             concert = (await uow.store.find(Concert))[0]
@@ -131,9 +143,9 @@ async def test_aiogram_end_to_end_with_fake_telegram_and_real_postgres(engine, t
         assert "Комета" in (await send(f"/add {song.id}", actor=2)).text
         assert "Подводка:" not in (await send("/add Комета", actor=2)).text
         assert "Средняя пауза: 00:30" in (await send("/pause 30", actor=2)).text
-        assert "Подводка:" not in (await send("/pause 1 2 0", actor=2)).text
+        assert "Подводка:" not in (await send("/pause 2 0", actor=2)).text
         assert "Подводка:" not in (await send("/pause 5", actor=2)).text
-        assert "07:21" in (await send("/pause 1 2 default", actor=2)).text
+        assert "07:21" in (await send("/pause 2 default", actor=2)).text
         assert "права администратора" in (await send("/approve", actor=2)).text
         await send("/setlist")
         approve = await send("/approve")
@@ -222,9 +234,9 @@ async def test_router_accepts_only_replies_to_its_working_messages_and_persists_
             await dispatcher.feed_update(bot, update)
             if len(session.sent) == before:
                 return None
-            sent = session.sent[-1]
+            sent = latest_message(session)
             return Message(
-                message_id=len(session.sent),
+                message_id=next(i for i, item in enumerate(session.sent, 1) if item is sent),
                 date=datetime.now(UTC),
                 chat=message.chat,
                 from_user=User(id=bot.id, is_bot=True, first_name="Bot"),
@@ -236,8 +248,8 @@ async def test_router_accepts_only_replies_to_its_working_messages_and_persists_
         assert session.sent[-1].parse_mode is None
         copy = session.sent[-1].reply_markup.inline_keyboard[0][0].callback_data
         prompt = await send(copy, callback=True, actor=2)
-        assert session.sent[-1].reply_markup.force_reply
-        assert "Какой вариант" in prompt.text
+        assert latest_message(session).reply_markup.force_reply
+        assert "Длительность" in prompt.text
         assert await send("Просто обсуждение") is None
         unrelated = Message(
             message_id=9999,
@@ -317,7 +329,10 @@ async def test_pdf_export_submenu_sends_both_a4_documents_through_aiogram(engine
                 else Update(update_id=update_id, message=message)
             )
             before = len(session.markups)
+            edits_before = len(session.edits)
             await dispatcher.feed_update(bot, update)
+            if len(session.edits) > edits_before:
+                return session.edits[-1]
             return session.markups[-1] if len(session.markups) > before else session.sent[-1]
 
         await send(f"/use_concert {world.concert.id}")
@@ -326,7 +341,7 @@ async def test_pdf_export_submenu_sends_both_a4_documents_through_aiogram(engine
             next(
                 row[0].callback_data
                 for row in shown.reply_markup.inline_keyboard
-                if row[0].text == "⚙️ Опции"
+                if row[0].text == "✅ Утвердить"
             ),
             callback=True,
         )
@@ -348,7 +363,7 @@ async def test_pdf_export_submenu_sends_both_a4_documents_through_aiogram(engine
         assert event.document.filename.endswith(".pdf")
         pdf = PdfReader(BytesIO(event.document.data))
         assert "Комета" in pdf.pages[0].extract_text()
-        assert "ЧЕРНОВИК" in pdf.pages[0].extract_text()
+        assert "УТВЕРЖДЕНО" in pdf.pages[0].extract_text()
 
 
 async def test_group_creation_force_reply_binding_and_fresh_admin_checks_through_router(engine):
@@ -387,9 +402,9 @@ async def test_group_creation_force_reply_binding_and_fresh_admin_checks_through
             await dispatcher.feed_update(bot, update)
             if len(session.sent) == before:
                 return None
-            output = session.sent[-1]
+            output = latest_message(session)
             return Message(
-                message_id=len(session.sent),
+                message_id=next(i for i, item in enumerate(session.sent, 1) if item is output),
                 date=datetime.now(UTC),
                 chat=message.chat,
                 from_user=User(id=bot.id, is_bot=True, first_name="Bot"),
@@ -397,11 +412,11 @@ async def test_group_creation_force_reply_binding_and_fresh_admin_checks_through
             )
 
         prompt = await send("/group@setlist_test_bot")
-        assert session.sent[-1].reply_markup.force_reply
+        assert latest_message(session).reply_markup.force_reply
         assert await send("Посторонний текст") is None
         assert await send("Чужое название", actor=2, reply=prompt) is None
         prompt2 = await send("   ", reply=prompt)
-        assert session.sent[-1].reply_markup.force_reply
+        assert latest_message(session).reply_markup.force_reply
         assert "от 1 до 200" in prompt2.text
         assert await send("Старый ответ", reply=prompt) is None
         preview = await send("Рок-группа «Атмосфера»", reply=prompt2)
@@ -414,7 +429,7 @@ async def test_group_creation_force_reply_binding_and_fresh_admin_checks_through
         assert session.admin_requests == 2
         session.admin_ids = [1]
         renamed_prompt = await send(edit, callback=preview)
-        assert session.sent[-1].reply_markup.force_reply
+        assert latest_message(session).reply_markup.force_reply
         renamed = await send("Атмосфера", reply=renamed_prompt)
         create_new = session.sent[-1].reply_markup.inline_keyboard[0][0].callback_data
         created = await send(create_new, callback=renamed)

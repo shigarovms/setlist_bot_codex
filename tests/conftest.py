@@ -1,7 +1,12 @@
+import fcntl
+import hashlib
 import os
 import subprocess
 import sys
+import tempfile
 from collections.abc import AsyncIterator
+from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +22,25 @@ from setlist_bot.domain.entities import User
 from setlist_bot.infrastructure.database import PostgresUnitOfWork, metadata
 
 
+@contextmanager
+def database_guard(url):
+    # RU: Каждый тест очищает общую _test-базу. Второй pytest должен остановиться,
+    # а не менять схему под первым процессом. Секреты URL не попадают в имя файла.
+    # EN: Tests truncate shared tables. Refuse a concurrent pytest run rather than
+    # migrating underneath it; hash the URL so credentials never appear in a path.
+    digest = hashlib.sha256(url.encode()).hexdigest()[:24]
+    path = Path(tempfile.gettempdir()) / f"setlist-pytest-{digest}.lock"
+    with path.open("w") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError("Another test run owns this database") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 @pytest.fixture(scope="session")
 def database_url() -> str:
     url = os.environ.get(
@@ -24,12 +48,13 @@ def database_url() -> str:
     )
     if not (make_url(url).database or "").endswith("_test"):
         raise RuntimeError("Tests truncate tables: use a dedicated database ending in _test")
-    subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
-        env={**os.environ, "DATABASE_URL": url},
-        check=True,
-    )
-    return url
+    with database_guard(url):
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            env={**os.environ, "DATABASE_URL": url},
+            check=True,
+        )
+        yield url
 
 
 @pytest_asyncio.fixture

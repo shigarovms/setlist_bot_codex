@@ -7,7 +7,17 @@ from setlist_bot.domain.entities import Entity
 
 
 class Store(Protocol):
+    """RU: Порт доступа к данным, не связанный с SQLAlchemy.
+
+    Store не проверяет членство автоматически. Прикладной сценарий обязан сначала
+    проверить права и после пакетного чтения проверить group_id каждой записи.
+    EN: Persistence interface independent of SQLAlchemy. This is not an authorization
+    boundary: use cases must validate membership and every loaded entity's tenant.
+    """
+
     async def get[T: Entity](self, kind: type[T], entity_id: UUID, *, lock: bool = False) -> T: ...
+
+    async def get_many[T: Entity](self, kind: type[T], identifiers: set[UUID]) -> list[T]: ...
 
     async def find[T: Entity](self, kind: type[T], **filters: Any) -> list[T]: ...
 

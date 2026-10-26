@@ -49,6 +49,7 @@ MESSAGES = {
         "draft_edit": "Изменить",
         "welcome": "Бот для репертуара и сет-листов. /help — команды.\nАдминистратор создаёт коллектив командой /group Название в общем чате. Участники: /register Ваша роль.",
         "help": (
+            "Поддержка: /support — написать разработчику в личном чате.\n"
             "В общем чате администратор создаёт коллектив: /group Название.\n"
             "Заявка участника: /register гитарист; заявки и роли: /members.\n"
             "В личном чате выбор коллектива: /groups. Можно участвовать в нескольких коллективах.\n"
@@ -109,6 +110,13 @@ MESSAGES = {
         "custom_pause": "пауза {time} (индивидуальная)",
         "lead_in": "Подводка: {time}",
         "copy_variant": "Предложить свой вариант",
+        "support_button": "Связаться с поддержкой",
+        "support_configured": "Чат поддержки настроен. Отвечайте на обращения через Reply.",
+        "support_private": "Напишите поддержке в личном чате с ботом:",
+        "support_unavailable": "Чат поддержки пока не настроен.",
+        "support_prompt": "Напишите сообщение поддержке в ответ на это сообщение. Текст и ваше имя с Telegram ID будут переданы в чат поддержки.",
+        "support_sent": "Сообщение передано поддержке. Ответ придёт сюда от бота.",
+        "support_reply_sent": "Ответ поставлен в очередь отправки пользователю.",
         "menu_options": "⚙️ Опции",
         "menu_variants": "📋 Варианты",
         "menu_back": "◀️ Назад",
@@ -384,6 +392,7 @@ MESSAGES = {
         "draft_edit": "Edit",
         "welcome": "Repertoire and setlist bot. /help — commands.\nA Telegram chat administrator creates the group with /group Name in the group chat. Members: /register Your role.",
         "help": (
+            "Support: /support — contact the developer in private chat.\n"
             "In the group chat, an administrator creates a musical group: /group Name.\n"
             "Membership application: /register guitarist; applications and roles: /members.\n"
             "Select a group in private chat: /groups. You can belong to several groups.\n"
@@ -444,6 +453,13 @@ MESSAGES = {
         "custom_pause": "pause {time} (custom)",
         "lead_in": "Lead-in: {time}",
         "copy_variant": "Propose your variant",
+        "support_button": "Contact support",
+        "support_configured": "Support chat configured. Reply to requests using Telegram Reply.",
+        "support_private": "Contact support in the bot's private chat:",
+        "support_unavailable": "Support is not configured yet.",
+        "support_prompt": "Reply to this message with your support request. Your text, name and Telegram ID will be shared with support staff.",
+        "support_sent": "Message queued for support. The bot will deliver their reply here.",
+        "support_reply_sent": "Reply queued for delivery to the user.",
         "menu_options": "⚙️ Options",
         "menu_variants": "📋 Variants",
         "menu_back": "◀️ Back",

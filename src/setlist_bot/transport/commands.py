@@ -35,6 +35,7 @@ Menu = Literal["default", "private", "group", "admin"]
 # identifiers are intentionally excluded. Backend permissions remain authoritative.
 DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "start": ("Начать работу с ботом", "Start using the bot"),
+    "support": ("Связаться с поддержкой", "Contact support"),
     "help": ("Команды и примеры использования", "Commands and examples"),
     "groups": ("Выбрать музыкальный коллектив", "Select a musical group"),
     "register": (
@@ -90,6 +91,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "trash": ("Корзина и восстановление (админ)", "Trash and restoration (admin)"),
 }
 COMMON = (
+    "support",
     "start",
     "help",
     "catalog",
@@ -195,6 +197,7 @@ async def collect_command_targets(
             (
                 await connection.execute(
                     text(
+                        "SELECT chat_id FROM support_settings UNION "
                         "SELECT chat_id FROM chat_bindings UNION "
                         "SELECT deleted_chat_id FROM groups "
                         "WHERE deleted_chat_id IS NOT NULL"

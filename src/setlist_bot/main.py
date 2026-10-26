@@ -19,6 +19,8 @@ from setlist_bot.domain.entities import (
     Group,
     Membership,
     Outbox,
+    SupportMessage,
+    SupportSettings,
     User,
     now,
 )
@@ -48,6 +50,16 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
         event = await uow.store.get(Outbox, pending.id, lock=True)
         if event.sent:
             return
+        if event.support_kind in ("event", "request"):
+            settings = await uow.store.find(SupportSettings, key="main")
+            if not settings:
+                event.sent = True
+                return
+            # RU: После смены чата даже уже поставленные в очередь обращения идут в новый чат.
+            # EN: Reconfiguration also redirects pending support events to the new destination.
+            event.chat_id = settings[0].chat_id
+            for route in await uow.store.find(SupportMessage, outbox_id=event.id):
+                route.chat_id = event.chat_id
         request = None
         request_data = None
         if group is not None:
@@ -105,7 +117,7 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
                 event.sent = True
                 return
         try:
-            await send_response(
+            sent_messages = await send_response(
                 bot,
                 event.chat_id,
                 Response(
@@ -117,8 +129,46 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
                     else None,
                 ),
             )
+            routes = await uow.store.find(SupportMessage, outbox_id=event.id)
+            if routes and sent_messages:
+                routes[0].message_id = sent_messages[0].message_id
+                for message in sent_messages[1:]:
+                    uow.store.add(
+                        SupportMessage(
+                            outbox_id=event.id,
+                            user_id=routes[0].user_id,
+                            chat_id=event.chat_id,
+                            message_id=message.message_id,
+                        )
+                    )
         except (TelegramForbiddenError, TelegramBadRequest) as exc:
             if request is None or request_data is None or group is None:
+                if event.support_kind and (
+                    isinstance(exc, TelegramForbiddenError)
+                    or any(
+                        reason in exc.message.lower()
+                        for reason in ("chat not found", "user not found", "bot was kicked")
+                    )
+                ):
+                    logger.warning(
+                        "Notification destination unavailable; retiring event %s", event.id
+                    )
+                    event.sent = True
+                    if event.support_kind == "reply":
+                        settings = await uow.store.find(SupportSettings, key="main")
+                        if settings:
+                            uow.store.add(
+                                Outbox(
+                                    chat_id=settings[0].chat_id,
+                                    support_kind="event",
+                                    text=(
+                                        "Ответ поддержки не доставлен пользователю "
+                                        f"{event.chat_id}. "
+                                        "Бот заблокирован или личный чат недоступен."
+                                    ),
+                                )
+                            )
+                    return
                 raise
             if isinstance(exc, TelegramBadRequest) and not any(
                 reason in exc.message.lower() for reason in ("chat not found", "user not found")

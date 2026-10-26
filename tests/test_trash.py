@@ -47,9 +47,9 @@ async def seed_concert(uow, world):
     await service.edit_songs(world.group.id, world.concert.id, 0, ["Комета"], replace=True)
     await service.approve(world.group.id, world.concert.id, 1)
     personal = Setlists(uow.store, world.member)
-    await personal.edit(
-        world.group.id, world.concert.id, 0, "block", ["СЕКРЕТНЫЙ ЧЕРНОВИК"], private=True
-    )
+    await personal.read(world.group.id, world.concert.id, private=True)
+    draft = (await uow.store.find(e.PersonalDraft, owner_id=world.member.id))[0]
+    draft.content = {**draft.content, "private_note": "СЕКРЕТНЫЙ ЧЕРНОВИК"}
     snapshot, _, _ = await service.read(world.group.id, world.concert.id)
     submission = e.Submission(
         group_id=world.group.id,
@@ -99,7 +99,7 @@ async def test_concert_delete_confirmation_hides_all_variants_and_restores_priva
             == original
         )
         draft = (await uow.store.find(e.PersonalDraft, owner_id=world.member.id))[0]
-        assert draft.content["blocks"][-1]["title"] == "СЕКРЕТНЫЙ ЧЕРНОВИК"
+        assert draft.content["private_note"] == "СЕКРЕТНЫЙ ЧЕРНОВИК"
         assert len(await uow.store.find(e.Song, group_id=world.group.id)) == 1
         assert all(event.sent for event in await uow.store.find(e.Outbox, group_id=world.group.id))
 
@@ -210,7 +210,7 @@ async def test_purge_removes_expired_tree_only_and_keeps_accounts(engine, world,
 async def test_old_confirmation_cannot_apply_after_delete_and_restore(engine, world):
     send = sender(engine)
     await send(f"/use_concert {world.concert.id}")
-    song = await send("/song Новая | 00:05")
+    song = await send("/song Новая  00:05")
     deleted = await send("/delete_group")
     second = await send(button(deleted, "confirm "))
     await send(button(second, "confirm "))

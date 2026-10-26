@@ -23,6 +23,7 @@ from setlist_bot.application.recommendations import suggested_titles
 from setlist_bot.application.setlist_menus import CARD, REQUEST, SetlistMenus
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.application.song_selection import PAGE_SIZE, SongSelection
+from setlist_bot.application.support import Support
 from setlist_bot.application.templates import Templates
 from setlist_bot.application.trash import RETENTION, Trash
 from setlist_bot.domain.concerts import compact_duration, date_label, parse_concert, today
@@ -39,6 +40,7 @@ from setlist_bot.domain.entities import (
     Revision,
     Song,
     Submission,
+    SupportSettings,
     User,
     now,
 )
@@ -90,6 +92,7 @@ class Response:
     auxiliary_message_ids: list[int] = field(default_factory=list)
     button_columns: int = 1
     group_creation_id: UUID | None = None
+    support_prompt_id: UUID | None = None
     command_input_id: UUID | None = None
     input_rejected: bool = False
     menu_card_id: UUID | None = None
@@ -110,6 +113,7 @@ class Controller:
         bot_username: str = "",
     ) -> None:
         self.store, self.user, self.chat_id = store, user, chat_id
+        self.sender_username = ""
         self.bot_username = bot_username
         self.private, self.chat_admin = private, chat_admin
         self.language = user.language
@@ -320,6 +324,47 @@ class Controller:
             await self._template_context(reply_template_id)
             if not message.startswith("/"):
                 command, args = "suggestion", message.strip()
+        if command == "set_support_chat":
+            await Support(self.store, self.user).configure(self.chat_id, self.sender_username)
+            return Response(self.t("support_configured"))
+        if command == "support_cancel":
+            rows = await self.store.find(
+                Confirmation, id=UUID(args), user_id=self.user.id, chat_id=self.chat_id
+            )
+            require(
+                bool(rows) and json.loads(rows[0].command).get("kind") == "support", "input_expired"
+            )
+            await self.store.delete(rows[0])
+            return Response(self.t("ok"))
+        if command == "support":
+            if not self.private:
+                require(bool(self.bot_username), "private_only")
+                return Response(
+                    self.t("support_private") + f" https://t.me/{self.bot_username}?start=support"
+                )
+            if not await self.store.find(SupportSettings, key="main"):
+                return Response(self.t("support_unavailable"))
+            for row in await self.store.find(
+                Confirmation, user_id=self.user.id, chat_id=self.chat_id
+            ):
+                if json.loads(row.command).get("kind") == "support":
+                    await self.store.delete(row)
+            session = Confirmation(
+                user_id=self.user.id,
+                chat_id=self.chat_id,
+                command=json.dumps({"kind": "support"}),
+                expires_at=now() + timedelta(minutes=30),
+            )
+            self.store.add(session)
+            return Response(
+                self.t("support_prompt"),
+                force_reply=True,
+                support_prompt_id=session.id,
+                cancel_action=f"support_cancel {session.id.hex}",
+                cancel_label=self.t("cancel_button"),
+            )
+        if command == "start" and args == "support":
+            return await self.execute("/support")
         if command in ("start", "help"):
             return Response(self.t("welcome" if command == "start" else "help"))
         if command == "language":
@@ -1963,7 +2008,10 @@ class Controller:
             ]
         )
         if level == "options":
-            buttons = [(self.t("export_settings"), f"slformat {key} main")]
+            buttons = [
+                (self.t("export_settings"), f"slformat {key} main"),
+                (self.t("support_button"), "support"),
+            ]
             membership = (
                 await self.store.find(
                     Membership,
@@ -2126,7 +2174,12 @@ class Controller:
             require(data["personal"] and self.private and values[1] == "publish", "private_only")
             await self.menus.validate(data, fresh=True)
             await self._card_context(data)
-            return await self.execute("publish")
+            # RU: Двойной клик не должен дважды рассылать один личный вариант.
+            # EN: Consume this card's publish action once; other card actions stay usable.
+            require(not data.get("published"), "already_done")
+            response = await self.execute("publish")
+            self.menus.write(row, {**data, "published": True})
+            return response
         if command == "slmenu":
             return Response(
                 "",

@@ -1,3 +1,15 @@
+"""RU: Сценарии сет-листов; транспорт Telegram и конкретная БД здесь не нужны.
+
+Рабочий список хранится нормализованными строками, личный черновик — JSON только
+своего владельца, а Revision — неизменяемый снимок истории. Нельзя использовать
+личный черновик в общем чате до явной публикации. expected — версия, которую видел
+пользователь: сравнение не позволяет старой кнопке затереть новую правку.
+
+EN: Setlist use cases depend on a persistence port, not Telegram or SQLAlchemy.
+Working entries are rows, personal drafts are owner-scoped JSON, and revisions are
+immutable history. The expected version prevents lost updates from stale actions.
+"""
+
 from datetime import date
 from typing import Any
 from uuid import UUID
@@ -5,9 +17,11 @@ from uuid import UUID
 from setlist_bot.application.catalog import Catalog
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
+from setlist_bot.application.support import Support
 from setlist_bot.domain.entities import (
     Block,
     Concert,
+    Group,
     Item,
     PersonalDraft,
     Revision,
@@ -50,6 +64,11 @@ class Setlists:
         self.store.add(Block(group_id=group_id, setlist_id=setlist.id, position=1, kind="main"))
         await self.store.flush()
         await self._record(setlist, "created", await self._working(setlist), increment=False)
+        support = Support(self.store, self.user)
+        await support.notify(
+            f"Создано мероприятие: {when:%d.%m.%Y} {title}\n"
+            f"Коллектив: {group.name}\nАвтор: {support.actor}"
+        )
         return concert
 
     async def load(self, group_id: UUID, concert_id: UUID) -> Setlist:
@@ -83,12 +102,22 @@ class Setlists:
 
     async def _snapshot(self, group_id: UUID, content: Document) -> Document:
         snapshot = flat_content(content)
+        # RU: Повторы остаются в списке, но каждую уникальную песню читаем только один раз.
+        # EN: Preserve repeated entries while loading each distinct song only once.
+        identifiers = {
+            UUID(item["song_id"])
+            for block in snapshot["blocks"]
+            for item in block["items"]
+            if not is_pause(item)
+        }
+        songs = {song.id: song for song in await self.store.get_many(Song, identifiers)}
         for block in snapshot["blocks"]:
             for item in block["items"]:
                 if is_pause(item):
                     continue
-                song = await self.store.get(Song, UUID(item["song_id"]))
-                require(song.group_id == group_id, "not_found")
+                song = songs.get(UUID(item["song_id"]))
+                require(song is not None and song.group_id == group_id, "not_found")
+                assert song is not None
                 item.update(
                     title=song.title,
                     duration_seconds=song.duration_seconds,
@@ -186,6 +215,20 @@ class Setlists:
     async def _persist(self, setlist: Setlist, content: Document) -> None:
         content = flat_content(content)
         setlist.default_pause_seconds = content["default_pause_seconds"]
+        identifiers = {
+            UUID(item["song_id"])
+            for block in content["blocks"]
+            for item in block["items"]
+            if not is_pause(item)
+        }
+        songs = {song.id: song for song in await self.store.get_many(Song, identifiers)}
+        # RU: Проверяем коллектив до удаления старых позиций; неизвестный ID не становится паузой.
+        # EN: Validate tenant ownership before replacing rows; a missing ID is never a pause.
+        require(
+            set(songs) == identifiers
+            and all(song.group_id == setlist.group_id for song in songs.values()),
+            "not_found",
+        )
         blocks = await self.store.find(Block, setlist_id=setlist.id)
         for block in blocks:
             for item in await self.store.find(Item, block_id=block.id):
@@ -205,7 +248,7 @@ class Setlists:
             self.store.add(block)
             await self.store.flush()
             for position, item in enumerate(data["items"], 1):
-                song = None if is_pause(item) else await self.store.get(Song, UUID(item["song_id"]))
+                song = None if is_pause(item) else songs[UUID(item["song_id"])]
                 require(song is None or song.group_id == setlist.group_id, "not_found")
                 self.store.add(
                     Item(
@@ -332,6 +375,21 @@ class Setlists:
         revision = await self._record(setlist, "approved", content)
         setlist.approved_revision_id = revision.id
         setlist.approved = True
+        concert = await self.store.get(Concert, concert_id)
+        group = await self.store.get(Group, group_id)
+        support = Support(self.store, self.user)
+        lines: list[str] = []
+        for block in revision.snapshot["blocks"]:
+            for item in block["items"]:
+                seconds = item["duration_seconds"]
+                lines.append(
+                    f"{len(lines) + 1}. {item['title']}  {seconds // 60:02d}:{seconds % 60:02d}"
+                )
+        await support.notify(
+            f"Утверждён сет-лист · Версия {revision.number}\n"
+            f"{group.name} · {concert.date:%d.%m.%Y} {concert.title}\n"
+            f"Утвердил: {support.actor}\n\n" + "\n".join(lines)
+        )
 
     async def reopen(self, group_id: UUID, concert_id: UUID, expected: int) -> None:
         await self.groups.access(group_id, admin=True)

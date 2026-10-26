@@ -96,6 +96,8 @@ class PdfDocuments:
             if audience == "musicians"
             else {"font": "noto", "size": 16, "align": "left"}
         )
+        # RU: Экспорт работает в потоках. ContextVar не даёт настройкам одного PDF попасть в другой.
+        # EN: Thread-local rendering context prevents concurrent exports leaking font settings.
         token = PDF_STYLE.set(config)
         try:
             return self._render(payload, audience, language, transliterate)

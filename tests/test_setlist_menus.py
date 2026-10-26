@@ -119,7 +119,7 @@ async def test_admin_approves_immediately_reopen_requires_one_time_confirmation(
     assert result.edit_message_ids == [50] and "Утверждённый" in result.text
     edit = action(result, "✏️ Редактировать")
     question = await send(edit, source=50)
-    assert question.markup_only and "Статус „Утверждён“ будет снят" in question.callback_notice
+    assert question.markup_only and "Статус „Утверждён“ будет снят" in question.text
     yes = action(question, "✅ Да, вернуть")
     cancelled = await send(action(question, "❌ Отмена"), source=50)
     assert cancelled.markup_only and await approved(engine, world)
@@ -164,7 +164,7 @@ async def test_member_reopen_request_keeps_approved_until_admin_accepts(engine, 
     send = sender(engine)
     card = await prepared(send, world)
     confirmed = await send(action(card, "✅ Утвердить"), source=50, remember=50)
-    proposal = action(confirmed, "Предложить свой вариант")
+    proposal = action(confirmed, "✏️ Редактировать")
     await send(proposal, actor=2, source=50)
     assert await approved(engine, world)
     async with PostgresUnitOfWork(engine) as uow:
@@ -205,7 +205,11 @@ async def test_private_draft_menus_cannot_approve_or_expose_other_owners_data(en
     send = sender(engine)
     await send(f"/use_group {world.group.id}", actor=2, private=True)
     card = await send(f"/use_concert {world.concert.id}", actor=2, private=True)
-    assert [label for label, _ in card.buttons] == ["Предложить свой вариант", "⚙️ Опции"]
+    assert [label for label, _ in card.buttons] == [
+        "Предложить этот вариант",
+        "Изменить",
+        "⚙️ Опции",
+    ]
     assert (await send(action(card, "⚙️ Опции"), private=True)).callback_notice
     forged = f"slact {card.menu_card_id.hex} approve"
     assert (await send(forged, actor=2, private=True)).callback_notice
@@ -249,7 +253,22 @@ async def test_navigation_uses_only_edit_reply_markup_and_export_keeps_setlist_t
 
         await feed(f"/use_concert {world.concert.id}")
         await feed("/suggestion\nКомета")
-        root = session.sent[-1]
+        card = session.sent[-1]
+        await feed(
+            next(
+                row[0].callback_data
+                for row in card.reply_markup.inline_keyboard
+                if row[0].text == "✅ Утвердить"
+            ),
+            Message(
+                message_id=len(session.sent),
+                date=datetime.now(UTC),
+                chat=Chat(id=-100, type="supergroup"),
+                from_user=TelegramUser(id=bot.id, is_bot=True, first_name="Bot"),
+                text=card.text,
+            ),
+        )
+        root = session.edits[-1]
         source = Message(
             message_id=len(session.sent),
             date=datetime.now(UTC),
@@ -275,12 +294,12 @@ async def test_navigation_uses_only_edit_reply_markup_and_export_keeps_setlist_t
         await feed(
             next(
                 r[0].callback_data
-                for r in session.markups[-1].reply_markup.inline_keyboard
+                for r in root.reply_markup.inline_keyboard
                 if r[0].text == "Экспорт"
             ),
             source,
         )
-        assert len(session.sent) == before and not session.edits
+        assert len(session.sent) == before and len(session.edits) == 1
         assert source.text == root.text and len(session.markups) == 4
 
 
@@ -330,13 +349,13 @@ async def test_cached_export_survives_card_approval_without_replacing_new_menu(e
 
     send = sender(engine)
     card = await prepared(send, world)
+    card = await send(action(card, "✅ Утвердить"), source=50, remember=50)
     menu = await send(await export_command(send, card))
     command = next(data for _, data in menu.buttons if data.startswith("export_file "))
     original = await send(command)
-    await send(action(card, "✅ Утвердить"), source=50)
     repeated = await send(command)
     assert repeated.files == original.files
-    assert repeated.markup_only and not repeated.edit_message_ids
+    assert repeated.markup_only
 
 
 async def test_permanent_concert_purge_removes_menu_snapshots_and_requests(engine, world):

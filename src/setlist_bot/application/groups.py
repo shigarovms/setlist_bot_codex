@@ -3,6 +3,7 @@ from datetime import timedelta
 from uuid import UUID
 
 from setlist_bot.application.ports import Store
+from setlist_bot.application.support import Support
 from setlist_bot.domain.entities import (
     ChatBinding,
     Confirmation,
@@ -23,6 +24,8 @@ class Groups:
         memberships = await self.store.find(Membership, group_id=group_id, user_id=self.user.id)
         require(bool(memberships) and memberships[0].status == "active", "forbidden")
         require(not admin or memberships[0].role == "admin", "admin_only")
+        # RU: Блокировка коллектива сериализует правки из разных чатов. Права проверены выше.
+        # EN: The tenant row lock serializes mutations across group and private chats.
         group = await self.store.get(Group, group_id, lock=True)
         require(deleted or group.deleted_at is None, "in_trash")
         return group
@@ -42,6 +45,10 @@ class Groups:
         )
         self.store.add(ChatBinding(group_id=group.id, chat_id=chat_id))
         await self.store.flush()
+        support = Support(self.store, self.user)
+        await support.notify(
+            f"Создан коллектив: {group.name}\nАвтор: {support.actor}\nЧат: {chat_id}"
+        )
         return group
 
     async def clear_creation(self, chat_id: int) -> None:

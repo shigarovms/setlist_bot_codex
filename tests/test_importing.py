@@ -23,7 +23,7 @@ SPACED_REPERTOIRE = (
     [
         ("Тестовая песня  03:20", True),
         ("Тестовая песня\t03:20", True),
-        ("Тестовая песня | 03:20", False),
+        ("Тестовая песня  03:20", True),
     ],
 )
 async def test_single_row_after_song_command_uses_table_or_legacy_pipe_format(

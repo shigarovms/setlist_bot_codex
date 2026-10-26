@@ -127,6 +127,8 @@ def pause_content(content: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+# RU: Адаптер старых снимков не изменяет JSON истории: работаем с глубокой копией.
+# EN: Adapt legacy snapshots on a deep copy; never rewrite historical JSON in place.
 def flat_content(content: dict[str, Any]) -> dict[str, Any]:
     result = pause_content(content)
     items: list[dict[str, Any]] = []

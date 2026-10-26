@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from setlist_bot.application.command_inputs import CommandInputs
 from setlist_bot.application.setlist_menus import CARD, SetlistMenus
 from setlist_bot.application.song_selection import SongSelection
+from setlist_bot.application.support import Support
 from setlist_bot.domain.entities import (
     Confirmation,
     ProcessedUpdate,
@@ -78,10 +79,16 @@ class Processor:
         private: bool,
         chat_admin: bool = False,
         display_name: str = "",
+        sender_username: str = "",
         reply_message_id: int | None = None,
         message_id: int | None = None,
         is_callback: bool | None = None,
     ) -> Response | None:
+        # RU: Здесь меняем только состояние БД. Отправка Telegram выполняется после
+        # завершения транзакции. Вложенная транзакция ниже откатывает неудачную правку,
+        # сохраняя возможность вернуть понятное сообщение об ошибке пользователю.
+        # EN: Persist state first; Telegram delivery runs after transaction completion.
+        # The nested savepoint rolls back a failed use case before returning its error.
         if is_callback is None:
             # Preserve direct Processor callers that pass internal callback commands.
             is_callback = (
@@ -112,11 +119,40 @@ class Processor:
                 chat_admin=chat_admin,
                 bot_username=self.bot_username,
             )
+            controller.sender_username = sender_username
             controller.source_message_id = message_id if is_callback else None
             response: Response | None
             input_reply_id = None
             try:
                 async with uow.session.begin_nested():
+                    # RU: Ответ принимается на сохранённое сообщение в текущем чате поддержки.
+                    # EN: Route only exact, persisted reply targets in the configured support chat.
+                    if not is_callback and not command.lstrip().startswith("/"):
+                        if reply_message_id is not None and not private:
+                            if await Support(uow.store, user).reply(
+                                chat_id, reply_message_id, command
+                            ):
+                                return Response(tr(user.language, "support_reply_sent"))
+                        if private and reply_message_id is not None:
+                            for session in await uow.store.find(
+                                Confirmation, user_id=user.id, chat_id=chat_id
+                            ):
+                                data = json.loads(session.command)
+                                if (
+                                    data.get("kind") == "support"
+                                    and data.get("prompt_id") == reply_message_id
+                                ):
+                                    if session.expires_at <= now():
+                                        await uow.store.delete(session)
+                                        return Response(tr(user.language, "input_expired"))
+                                    delivered = await Support(uow.store, user).submit(command)
+                                    await uow.store.delete(session)
+                                    return Response(
+                                        tr(
+                                            user.language,
+                                            "support_sent" if delivered else "support_unavailable",
+                                        )
+                                    )
                     selection_before = await controller.selection.active() if private else None
                     references = (
                         await uow.store.find(
@@ -268,7 +304,8 @@ class Processor:
         self, chat_id: int, response: Response, messages: list[Message]
     ) -> None:
         if (
-            response.suggestion_template_id is None
+            response.support_prompt_id is None
+            and response.suggestion_template_id is None
             and response.selection_id is None
             and response.group_creation_id is None
             and response.menu_card_id is None
@@ -276,6 +313,14 @@ class Processor:
         ):
             return
         async with PostgresUnitOfWork(self.engine) as uow:
+            if response.support_prompt_id is not None and messages:
+                rows = await uow.store.find(
+                    Confirmation, id=response.support_prompt_id, chat_id=chat_id
+                )
+                if rows:
+                    rows[0].command = json.dumps(
+                        {"kind": "support", "prompt_id": messages[-1].message_id}
+                    )
             if response.command_input_id is not None and messages:
                 rows = await uow.store.find(
                     Confirmation, id=response.command_input_id, chat_id=chat_id
@@ -395,6 +440,8 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
         prefix = output_text[:body_start].rstrip() + "\n\n"
         output_text = prefix + output_text[body_start:]
         body_start = len(prefix)
+    # RU: Python считает символы, Telegram — UTF-16; ниже переводим границы каждого фрагмента.
+    # EN: Python indexes code points; Telegram entities use UTF-16 offsets per message chunk.
     body_end = body_start + len(body)
     pieces = chunks(output_text)
     markup_batches = [
@@ -599,6 +646,7 @@ def make_router(processor: Processor, username: str, *, diagnostics: bool = Fals
                 private=private,
                 chat_admin=chat_admin,
                 display_name=message.from_user.full_name,
+                sender_username=message.from_user.username or "",
                 reply_message_id=reply_id,
                 message_id=message.message_id,
                 is_callback=False,

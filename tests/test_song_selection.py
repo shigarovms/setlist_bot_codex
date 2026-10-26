@@ -75,7 +75,7 @@ async def test_confirm_replaces_only_private_draft_preserves_order_duplicates_an
         )
     send = messenger(engine)
     picker = await choose(send, world)
-    labels = {label.split(". ", 1)[1]: label for row in picker.reply_keyboard[1:] for label in row}
+    labels = {label.split(" ", 1)[1]: label for row in picker.reply_keyboard[2:-1] for label in row}
     for label in (labels["Комета"], labels["Атомы"], labels["Комета"]):
         selected = await send(label, raw=True)
         assert selected.delete_input and selected.reply_keyboard is None
@@ -121,21 +121,21 @@ async def test_cancel_discards_selection_preserves_existing_draft_and_returns_in
     before = await contents(engine, world)
     send = messenger(engine)
     picker = await choose(send, world)
-    await send(picker.reply_keyboard[1][0], raw=True)
+    await send(picker.reply_keyboard[2][0], raw=True)
     if review_first:
         review = await send("✅ Завершить", raw=True)
         result = await send(button(review, "pick_cancel"))
-        assert button(result, "pick_start")
+        assert button(result, "sldraft")
     else:
         result = await send("/cancel")
     assert result.remove_keyboard == (not review_first)
     assert await contents(engine, world) == before
     if not review_first:
-        assert await send(picker.reply_keyboard[1][0], raw=True) is None
+        assert await send(picker.reply_keyboard[2][0], raw=True) is None
     async with PostgresUnitOfWork(engine) as uow:
         active = await SongSelection(uow.store, world.member, 2).active()
         if review_first:
-            assert active and SongSelection.data(active)["selected"] == []
+            assert active is None
         else:
             assert active is None
 
@@ -179,8 +179,8 @@ async def test_popularity_uses_only_latest_approval_per_concert_and_freezes_rost
         uow.store.add(archived)
     send = messenger(engine)
     picker = await choose(send, world)
-    labels = [s for row in picker.reply_keyboard[1:] for s in row]
-    assert labels == ["1. Альфа", "2. Комета", "3. Гамма"]
+    labels = [s for row in picker.reply_keyboard[2:-1] for s in row]
+    assert labels == ["01:00 Альфа", "03:38 Комета", "01:00 Гамма"]
     async with PostgresUnitOfWork(engine) as uow:
         service = Setlists(uow.store, world.admin)
         await service.reopen(world.group.id, world.concert2.id, 2)
@@ -192,7 +192,7 @@ async def test_popularity_uses_only_latest_approval_per_concert_and_freezes_rost
             str(world.song.id),
             str(gamma.id),
         ]
-    assert "1. Альфа" in (await send("1. Альфа", raw=True)).text
+    assert "1. Альфа" in (await send("01:00 Альфа", raw=True)).text
 
 
 async def test_forty_per_page_two_columns_keep_page_and_selections(engine, world):
@@ -201,15 +201,15 @@ async def test_forty_per_page_two_columns_keep_page_and_selections(engine, world
             uow.store.add(Song(group_id=world.group.id, title=f"Песня {i:02}", duration_seconds=60))
     send = messenger(engine)
     picker = await choose(send, world)
-    assert picker.reply_keyboard[0] == ["✅ Завершить"]
-    assert len(picker.reply_keyboard[1:-1]) == 20
-    assert all(len(row) == 2 for row in picker.reply_keyboard[1:-1])
-    first = picker.reply_keyboard[1][0]
+    assert picker.reply_keyboard[0] == ["✅ Завершить", "⏸ Пауза"]
+    assert len(picker.reply_keyboard[2:-2]) == 20
+    assert all(len(row) == 2 for row in picker.reply_keyboard[2:-2])
+    first = picker.reply_keyboard[2][0]
     await send(first, raw=True)
     second_page = await send("Вперёд ▶️", raw=True)
     assert "2/2" in second_page.keyboard_text
-    assert len([s for row in second_page.reply_keyboard[1:-1] for s in row]) == 5
-    last = second_page.reply_keyboard[1][0]
+    assert len([s for row in second_page.reply_keyboard[2:-2] for s in row]) == 5
+    last = second_page.reply_keyboard[2][0]
     await send(last, raw=True)
     await send(last, raw=True)
     async with PostgresUnitOfWork(engine) as uow:
@@ -218,7 +218,7 @@ async def test_forty_per_page_two_columns_keep_page_and_selections(engine, world
         assert data["page"] == 1 and len(data["selected"]) == 3
     back = await send("◀️ Назад", raw=True)
     assert back.reply_keyboard == picker.reply_keyboard
-    assert "Всего песен: 3" in back.text
+    assert "Всего позиций: 3" in back.text
 
 
 async def test_stale_foreign_callbacks_context_switch_commands_and_update_dedup(engine, world):
@@ -227,15 +227,15 @@ async def test_stale_foreign_callbacks_context_switch_commands_and_update_dedup(
     identifier = picker.selection_id.hex
     assert "устарел" in (await send(f"pick_confirm {identifier}", actor=1)).text
     assert "личном" in (await send(f"pick_confirm {identifier}", private=False)).text
-    await send(picker.reply_keyboard[1][0], raw=True, update_id=900)
-    assert await send(picker.reply_keyboard[1][0], raw=True, update_id=900) is None
+    await send(picker.reply_keyboard[2][0], raw=True, update_id=900)
+    assert await send(picker.reply_keyboard[2][0], raw=True, update_id=900) is None
     await send("✅ Завершить", raw=True)
     next_method = await send("/suggestion")
     assert "устарел" in (await send(f"pick_cancel {identifier}")).text
     next_picker = await send(button(next_method, "pick_start"))
     switched = await send(f"/use_concert {world.concert2.id}")
     assert switched.remove_keyboard
-    assert await send(next_picker.reply_keyboard[1][0], raw=True) is None
+    assert await send(next_picker.reply_keyboard[2][0], raw=True) is None
     assert (await contents(engine, world))[1] == 0
 
 
@@ -243,7 +243,7 @@ async def test_stale_foreign_callbacks_context_switch_commands_and_update_dedup(
 async def test_changed_state_cannot_overwrite_or_publish_draft(engine, world, change):
     send = messenger(engine)
     picker = await choose(send, world)
-    await send(picker.reply_keyboard[1][0], raw=True)
+    await send(picker.reply_keyboard[2][0], raw=True)
     review = await send("✅ Завершить", raw=True)
     async with PostgresUnitOfWork(engine) as uow:
         if change == "archive":
@@ -279,15 +279,15 @@ async def test_duplicate_titles_are_saved_by_song_id_and_limits_are_atomic(engin
         uow.store.add(twin)
     send = messenger(engine)
     picker = await choose(send, world)
-    assert picker.reply_keyboard[1] == ["1. Комета", "2. Комета"]
-    await send("2. Комета", raw=True)
+    assert set(picker.reply_keyboard[2]) == {"03:38 Комета", "01:00 Комета"}
+    await send("03:38 Комета", raw=True)
     async with PostgresUnitOfWork(engine) as uow:
         session = await uow.store.get(Confirmation, picker.selection_id)
         data = SongSelection.data(session)
         expected = data["selected"][0]
         data["selected"] = [expected] * 200
         SongSelection.write(session, data)
-    assert "от 1 до 200" in (await send("2. Комета", raw=True)).text
+    assert "от 1 до 200" in (await send("03:38 Комета", raw=True)).text
     review = await send("✅ Завершить", raw=True)
     await send(button(review, "pick_confirm"))
     items = (await contents(engine, world))[0]["blocks"][0]["items"]
@@ -378,11 +378,20 @@ async def test_real_router_deletes_only_picker_input_edits_panel_and_survives_de
         await send(f"/use_group {world.group.id}")
         await send(f"/use_concert {world.concert.id}")
         await send("/suggestion")
-        start = session.sent[-1].reply_markup.inline_keyboard[1][0].callback_data
+        start = (
+            next(
+                m
+                for m in reversed(session.sent)
+                if getattr(m.reply_markup, "inline_keyboard", None)
+                and m.reply_markup.inline_keyboard[0][0].callback_data.startswith("pick_text ")
+            )
+            .reply_markup.inline_keyboard[1][0]
+            .callback_data
+        )
         await send(start, callback=True)
         keyboard = session.sent[-2].reply_markup
-        assert keyboard.resize_keyboard and len(keyboard.keyboard[1]) == 1
-        label = keyboard.keyboard[1][0].text
+        assert keyboard.resize_keyboard and len(keyboard.keyboard[2]) == 1
+        label = keyboard.keyboard[2][0].text
         baseline = len(session.sent)
         first_input = await send(label)
         assert first_input in session.deleted and len(session.sent) == baseline

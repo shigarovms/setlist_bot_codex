@@ -30,9 +30,9 @@ def test_time_includes_only_internal_pauses_and_breaks():
             {"break_seconds": 999, "items": [{"duration_seconds": 2700, "pause_after": 20}]},
         ]
     }
-    assert totals(snapshot) == ([2700, 2700], 5400, 6300)
+    assert totals(snapshot) == ([6300], 6300, 6300)
     snapshot["blocks"][0]["items"].append({"duration_seconds": 5, "pause_after": 50})
-    assert totals(snapshot) == ([2715, 2700], 5415, 6315)
+    assert totals(snapshot) == ([6315], 6315, 6315)
 
 
 def test_localization_keys_and_placeholders_match():

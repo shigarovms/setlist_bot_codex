@@ -266,6 +266,7 @@ table(
 table(
     e.Outbox,
     "outbox",
+    col("support_kind", String(10), server_default=""),
     col("chat_id", BigInteger),
     col("text", Text),
     col("sent", Boolean),
@@ -347,6 +348,26 @@ table(
 )
 
 
+# RU: Глобальная поддержка отделена от коллективов; личные черновики сюда не попадают.
+# EN: Bot-wide support is independent of tenants and never copies private drafts.
+table(
+    e.SupportSettings,
+    "support_settings",
+    col("key", String(20), unique=True),
+    col("owner_telegram_id", BigInteger),
+    col("chat_id", BigInteger),
+)
+table(
+    e.SupportMessage,
+    "support_messages",
+    col("outbox_id", Uuid, ForeignKey("outbox.id"), index=True),
+    col("user_id", Uuid, ForeignKey("users.id")),
+    col("chat_id", BigInteger),
+    col("message_id", BigInteger, nullable=True),
+    UniqueConstraint("chat_id", "message_id"),
+)
+
+
 class PostgresStore:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -360,6 +381,16 @@ class PostgresStore:
         if result is None:
             raise AppError("not_found")
         return result
+
+    async def get_many[T: e.Entity](self, kind: type[T], identifiers: set[UUID]) -> list[T]:
+        # RU: Один SQL-запрос вместо запроса на каждую песню. Пустой набор не читает таблицу.
+        # EN: Batch IDs in one SQL query; an empty set must never become a full-table scan.
+        if not identifiers:
+            return []
+        identity: Any = kind.id
+        return list(
+            (await self.session.scalars(select(kind).where(identity.in_(identifiers)))).all()
+        )
 
     async def find[T: e.Entity](self, kind: type[T], **filters: Any) -> list[T]:
         query = select(kind)
@@ -400,6 +431,10 @@ class PostgresUnitOfWork:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
+        # RU: Unit of Work — граница одной операции пользователя: без ошибки сохраняем
+        # всё вместе; при любой ошибке откатываем. finally возвращает соединение в пул.
+        # EN: The unit of work commits one complete use case, or rolls it all back.
+        # Always close the session so failures cannot exhaust the connection pool.
         try:
             if typ is None:
                 await self.session.commit()

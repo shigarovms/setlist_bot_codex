@@ -39,7 +39,19 @@ class Exports:
 
     async def _lighting_snapshot(self, group_id: UUID, snapshot: dict[str, Any]) -> dict[str, Any]:
         result = flat_content(snapshot)
-        songs = {str(song.id): song for song in await self.store.find(Song, group_id=group_id)}
+        identifiers = {
+            UUID(item["song_id"])
+            for block in result["blocks"]
+            for item in block["items"]
+            if not is_pause(item)
+        }
+        songs = {
+            str(song.id): song
+            for song in await self.store.get_many(Song, identifiers)
+            if song.group_id == group_id
+        }
+        # RU: Меняем лишь служебные поля света, сохраняя утверждённые названия и время.
+        # EN: Overlay lighting metadata only; approved names, timing and order remain frozen.
         for block in result["blocks"]:
             for item in block["items"]:
                 if is_pause(item):
@@ -98,7 +110,14 @@ class Exports:
         return export
 
     async def configured(self, source: ExportSnapshot) -> ExportSnapshot:
-        """A new immutable cache key for the requesting user's current typography."""
+        """RU: Получить снимок для текущего оформления и световых полей.
+
+        Старые PDF могли уже распечатать. Поэтому нельзя менять их байты на месте:
+        при изменении входных данных создаём или повторно используем другой снимок.
+        Его ID входит в уникальный ключ кеша файлов вместе с видом PDF и языком.
+        EN: Resolve typography and lighting changes to another immutable snapshot.
+        Reuse an equivalent snapshot when possible; never mutate printed PDF bytes.
+        """
         config = settings(self.user.export_settings)
         lighting = await self._lighting_snapshot(source.group_id, source.payload["snapshot"])
         if (
@@ -108,6 +127,28 @@ class Exports:
             and source.payload.get("lighting_snapshot") == lighting
         ):
             return source
+        # RU: Старое меню может многократно запросить те же обновлённые поля.
+        # Ищем уже созданный неизменяемый снимок: PDF не пересобирается на каждый клик.
+        # EN: Reuse an equivalent immutable snapshot requested from a stale menu.
+        # Never overwrite old PDF bytes: they may already have been printed.
+        payload = {
+            **deepcopy(source.payload),
+            "settings": config,
+            "layout_version": 2,
+            "bot_username": self.bot_username,
+            "lighting_snapshot": lighting,
+        }
+        candidates = await self.store.find(
+            ExportSnapshot,
+            group_id=source.group_id,
+            concert_id=source.concert_id,
+            chat_id=source.chat_id,
+            owner_id=source.owner_id,
+            payload=payload,
+        )
+        for candidate in candidates:
+            if candidate.expires_at > now():
+                return candidate
         result = ExportSnapshot(
             group_id=source.group_id,
             concert_id=source.concert_id,
@@ -116,13 +157,7 @@ class Exports:
             group_epoch=source.group_epoch,
             concert_epoch=source.concert_epoch,
             expires_at=source.expires_at,
-            payload={
-                **deepcopy(source.payload),
-                "settings": config,
-                "layout_version": 2,
-                "bot_username": self.bot_username,
-                "lighting_snapshot": lighting,
-            },
+            payload=payload,
         )
         self.store.add(result)
         return result

@@ -67,15 +67,8 @@ async def test_exact_user_add_list_is_atomic_ordered_and_single_numbered(engine,
         ]
     zero = await send("/pause 0")
     assert "Подводка:" not in zero.text
-    before = await send("/pause 3 30")
-    assert "Подводка: 00:30\n3. Меланхолия" in before.text
-    first = await send("/pause 1 20")
-    assert "Подводка: 00:20\n1. Славик" in first.text
-    encore = await send("encore")
-    assert "Бис" in encore.text and "1.1. Славик" in encore.text
-    added = await send("/add 2\nКомета\nРадуга")
-    assert "2.1. Комета" in added.text and "2.2. Радуга" in added.text
-    assert "Перерыв: 00:00" not in added.text
+    before = await send("/add\n30 сек")
+    assert "пауза" in before.text and "00:30" in before.text
 
 
 async def test_suggestions_replace_whole_setlist_and_number_each_proposer(engine, world):
@@ -132,13 +125,10 @@ async def test_private_suggestion_stays_private_until_explicit_publish_and_apply
         assert (
             len(await uow.store.find(Revision, group_id=world.group.id, suggestion_number=1)) == 0
         )
-    preview = await send("/publish", actor=2, private=True)
-    await send(preview.buttons[0][1], actor=2, private=True)
+    await send("/publish", actor=2, private=True)
     async with PostgresUnitOfWork(engine) as uow:
         event = (await uow.store.find(Outbox))[0]
-    opened = await send(event.buttons[0][1])
-    apply = await send(opened.buttons[0][1])
-    result = await send(apply.buttons[0][1])
+    result = await send(event.buttons[0][1])
     assert "Борис · вариант 1" in dict((await variants(send, result)).buttons)
     async with PostgresUnitOfWork(engine) as uow:
         revision = (
@@ -232,17 +222,8 @@ async def test_concurrent_batch_replacements_produce_one_version_and_one_conflic
         assert version == 2 and song_titles(current) == ["Комета"] * 3
 
 
-async def test_encore_button_is_bound_to_its_concert_and_version(engine, world):
+async def test_removed_encore_not_offered_in_options(engine, world):
     send = messenger(engine)
-    first = await send(f"/use_concert {world.concert.id}")
-    menu = await options(send, first)
-    button = next(data for label, data in menu.buttons if label == "Добавить бис")
-    await send(f"/use_concert {world.concert2.id}")
-    assert "Бис" in (await send(button)).text
-    await send(f"/use_concert {world.concert.id}")
-    await send("/add Комета")
-    assert "устарели" in (await send(button)).text
-    async with PostgresUnitOfWork(engine) as uow:
-        for concert in (world.concert, world.concert2):
-            current, _, _ = await Setlists(uow.store, world.admin).read(world.group.id, concert.id)
-            assert len(current["blocks"]) == (2 if concert.id == world.concert.id else 1)
+    card = await send(f"/use_concert {world.concert.id}")
+    menu = await options(send, card)
+    assert all("бис" not in label.lower() for label, _ in menu.buttons)

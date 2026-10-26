@@ -132,6 +132,13 @@ class CommandInputs:
         return None
 
     async def restore(self, row: Confirmation) -> dict[str, Any]:
+        """RU: Ответ относится к исходному вопросу, а не к последнему выбранному концерту.
+
+        Повторно проверяем владельца, чат, срок, роль и версии: кнопка/вопрос могли
+        остаться в Telegram после изменения данных или удаления мероприятия.
+        EN: Bind replies to their original prompt, not the latest selected concert.
+        Revalidate ownership, chat, expiry, permissions and versions at execution.
+        """
         data = self.data(row)
         require(
             row.user_id == self.user.id

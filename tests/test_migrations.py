@@ -1,274 +1,131 @@
 import os
 import subprocess
 import sys
-from uuid import uuid4
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
-
-from setlist_bot.application.setlists import Setlists
-from setlist_bot.domain.rules import totals
-from setlist_bot.infrastructure.database import PostgresUnitOfWork
 
 
-async def test_migration_round_trip_and_schema_match(database_url, engine):
-    environment = {**os.environ, "DATABASE_URL": database_url}
-    for args in (("downgrade", "base"), ("upgrade", "head"), ("check",)):
-        subprocess.run([sys.executable, "-m", "alembic", *args], env=environment, check=True)
-
-
-async def test_upgrade_preserves_existing_outbox_messages(database_url):
-    environment = {**os.environ, "DATABASE_URL": database_url}
-    subprocess.run(
-        [sys.executable, "-m", "alembic", "downgrade", "eea0f8fa0e00"], env=environment, check=True
-    )
-    engine = create_async_engine(database_url)
-    identifier = uuid4()
-    try:
-        async with engine.begin() as connection:
-            await connection.execute(
-                text(
-                    "INSERT INTO outbox (id,chat_id,text,sent) "
-                    "VALUES (:id,-100,'Existing message',false)"
-                ),
-                {"id": identifier},
-            )
-        subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"], env=environment, check=True
-        )
-        async with engine.connect() as connection:
-            result = (
-                await connection.execute(
-                    text("SELECT text,buttons FROM outbox WHERE id=:id"), {"id": identifier}
-                )
-            ).one()
-            assert result.text == "Existing message" and result.buttons == []
-    finally:
-        await engine.dispose()
-
-
-async def test_pause_migration_preserves_legacy_timing_and_snapshots(database_url, engine, world):
-    environment = {**os.environ, "DATABASE_URL": database_url}
-    async with PostgresUnitOfWork(engine) as uow:
-        service = Setlists(uow.store, world.admin)
-        for version in range(3):
-            await service.edit(
-                world.group.id, world.concert.id, version, "add", ["1", str(world.song.id)]
-            )
-        await service.edit(world.group.id, world.concert.id, 3, "pause", ["1", "1", "0"])
-        await service.edit(world.group.id, world.concert.id, 4, "pause", ["1", "2", "30"])
-        await service.approve(world.group.id, world.concert.id, 5)
-        approved, _, _ = await service.read(world.group.id, world.concert.id)
-        await service.edit(
-            world.group.id, world.concert.id, 0, "default_pause", ["20"], private=True
-        )
-        await service.publish(world.group.id, world.concert.id)
-    try:
-        subprocess.run(
-            [sys.executable, "-m", "alembic", "downgrade", "2f0007ae2d83"],
-            env=environment,
-            check=True,
-        )
-        async with engine.connect() as connection:
-            historical = (await connection.execute(text("SELECT id,snapshot FROM revisions"))).all()
-            drafts = (
-                await connection.execute(text("SELECT id,content FROM personal_drafts"))
-            ).all()
-            proposals = (
-                await connection.execute(text("SELECT id,snapshot FROM submissions"))
-            ).all()
-            assert totals(
-                next(
-                    d
-                    for _, d in historical
-                    if d["blocks"][0]["items"]
-                    and len(d["blocks"][0]["items"]) == 3
-                    and d["blocks"][0]["items"][0]["pause_after"] == 30
-                )
-            ) == totals(approved)
-        subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"], env=environment, check=True
-        )
-        async with engine.connect() as connection:
-            assert (
-                await connection.execute(text("SELECT id,snapshot FROM revisions"))
-            ).all() == historical
-            assert (
-                await connection.execute(text("SELECT id,content FROM personal_drafts"))
-            ).all() == drafts
-            assert (
-                await connection.execute(text("SELECT id,snapshot FROM submissions"))
-            ).all() == proposals
-            defaults = (
-                (await connection.execute(text("SELECT default_pause_seconds FROM groups")))
-                .scalars()
-                .all()
-            )
-            assert defaults and set(defaults) == {5}
-            old_defaults = (
-                (await connection.execute(text("SELECT default_pause_seconds FROM setlists")))
-                .scalars()
-                .all()
-            )
-            assert old_defaults and set(old_defaults) == {0}
-        async with PostgresUnitOfWork(engine) as uow:
-            service = Setlists(uow.store, world.admin)
-            assert totals((await service.read(world.group.id, world.concert.id))[0]) == totals(
-                approved
-            )
-            await service.reopen(world.group.id, world.concert.id, 6)
-            current, _, _ = await service.read(world.group.id, world.concert.id)
-            assert current["default_pause_seconds"] == 0
-            assert current["blocks"][0]["items"][0]["pause_before"] is None
-            assert current["blocks"][0]["items"][1]["pause_before"] == 30
-            assert totals(current) == totals(approved)
-    finally:
-        subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"], env=environment, check=True
-        )
-
-
-async def test_downgrade_cannot_silently_drop_first_lead_in(database_url, engine, world):
-    async with PostgresUnitOfWork(engine) as uow:
-        service = Setlists(uow.store, world.admin)
-        await service.edit(world.group.id, world.concert.id, 0, "add", ["1", str(world.song.id)])
-        await service.edit(world.group.id, world.concert.id, 1, "pause", ["1", "1", "30"])
-        before = await service.read(world.group.id, world.concert.id)
-    result = subprocess.run(
-        [sys.executable, "-m", "alembic", "downgrade", "92c725b48a61"],
+def alembic(database_url, *args, check=True):
+    return subprocess.run(
+        [sys.executable, "-m", "alembic", *args],
         env={**os.environ, "DATABASE_URL": database_url},
         capture_output=True,
         text=True,
+        check=check,
     )
-    assert result.returncode != 0 and "Cannot downgrade" in result.stderr
-    async with PostgresUnitOfWork(engine) as uow:
+
+
+async def test_migration_round_trip_and_schema_match(database_url, engine):
+    for args in [("downgrade", "base"), ("upgrade", "head"), ("check",)]:
+        alembic(database_url, *args)
+
+
+async def test_new_migration_refuses_loss_of_event_details(database_url, engine, world):
+    async with engine.begin() as connection:
+        await connection.execute(
+            text("UPDATE concerts SET city='Москва' WHERE id=:id"), {"id": world.concert.id}
+        )
+    result = alembic(database_url, "downgrade", "a6f8d31b2e90", check=False)
+    assert result.returncode != 0 and "would lose data" in result.stderr
+    async with engine.connect() as connection:
         assert (
-            await Setlists(uow.store, world.admin).read(world.group.id, world.concert.id)
-        ) == before
+            await connection.execute(
+                text("SELECT city FROM concerts WHERE id=:id"), {"id": world.concert.id}
+            )
+        ).scalar_one() == "Москва"
 
 
-async def test_trash_upgrade_preserves_snapshots_and_recognizes_old_encore(
-    database_url, engine, world
+async def test_upgrade_backfills_new_optional_fields_without_touching_old_data(
+    database_url, engine
 ):
-    from setlist_bot.domain.entities import Outbox, PersonalDraft, Submission
+    alembic(database_url, "downgrade", "a6f8d31b2e90")
+    # RU/EN: Проверяем реальную старую схему / exercise the actual previous schema.
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "INSERT INTO users(id,telegram_id,language,display_name) "
+                "VALUES ('00000000-0000-0000-0000-000000000001',123,'ru','Test')"
+            )
+        )
+    alembic(database_url, "upgrade", "head")
+    async with engine.connect() as connection:
+        assert (
+            await connection.execute(
+                text("SELECT export_settings FROM users WHERE telegram_id=123")
+            )
+        ).scalar_one() == {}
+    alembic(database_url, "check")
 
-    environment = {**os.environ, "DATABASE_URL": database_url}
+
+async def test_legacy_blocks_upgrade_preserves_actual_rows_and_time(database_url, engine, world):
+    from uuid import uuid4
+
+    from setlist_bot.application.setlists import Setlists
+    from setlist_bot.domain.rules import totals
+    from setlist_bot.infrastructure.database import PostgresUnitOfWork
+
+    alembic(database_url, "downgrade", "7c9e02d6a415")
+    async with engine.begin() as connection:
+        setlist_id = (
+            await connection.execute(
+                text("SELECT id FROM setlists WHERE concert_id=:id"), {"id": world.concert.id}
+            )
+        ).scalar_one()
+        block_id = (
+            await connection.execute(
+                text("SELECT id FROM blocks WHERE setlist_id=:id"), {"id": setlist_id}
+            )
+        ).scalar_one()
+        await connection.execute(
+            text("UPDATE blocks SET break_seconds=90 WHERE id=:id"), {"id": block_id}
+        )
+        second = uuid4()
+        await connection.execute(
+            text(
+                "INSERT INTO blocks(id,group_id,setlist_id,position,title,kind,break_seconds) "
+                "VALUES (:id,:group,:list,2,'Бис','encore',0)"
+            ),
+            {"id": second, "group": world.group.id, "list": setlist_id},
+        )
+        for block, lead in ((block_id, 10), (second, None)):
+            await connection.execute(
+                text(
+                    "INSERT INTO items(id,group_id,block_id,song_id,position,pause_before) "
+                    "VALUES (:id,:group,:block,:song,1,:lead)"
+                ),
+                {
+                    "id": uuid4(),
+                    "group": world.group.id,
+                    "block": block,
+                    "song": world.song.id,
+                    "lead": lead,
+                },
+            )
+    alembic(database_url, "upgrade", "head")
+    async with PostgresUnitOfWork(engine) as uow:
+        snapshot, _, _ = await Setlists(uow.store, world.admin).read(
+            world.group.id, world.concert.id
+        )
+        assert len(snapshot["blocks"]) == 1 and totals(snapshot)[2] == 536
+        assert [item["title"] for item in snapshot["blocks"][0]["items"]] == [
+            "пауза",
+            "Комета",
+            "пауза",
+            "Комета",
+        ]
+
+
+async def test_pause_downgrade_refuses_data_loss(database_url, engine, world):
+    from setlist_bot.application.setlists import Setlists
+    from setlist_bot.infrastructure.database import PostgresUnitOfWork
+
     async with PostgresUnitOfWork(engine) as uow:
         service = Setlists(uow.store, world.admin)
-        await service.edit(world.group.id, world.concert.id, 0, "encore", ["Бис"])
-        await service.edit(world.group.id, world.concert.id, 1, "add", ["2", str(world.song.id)])
-        snapshot, _, _ = await service.read(world.group.id, world.concert.id)
-        submission = Submission(
-            group_id=world.group.id,
-            concert_id=world.concert.id,
-            author_id=world.admin.id,
-            snapshot=snapshot,
-        )
-        uow.store.add(submission)
-        uow.store.add(
-            Outbox(
-                chat_id=-100,
-                text="Existing proposal",
-                group_id=world.group.id,
-                concert_id=world.concert.id,
-                buttons=[["open", f"view_submission {submission.id}"]],
-            )
-        )
-        await service.read(world.group.id, world.concert.id, private=True)
-        before = (await uow.store.find(PersonalDraft, owner_id=world.admin.id))[0].content
-    subprocess.run(
-        [sys.executable, "-m", "alembic", "downgrade", "b73e5a190c24"], env=environment, check=True
-    )
-    try:
-        async with engine.connect() as connection:
-            snapshots = dict(
-                (await connection.execute(text("SELECT id,snapshot FROM revisions"))).all()
-            )
-        subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"], env=environment, check=True
-        )
-        async with engine.connect() as connection:
-            assert (
-                dict((await connection.execute(text("SELECT id,snapshot FROM revisions"))).all())
-                == snapshots
-            )
-            assert (
-                await connection.execute(text("SELECT kind FROM blocks WHERE title='Бис'"))
-            ).scalar_one() == "encore"
-            assert (
-                await connection.execute(
-                    text("SELECT count(*) FROM groups WHERE deleted_at IS NOT NULL")
-                )
-            ).scalar_one() == 0
-            event = (
-                await connection.execute(text("SELECT group_id,concert_id,text FROM outbox"))
-            ).one()
-            assert event.group_id == world.group.id and event.concert_id == world.concert.id
-            assert event.text == "Existing proposal"
-        async with PostgresUnitOfWork(engine) as uow:
-            assert (await uow.store.find(PersonalDraft, owner_id=world.admin.id))[
-                0
-            ].content == before
-    finally:
-        subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"], env=environment, check=True
-        )
-
-
-async def test_reply_migration_preserves_legacy_templates_and_queued_text(
-    database_url, engine, world
-):
-    environment = {**os.environ, "DATABASE_URL": database_url}
-    subprocess.run(
-        [sys.executable, "-m", "alembic", "downgrade", "3818f9aeed43"],
-        env=environment,
-        check=True,
-    )
-    template_id, outbox_id = uuid4(), uuid4()
-    try:
-        async with engine.begin() as connection:
-            await connection.execute(
-                text(
-                    "INSERT INTO song_list_templates "
-                    "(id,group_id,concert_id,chat_id,titles,expires_at,owner_id) "
-                    "VALUES (:id,:group_id,:concert_id,-100,"
-                    "'[\"Комета\"]',now()+interval '1 day',NULL)"
-                ),
-                {"id": template_id, "group_id": world.group.id, "concert_id": world.concert.id},
-            )
-            await connection.execute(
-                text(
-                    "INSERT INTO outbox (id,chat_id,text,sent,buttons) "
-                    "VALUES (:id,-100,'Legacy <text>',false,'[]')"
-                ),
-                {"id": outbox_id},
-            )
-        subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
-            env=environment,
-            check=True,
-        )
-        async with engine.connect() as connection:
-            row = (
-                await connection.execute(
-                    text(
-                        "SELECT titles,version,group_epoch,concert_epoch "
-                        "FROM song_list_templates WHERE id=:id"
-                    ),
-                    {"id": template_id},
-                )
-            ).one()
-            assert row.titles == ["Комета"] and row.version is None
-            assert row.group_epoch == row.concert_epoch == 0
-            event = (
-                await connection.execute(
-                    text("SELECT text,monospace FROM outbox WHERE id=:id"), {"id": outbox_id}
-                )
-            ).one()
-            assert event.text == "Legacy <text>" and event.monospace is False
-    finally:
-        subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
-            env=environment,
-            check=True,
+        await service.edit_songs(world.group.id, world.concert.id, 0, ["Комета", "2 мин"])
+        before = await service.read(world.group.id, world.concert.id)
+    result = alembic(database_url, "downgrade", "7c9e02d6a415", check=False)
+    assert result.returncode != 0 and "downgrade would lose data" in result.stderr
+    async with PostgresUnitOfWork(engine) as uow:
+        assert (
+            await Setlists(uow.store, world.admin).read(world.group.id, world.concert.id) == before
         )

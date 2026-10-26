@@ -34,6 +34,8 @@ def messenger(engine):
                 date=datetime.now(UTC),
                 chat=Chat(id=chat_id, type="private" if private else "supergroup"),
             )
+            if response.deliveries:
+                response = response.deliveries[0][1]
             await processor.remember_response(chat_id, response, [message])
         return response
 
@@ -50,7 +52,7 @@ async def test_empty_concert_button_and_reply_create_first_variant_for_another_m
     send = messenger(engine)
     empty = await send(f"/use_concert {world.concert.id}", remember=100)
     prompt = await send(copy_button(empty), actor=2, remember=101)
-    assert "Какой вариант вы предлагаете?" in prompt.text
+    assert "Длительность предлагаемого" in prompt.text
     result = await send("Комета\nКомета", actor=2, reply=101)
     assert "Музыкант 2 · вариант 1" in dict((await variants(send, result, actor=2)).buttons)
     assert "1. Комета" in result.text and "2. Комета" in result.text
@@ -81,7 +83,7 @@ async def test_command_without_list_prompts_and_command_reply_keeps_anchor(engin
     send = messenger(engine)
     await send(f"/use_concert {world.concert.id}", remember=100)
     prompt = await send("/suggestion", remember=101)
-    assert prompt.force_reply and "Какой вариант" in prompt.text
+    assert prompt.force_reply and "Длительность" in prompt.text
     await send(f"/use_concert {world.concert2.id}")
     prompt2 = await send("/suggestion", reply=100, remember=102)
     assert prompt2.force_reply
@@ -114,7 +116,7 @@ async def test_private_reply_changes_only_owners_draft_and_does_not_publish(engi
     await send(f"/use_group {world.group.id}", actor=2, private=True)
     shown = await send(f"/use_concert {world.concert.id}", actor=2, private=True, remember=100)
     prompt = await send(copy_button(shown), actor=2, private=True, remember=101)
-    assert "/publish" in prompt.text
+    assert "/publish" not in prompt.text
     own = await send("Комета\nКомета", actor=2, private=True, reply=101)
     assert "Личный черновик" in own.text
     async with PostgresUnitOfWork(engine) as uow:
