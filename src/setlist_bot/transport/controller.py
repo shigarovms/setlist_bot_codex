@@ -146,7 +146,8 @@ class Controller:
         message = text.lstrip()
         head = message.split(maxsplit=1)[0] if message else ""
         raw_args = message[len(head) :].lstrip(" \t\r")
-        if raw_args.startswith("\n"):
+        body_on_new_line = raw_args.startswith("\n")
+        if body_on_new_line:
             raw_args = raw_args[1:]
         args = raw_args.strip()
         command = head.lstrip("/").split("@")[0].lower()
@@ -319,7 +320,11 @@ class Controller:
                     "group_pause_setting", name=group.name, time=clock(group.default_pause_seconds)
                 )
             )
-        table_input = "\t" in raw_args or ("\n" in raw_args and "|" not in raw_args.splitlines()[0])
+        table_input = "\t" in raw_args or (
+            bool(raw_args)
+            and (body_on_new_line or "\n" in raw_args)
+            and "|" not in raw_args.splitlines()[0]
+        )
         if command == "import" or (command == "song" and table_input):
             job = await self.importer.create(group_id, raw_args)
             return await self._import_preview(context, job)

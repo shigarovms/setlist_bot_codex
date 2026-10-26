@@ -17,6 +17,58 @@ SPACED_REPERTOIRE = (
 )
 
 
+@pytest.mark.parametrize("private", [False, True])
+@pytest.mark.parametrize(
+    "row,is_table",
+    [
+        ("Тестовая песня  03:20", True),
+        ("Тестовая песня\t03:20", True),
+        ("Тестовая песня | 03:20", False),
+    ],
+)
+async def test_single_row_after_song_command_uses_table_or_legacy_pipe_format(
+    engine, world, private, row, is_table
+):
+    from datetime import UTC, datetime
+
+    from aiogram import Bot, Dispatcher
+    from aiogram.types import Chat, Message, MessageEntity, Update, User
+    from test_telegram import FakeTelegram
+
+    from setlist_bot.transport.telegram import make_router
+
+    processor = Processor(engine)
+    if private:
+        await processor.process(1, 1, 1, f"/use_group {world.group.id}", private=True)
+    session = FakeTelegram()
+    async with Bot("1110437563:TEST_ONLY_NOT_A_REAL_TELEGRAM_TOKEN", session=session) as bot:
+        dispatcher = Dispatcher()
+        dispatcher.include_router(make_router(processor, "botToPract696_bot"))
+        command = "/song@botToPract696_bot"
+        await dispatcher.feed_update(
+            bot,
+            Update(
+                update_id=2,
+                message=Message(
+                    message_id=100,
+                    date=datetime.now(UTC),
+                    from_user=User(id=1, is_bot=False, first_name="Админ"),
+                    chat=Chat(
+                        id=1 if private else -100, type="private" if private else "supergroup"
+                    ),
+                    text=command + "\n" + row,
+                    entities=[MessageEntity(type="bot_command", offset=0, length=len(command))],
+                ),
+            ),
+        )
+    assert session.admin_requests == 0
+    assert any("новых — 1" in method.text for method in session.sent) == is_table
+    assert any("Проверьте и подтвердите" in method.text for method in session.sent)
+    assert not any("Проверьте поля песни" in method.text for method in session.sent)
+    async with PostgresUnitOfWork(engine) as uow:
+        assert len(await uow.store.find(CatalogImport)) == int(is_table)
+
+
 def test_user_spaced_paste_matches_original_tsv_for_all_ten_songs():
     parsed = parse_import(SPACED_REPERTOIRE)
     assert not parsed.error and len(parsed.rows) == 10
