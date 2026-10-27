@@ -23,6 +23,8 @@ class User(Entity):
 
 @dataclass(kw_only=True)
 class Group(Entity):
+    owner_id: UUID | None = None
+    reminders_enabled: bool = True
     name: str
     language: str = "ru"
     default_pause_seconds: int = 5
@@ -253,3 +255,11 @@ class SupportMessage(Entity):
     user_id: UUID
     chat_id: int
     message_id: int | None = None
+
+
+@dataclass(kw_only=True)
+class Reminder(Entity):
+    group_id: UUID
+    concert_id: UUID
+    day: date
+    outbox_id: UUID

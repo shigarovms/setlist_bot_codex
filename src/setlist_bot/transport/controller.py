@@ -7,6 +7,7 @@ from uuid import UUID
 
 from setlist_bot.application.backup import Backup
 from setlist_bot.application.catalog import SONG_FIELDS, Catalog
+from setlist_bot.application.chat_cleanup import collect as cleanup_messages
 from setlist_bot.application.command_inputs import (
     GROUP_INPUTS,
     SETLIST_INPUTS,
@@ -27,6 +28,7 @@ from setlist_bot.application.support import Support
 from setlist_bot.application.templates import Templates
 from setlist_bot.application.trash import RETENTION, Trash
 from setlist_bot.domain.concerts import compact_duration, date_label, parse_concert, today
+from setlist_bot.domain.display import entry_labels, short_duration
 from setlist_bot.domain.entities import (
     CatalogImport,
     CatalogProposal,
@@ -38,6 +40,7 @@ from setlist_bot.domain.entities import (
     Membership,
     Outbox,
     Revision,
+    Setlist,
     Song,
     Submission,
     SupportSettings,
@@ -92,6 +95,7 @@ class Response:
     auxiliary_message_ids: list[int] = field(default_factory=list)
     button_columns: int = 1
     group_creation_id: UUID | None = None
+    navigation_owner_id: UUID | None = None
     support_prompt_id: UUID | None = None
     command_input_id: UUID | None = None
     input_rejected: bool = False
@@ -280,7 +284,9 @@ class Controller:
             assert session is not None
             session, picked = await self.selection.load(session.id)
             require(picked["stage"] == "pause", "selection_expired")
-            seconds = parse_pause(args, bare_seconds=True)
+            seconds = parse_pause(
+                args + " мин" if args.strip().isdigit() else args, bare_seconds=True
+            )
             require(seconds is not None, "pause_duration")
             require(len(picked["selected"]) < 200, "song_list_input")
             picked["selected"].append({"pause_seconds": seconds})
@@ -365,6 +371,73 @@ class Controller:
             )
         if command == "start" and args == "support":
             return await self.execute("/support")
+        if command == "position_cancel":
+            rows = await self.store.find(
+                Confirmation, id=UUID(args), user_id=self.user.id, chat_id=self.chat_id
+            )
+            require(
+                bool(rows) and json.loads(rows[0].command).get("kind") == "position_choice",
+                "input_expired",
+            )
+            await self.store.delete(rows[0])
+            return Response(self.t("ok"))
+        if command == "position":
+            identifier, raw = args.split()
+            rows = await self.store.find(
+                Confirmation, id=UUID(identifier), user_id=self.user.id, chat_id=self.chat_id
+            )
+            require(bool(rows) and rows[0].expires_at > now(), "input_expired")
+            row = rows[0]
+            data = json.loads(row.command)
+            require(
+                data.get("kind") == "position_choice" and data["private"] == self.private,
+                "input_expired",
+            )
+            context = await self.groups.context(self.chat_id, self.private)
+            position_group_id, position_concert_id = (
+                UUID(data["group_id"]),
+                UUID(data["concert_id"]),
+            )
+            await self.groups.access(position_group_id)
+            require(
+                context.group_id == position_group_id and context.concert_id == position_concert_id,
+                "input_expired",
+            )
+            group = await self.store.get(Group, position_group_id)
+            concert = await self.store.get(Concert, position_concert_id)
+            require(
+                group.lifecycle_version == data["group_epoch"]
+                and concert.lifecycle_version == data["concert_epoch"],
+                "input_expired",
+            )
+            snapshot, version, approved = await self.setlists.read(
+                position_group_id, position_concert_id, private=self.private
+            )
+            require(version == data["version"] and not approved, "conflict")
+            items = snapshot["blocks"][0]["items"]
+            index = int(raw)
+            require(0 <= index < len(items), "input")
+            if data["operation"] == "move" and data.get("source") is None:
+                data["source"] = index
+                row.command = json.dumps(data)
+                return self._position_buttons(row, data, items)
+            await self.store.delete(row)
+            if data["operation"] == "remove":
+                return await self.confirm(
+                    context,
+                    f"edit_list remove {version} 1 {index + 1}",
+                    self.t("remove_entry", title=items[index]["title"]),
+                    concert=True,
+                )
+            await self.setlists.edit(
+                position_group_id,
+                position_concert_id,
+                version,
+                "move",
+                ["1", str(data["source"] + 1), str(index + 1)],
+                private=self.private,
+            )
+            return await self._show(context)
         if command in ("start", "help"):
             return Response(self.t("welcome" if command == "start" else "help"))
         if command == "language":
@@ -487,13 +560,11 @@ class Controller:
         if command == "register":
             require(not self.private, "group_only")
             if not args:
-                require(
-                    not await self.store.find(Membership, group_id=group_id, user_id=self.user.id),
-                    "already_member",
-                )
                 return await self._request_input(command, context)
-            await self.groups.register(group_id, args)
-            return Response(self.t("registered"))
+            membership = await self.groups.register(group_id, args)
+            return Response(
+                self.t("nickname_saved" if membership.status == "active" else "registered")
+            )
         group = await self.groups.access(group_id)
         if command in GROUP_INPUTS and not args:
             if command in (
@@ -507,6 +578,58 @@ class Controller:
                 await self.groups.access(group_id, admin=True)
             if command not in ("archive", "unarchive") or context.selected_song_id is None:
                 return await self._request_input(command, context)
+        if command == "reminders":
+            await self.groups.access(group_id, admin=True)
+            reminder_args = args.split()
+            require(len(reminder_args) <= 2, "input")
+            if len(reminder_args) == 2:
+                require(UUID(reminder_args[1]) == group_id, "input_expired")
+            reminder_action = reminder_args[0] if reminder_args else ""
+            require(reminder_action in ("", "on", "off"), "input")
+            if reminder_action:
+                group.reminders_enabled = reminder_action == "on"
+            return Response(
+                self.t("reminders_on" if group.reminders_enabled else "reminders_off"),
+                [
+                    (
+                        self.t(
+                            "reminder_disable" if group.reminders_enabled else "reminder_enable"
+                        ),
+                        f"reminders {'off' if group.reminders_enabled else 'on'} {group_id}",
+                    )
+                ],
+            )
+        if command == "cleanup_chat":
+            if not self.private:
+                await self.groups.access(group_id, admin=True)
+            if not confirmed:
+                cleanup_confirmation = await self.confirm(
+                    context, "cleanup_chat", self.t("cleanup_prompt")
+                )
+                cleanup_confirmation.buttons[0] = (
+                    self.t("cleanup_yes"),
+                    cleanup_confirmation.buttons[0][1],
+                )
+                return cleanup_confirmation
+            return Response(
+                self.t("cleanup_done"),
+                delete_message_ids=await cleanup_messages(self.store, self.chat_id),
+            )
+        if command == "administrator":
+            operation, member_id = args.split()
+            require(operation in ("grant", "revoke"), "input")
+            require(group.owner_id == self.user.id, "owner_only")
+            if not confirmed:
+                member = await self.store.get(Membership, UUID(member_id))
+                require(member.group_id == group_id and member.status == "active", "not_found")
+                name = await self.groups.name(group_id, member.user_id)
+                return await self.confirm(
+                    context,
+                    f"administrator {args}",
+                    self.t("administrator_prompt", name=name, action=self.t(operation)),
+                )
+            await self.groups.administrator(group_id, UUID(member_id), operation == "grant")
+            return await self.execute("members")
         if command in ("backup", "backup_group"):
             require(not args or UUID(args) == group_id, "not_found")
             return Response(
@@ -625,8 +748,21 @@ class Controller:
             buttons = []
             for member in await self.store.find(Membership, group_id=group_id):
                 user = await self.store.get(User, member.user_id)
-                label = user.display_name or str(user.telegram_id)
-                lines.append(f"{label} · {member.musical_role} · {self.t(member.status)}")
+                label = await self.groups.name(group_id, user.id)
+                role = "owner" if group.owner_id == user.id else member.role
+                lines.append(f"{label} · {self.t(role)} · {self.t(member.status)}")
+                if (
+                    group.owner_id == self.user.id
+                    and user.id != group.owner_id
+                    and member.status == "active"
+                ):
+                    operation = "revoke" if member.role == "admin" else "grant"
+                    buttons.append(
+                        (
+                            self.t(operation) + " · " + label,
+                            f"administrator {operation} {member.id}",
+                        )
+                    )
                 if member.status == "pending":
                     for action, key in (("yes", "approve_button"), ("no", "reject_button")):
                         buttons.append((f"{self.t(key)} {label}", f"member {action} {member.id}"))
@@ -832,7 +968,7 @@ class Controller:
             for proposal in proposals:
                 preview = proposal.payload.get("alias") or self._song_card(proposal.payload)
                 author = await self.store.get(User, proposal.author_id)
-                lines.append(f"{author.display_name or author.telegram_id}\n{preview}")
+                lines.append(f"{await self.groups.name(group_id, author.id)}\n{preview}")
                 for action, key in (("yes", "approve_button"), ("no", "reject_button")):
                     buttons.append(
                         (
@@ -886,8 +1022,16 @@ class Controller:
                 key=lambda c: (c.date, str(c.id)),
                 reverse=past,
             )
+            approved_concerts = {
+                row.concert_id
+                for row in await self.store.find(Setlist, group_id=group_id, approved=True)
+            }
             buttons = [
-                (concert_label(c, self.language, button=True), f"use_concert {c.id}")
+                (
+                    ("✅ " if c.id in approved_concerts else "")
+                    + concert_label(c, self.language, button=True),
+                    f"use_concert {c.id}",
+                )
                 for c in concerts
             ]
             if past:
@@ -911,7 +1055,29 @@ class Controller:
                 group_id, submitted.concert_id
             )
             require(not approved, "approved")
-            return await self.execute(f"apply {submitted.id}")
+            expected_shared = submitted.snapshot.get("shared_version")
+            require(
+                expected_shared is None or expected_shared == context.observed_version, "conflict"
+            )
+            response = await self.execute(f"apply {submitted.id}")
+            if self.source_message_id is not None:
+                response.edit_message_ids = [self.source_message_id]
+                events = await self.store.find(
+                    Outbox, group_id=group_id, concert_id=submitted.concert_id
+                )
+                for event in events:
+                    if any(
+                        button[1] == f"apply_submission {submitted.id}" for button in event.buttons
+                    ):
+                        refs = await self.store.find(Confirmation, chat_id=self.chat_id)
+                        for ref in refs:
+                            payload = json.loads(ref.command)
+                            if payload.get("submission_id") == str(submitted.id):
+                                response.edit_message_ids = payload.get(
+                                    "message_ids", response.edit_message_ids
+                                )
+                                await self.store.delete(ref)
+            return response
         if command == "view_submission":
             submission = await self.store.get(Submission, UUID(args))
             require(submission.group_id == group_id, "not_found")
@@ -934,6 +1100,36 @@ class Controller:
         require(context.concert_id is not None, "select_concert")
         concert_id = context.concert_id
         assert concert_id is not None
+        if command in ("move", "remove") and not args:
+            snapshot, version, approved = await self.setlists.read(
+                group_id, concert_id, private=self.private
+            )
+            require(not approved, "approved")
+            require(bool(snapshot["blocks"][0]["items"]), "empty_setlist")
+            context.observed_version = version
+            row = Confirmation(
+                user_id=self.user.id,
+                chat_id=self.chat_id,
+                expires_at=now() + timedelta(minutes=10),
+                command=json.dumps(
+                    {
+                        "kind": "position_choice",
+                        "group_id": str(group_id),
+                        "concert_id": str(concert_id),
+                        "version": version,
+                        "private": self.private,
+                        "operation": command,
+                        "group_epoch": group.lifecycle_version,
+                        "concert_epoch": (
+                            await self.store.get(Concert, concert_id)
+                        ).lifecycle_version,
+                    }
+                ),
+            )
+            self.store.add(row)
+            return self._position_buttons(
+                row, json.loads(row.command), snapshot["blocks"][0]["items"]
+            )
         if command in SETLIST_INPUTS and not args:
             return await self._request_input(command, context)
         if command in ("delete_concert", "delete_concert_final"):
@@ -1071,6 +1267,20 @@ class Controller:
                             input_rejected=bool(selector.strip()) and not songs,
                         )
                     values = [block, str(songs[0].id)]
+            if command in ("move", "remove"):
+                snapshot, _, _ = await self.setlists.read(
+                    group_id, concert_id, private=self.private
+                )
+                song_rows = [
+                    index + 1
+                    for index, item in enumerate(snapshot["blocks"][0]["items"])
+                    if not is_pause(item)
+                ]
+                for slot in [1, 2] if command == "move" else [1]:
+                    require(slot < len(values), "setlist_input")
+                    number = int(values[slot])
+                    require(1 <= number <= len(song_rows), "setlist_input")
+                    values[slot] = str(song_rows[number - 1])
             lengths = {"add": 2, "move": 3, "pause": 3, "default_pause": 1, "break": 2, "remove": 2}
             require(len(values) == lengths[operation], "setlist_input")
             if command == "remove" and not confirmed:
@@ -1172,7 +1382,7 @@ class Controller:
                             "approved_action" if revision.action == "approved" else revision.action
                         ),
                         time=revision.created_at.isoformat(timespec="seconds"),
-                        author=author.display_name or str(author.telegram_id),
+                        author=await self.groups.name(group_id, author.id),
                     )
                 )
             return Response(
@@ -1218,6 +1428,8 @@ class Controller:
             require(bool(bindings), "no_chat")
             require(any(block["items"] for block in snapshot["blocks"]), "empty_setlist")
             submission = await self.setlists.publish(group_id, concert_id)
+            _, shared_version, _ = await self.setlists.read(group_id, concert_id)
+            submission.snapshot = {**submission.snapshot, "shared_version": shared_version}
             public_body = (
                 group.name
                 + "\n"
@@ -1229,7 +1441,9 @@ class Controller:
                     private=True,
                 )
             )
-            public_prefix = tr(group.language, "submission") + "\n\n"
+            public_prefix = (
+                tr(group.language, "submission", name=await self.groups.name(group_id)) + "\n\n"
+            )
             public_text = public_prefix + public_body
             self.store.add(
                 Outbox(
@@ -1255,7 +1469,7 @@ class Controller:
         author = await self.store.get(User, revision.proposer_id or revision.author_id)
         return self.t(
             "variant_label" if revision.suggestion_number is not None else "revision_label",
-            name=author.display_name or self.t("member_name"),
+            name=await self.groups.name(revision.group_id, author.id),
             number=revision.suggestion_number
             if revision.suggestion_number is not None
             else revision.number,
@@ -1414,7 +1628,7 @@ class Controller:
             + (
                 ""
                 if command in CONCERT_INPUTS
-                or command in ("edit_bpm", "edit_lights", "edit_comment")
+                or command in ("concert", "edit_bpm", "edit_lights", "edit_comment")
                 else self.t("input_prompt", command=command)
             )
             + "\n\n"
@@ -1623,8 +1837,13 @@ class Controller:
             else title
             for entry, title in zip(data["selected"], titles, strict=True)
         ]
+        numbers = entry_labels(
+            [{"kind": "pause"} if isinstance(entry, dict) else {} for entry in data["selected"]]
+        )
         body = "\n".join(
-            titles if reviewing else [f"{i}. {title}" for i, title in enumerate(live_titles, 1)]
+            titles
+            if reviewing
+            else [f"{number}. {title}" for number, title in zip(numbers, live_titles, strict=True)]
         )
         entries = [
             {"kind": "pause", "duration_seconds": entry["pause_seconds"], "pause_before": 0}
@@ -1646,7 +1865,9 @@ class Controller:
             + "\n"
             + self.t(
                 "selection_planned",
-                time=clock(planned) if planned is not None else self.t("unknown_duration"),
+                time=short_duration(planned, self.language, minutes_only=True)
+                if planned is not None
+                else self.t("unknown_duration"),
             )
             + "\n\n"
             + (body or self.t("selection_no_songs"))
@@ -1801,10 +2022,8 @@ class Controller:
             require(bool(data["selected"]), "empty_setlist")
             data["stage"] = "review"
         elif value == self.t("selection_remove_last"):
-            for index in range(len(data["selected"]) - 1, -1, -1):
-                if isinstance(data["selected"][index], str):
-                    data["selected"].pop(index)
-                    break
+            if data["selected"]:
+                data["selected"].pop()
         elif value in (self.t("selection_prev"), self.t("selection_next")):
             page = data["page"] + (-1 if value == self.t("selection_prev") else 1)
             require(0 <= page * PAGE_SIZE < len(data["songs"]), "selection_expired")
@@ -2008,11 +2227,8 @@ class Controller:
             ]
         )
         if level == "options":
-            buttons = [
-                (self.t("export_settings"), f"slformat {key} main"),
-                (self.t("support_button"), "support"),
-            ]
-            membership = (
+            buttons = [(self.t("export_settings"), f"slformat {key} main")]
+            member = (
                 await self.store.find(
                     Membership,
                     group_id=UUID(data["group_id"]),
@@ -2020,18 +2236,21 @@ class Controller:
                     status="active",
                 )
             )[0]
-            if membership.role == "admin":
+            if member.role == "admin":
                 buttons.append(
                     (self.t("concert_settings"), f"concert_settings {data['concert_id']}")
                 )
-            buttons += [
-                (label, f"slopt {key} {i}")
-                for i, (label, action) in enumerate(await self._card_options(data))
-                if not action.startswith("export_menu ")
-            ]
             if variants:
                 buttons.append((self.t("menu_variants"), f"slmenu {key} variants"))
-            return buttons + [(self.t("menu_back"), f"slmenu {key} main")]
+            for index, (label, action) in enumerate(await self._card_options(data)):
+                if action.startswith("delete_concert "):
+                    buttons.append((label, f"slopt {key} {index}"))
+            if self.private or member.role == "admin":
+                buttons.append((self.t("cleanup_button"), "cleanup_chat"))
+            buttons.extend(
+                [(self.t("support_button"), "support"), (self.t("menu_back"), f"slmenu {key} main")]
+            )
+            return buttons
         require(page >= 0, "input")
         page = min(page, max(0, (len(variants) - 1) // 20))
         buttons = [
@@ -2235,7 +2454,7 @@ class Controller:
             if created:
                 group = await self.store.get(Group, UUID(data["group_id"]))
                 concert = await self.store.get(Concert, UUID(data["concert_id"]))
-                name = self.user.display_name or self.t("member_name")
+                name = await self.groups.name(UUID(data["group_id"]))
                 header = tr(
                     admin.language,
                     "request_admin",
@@ -2389,4 +2608,20 @@ class Controller:
             monospace_body=text,
             suggestion_template_id=template_id,
             menu_card_id=card.id,
+        )
+
+    def _position_buttons(
+        self, row: Confirmation, data: dict[str, Any], items: list[dict[str, Any]]
+    ) -> Response:
+        labels = entry_labels(items)
+        return Response(
+            self.t("choose_position"),
+            [
+                (
+                    f"{labels[index]}. {item['title']} · {clock(item['duration_seconds'])}",
+                    f"position {row.id.hex} {index}",
+                )
+                for index, item in enumerate(items)
+            ]
+            + [(self.t("cancel_button"), f"position_cancel {row.id.hex}")],
         )

@@ -83,7 +83,7 @@ async def test_suggestions_replace_whole_setlist_and_number_each_proposer(engine
     await send("/add Комета")
     await send(f"/use_concert {world.concert.id}", actor=2)
     second = await send("/suggestion\nVIBY\nСлавик", actor=2)
-    assert "Борис · вариант 1" in dict((await variants(send, second, actor=2)).buttons)
+    assert "гитарист · вариант 1" in dict((await variants(send, second, actor=2)).buttons)
     stale = await send("/suggestion\nАтомы")
     assert "уже изменились" in stale.text
     third = await send("/suggestion\nАтомы\nСердце лёд")
@@ -103,7 +103,7 @@ async def test_suggestions_replace_whole_setlist_and_number_each_proposer(engine
     restored = await send(restore.buttons[0][1])
     assert "6. VIBY" in restored.text
     history = await send("/versions")
-    assert {"Алексей · вариант 1", "Алексей · вариант 2", "Борис · вариант 1"} <= {
+    assert {"Алексей · вариант 1", "Алексей · вариант 2", "гитарист · вариант 1"} <= {
         label for label, _ in history.buttons
     }
 
@@ -129,7 +129,7 @@ async def test_private_suggestion_stays_private_until_explicit_publish_and_apply
     async with PostgresUnitOfWork(engine) as uow:
         event = (await uow.store.find(Outbox))[0]
     result = await send(event.buttons[0][1])
-    assert "Борис · вариант 1" in dict((await variants(send, result)).buttons)
+    assert "гитарист · вариант 1" in dict((await variants(send, result)).buttons)
     async with PostgresUnitOfWork(engine) as uow:
         revision = (
             await Setlists(uow.store, world.admin).history(world.group.id, world.concert.id)

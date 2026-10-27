@@ -134,6 +134,7 @@ class SetlistMenus:
             {
                 **data,
                 "kind": REQUEST,
+                "message_ids": [],
                 "status": "pending",
                 "operation": operation,
                 "source_chat_id": self.chat_id,

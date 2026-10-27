@@ -34,13 +34,14 @@ Menu = Literal["default", "private", "group", "admin"]
 # Only user-facing commands belong here; callbacks and commands requiring opaque
 # identifiers are intentionally excluded. Backend permissions remain authoritative.
 DESCRIPTIONS: dict[str, tuple[str, str]] = {
+    "reminders": ("Настроить напоминания о сет-листах", "Setlist reminders"),
     "start": ("Начать работу с ботом", "Start using the bot"),
     "support": ("Связаться с поддержкой", "Contact support"),
     "help": ("Команды и примеры использования", "Commands and examples"),
     "groups": ("Выбрать музыкальный коллектив", "Select a musical group"),
     "register": (
-        "Подать заявку в коллектив: /register гитарист",
-        "Apply to join: /register guitarist",
+        "Имя в коллективе и заявка на вступление",
+        "Group display name and membership application",
     ),
     "catalog": ("Репертуар и поиск песен", "Repertoire and song search"),
     "archived": ("Архивные песни", "Archived songs"),
@@ -93,9 +94,9 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
 COMMON = (
     "support",
     "start",
+    "concerts",
     "help",
     "catalog",
-    "concerts",
     "setlist",
     "shared",
     "export",
@@ -114,6 +115,7 @@ COMMON = (
     "cancel",
 )
 ADMIN = (
+    "reminders",
     "members",
     "proposals",
     "concert",
@@ -128,7 +130,7 @@ ADMIN = (
     "trash",
 )
 MENUS: dict[Menu, tuple[str, ...]] = {
-    "default": ("start", "help"),
+    "default": ("support", "start", "concerts", "help"),
     "private": COMMON + ("groups", "publish", "language") + ADMIN,
     "group": COMMON + ("register",),
     "admin": COMMON + ("register", "group", "approve", "reopen") + ADMIN,

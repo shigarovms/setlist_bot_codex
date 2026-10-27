@@ -26,7 +26,7 @@ from unidecode import unidecode
 
 from setlist_bot.application.exports import Audience
 from setlist_bot.domain.concerts import date_label
-from setlist_bot.domain.display import english_colors, pause_title, position_label
+from setlist_bot.domain.display import english_colors, entry_labels, pause_title
 from setlist_bot.domain.export_settings import settings
 from setlist_bot.domain.rules import clock, flat_content, is_pause, totals
 from setlist_bot.transport.i18n import tr
@@ -137,6 +137,13 @@ class PdfDocuments:
             width, height = page_size
             canvas.saveState()
             status = tr(language, "pdf_approved" if payload["approved"] else "pdf_draft")
+            if payload["approved"] and snapshot.get("approved_by"):
+                status = tr(
+                    language,
+                    "approved_by",
+                    name=snapshot["approved_by"],
+                    version=payload["version"],
+                )
             status_width = pdfmetrics.stringWidth(status, BOLD, 10)
             info = " · ".join(
                 part
@@ -183,13 +190,14 @@ class PdfDocuments:
     ) -> list[Flowable]:
         story: list[Flowable] = []
         items = snapshot["blocks"][0]["items"]
+        numbers = entry_labels(items)
         for position, item in enumerate(items, 1):
             title = " ".join(title_text(item["title"], transliterate).split())
             if is_pause(item):
                 title = (
                     pause_title(language, transliterate) + "  " + clock(item["duration_seconds"])
                 )
-            number = position_label(position, len(items))
+            number = numbers[position - 1]
             story.append(
                 KeepTogether(
                     [
@@ -221,8 +229,9 @@ class PdfDocuments:
                     )
                 ]
             ]
+            numbers = entry_labels(block["items"])
             for position, item in enumerate(block["items"], 1):
-                prefix = position_label(position, len(block["items"]))
+                prefix = numbers[position - 1]
                 title = (
                     pause_title(language, transliterate)
                     if is_pause(item)

@@ -62,7 +62,7 @@ async def test_picker_timing_undo_and_publish_once(engine, world):
     assert "03:38" in first.text and "неизвестно" in first.text
     twice = await send(label, True)
     assert "07:21" in twice.text
-    undo = await send("↩️ Удалить последнюю песню", True)
+    undo = await send("↩️ Удалить последнюю", True)
     assert "03:38" in undo.text and "Всего позиций: 1" in undo.text
     review = await send("✅ Завершить", True)
     card = await send(

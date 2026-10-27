@@ -165,7 +165,14 @@ class TrashCleanup:
             ):
                 await self.store.delete(session)
         filters = {"group_id": concert.group_id, "concert_id": concert.id}
-        for kind in (e.Outbox, e.ExportSnapshot, e.SongListTemplate, e.PersonalDraft, e.Submission):
+        for kind in (
+            e.Reminder,
+            e.Outbox,
+            e.ExportSnapshot,
+            e.SongListTemplate,
+            e.PersonalDraft,
+            e.Submission,
+        ):
             await self._delete(kind, **filters)
         for setlist in await self.store.find(e.Setlist, **filters):
             setlist.approved_revision_id = None

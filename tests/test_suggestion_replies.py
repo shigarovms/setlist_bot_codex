@@ -54,7 +54,7 @@ async def test_empty_concert_button_and_reply_create_first_variant_for_another_m
     prompt = await send(copy_button(empty), actor=2, remember=101)
     assert "Длительность предлагаемого" in prompt.text
     result = await send("Комета\nКомета", actor=2, reply=101)
-    assert "Музыкант 2 · вариант 1" in dict((await variants(send, result, actor=2)).buttons)
+    assert "гитарист · вариант 1" in dict((await variants(send, result, actor=2)).buttons)
     assert "1. Комета" in result.text and "2. Комета" in result.text
     async with PostgresUnitOfWork(engine) as uow:
         data, version, _ = await Setlists(uow.store, world.member).read(

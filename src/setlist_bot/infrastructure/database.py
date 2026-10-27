@@ -73,6 +73,8 @@ table(
 table(
     e.Group,
     "groups",
+    col("owner_id", Uuid, ForeignKey("users.id"), nullable=True),
+    col("reminders_enabled", Boolean, server_default="true"),
     col("name", String(200)),
     col("language", String(2)),
     col("default_pause_seconds", Integer),
@@ -365,6 +367,17 @@ table(
     col("chat_id", BigInteger),
     col("message_id", BigInteger, nullable=True),
     UniqueConstraint("chat_id", "message_id"),
+)
+
+
+table(
+    e.Reminder,
+    "reminders",
+    tenant(),
+    col("concert_id", Uuid, ForeignKey("concerts.id")),
+    col("day", Date),
+    col("outbox_id", Uuid, ForeignKey("outbox.id"), unique=True),
+    UniqueConstraint("concert_id", "day"),
 )
 
 

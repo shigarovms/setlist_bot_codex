@@ -102,7 +102,7 @@ async def test_three_levels_variants_refresh_and_no_context_changes_during_navig
     await send(f"/use_concert {world.concert2.id}")
     choices = await variants(send, first)
     assert choices.markup_only and choices.edit_message_ids == [50] and choices.text == ""
-    assert {"Музыкант 1 · вариант 1", "Музыкант 2 · вариант 1"} <= dict(choices.buttons).keys()
+    assert {"Музыкант 1 · вариант 1", "гитарист · вариант 1"} <= dict(choices.buttons).keys()
     original = await send(action(choices, "Музыкант 1 · вариант 1"))
     assert "Новый год" in original.text and original.text.count("Комета") == 1
     assert all(len(callback.encode()) <= 64 for _, callback in choices.buttons)
@@ -116,7 +116,7 @@ async def test_admin_approves_immediately_reopen_requires_one_time_confirmation(
     card = await prepared(send, world)
     result = await send(action(card, "✅ Утвердить"), source=50, remember=50)
     assert await approved(engine, world)
-    assert result.edit_message_ids == [50] and "Утверждённый" in result.text
+    assert result.edit_message_ids == [50] and "Одобрен:" in result.text
     edit = action(result, "✏️ Редактировать")
     question = await send(edit, source=50)
     assert question.markup_only and "Статус „Утверждён“ будет снят" in question.text
@@ -148,7 +148,7 @@ async def test_member_approval_request_is_private_to_admin_deduplicated_and_idem
     assert len(rows) == 1 and rows[0].user_id == world.admin.id
     async with PostgresUnitOfWork(engine) as uow:
         event = (await uow.store.find(Outbox, chat_id=1))[0]
-        assert "Музыкант 2" in event.text and "Коллектив А" in event.text and "Комета" in event.text
+        assert "гитарист" in event.text and "Коллектив А" in event.text and "Комета" in event.text
         decision = event.buttons[0 if accept else 1][1]
     assert (await send(decision, actor=2, private=True)).callback_notice
     result = await send(decision, private=True)
@@ -170,7 +170,7 @@ async def test_member_reopen_request_keeps_approved_until_admin_accepts(engine, 
     async with PostgresUnitOfWork(engine) as uow:
         events = await uow.store.find(Outbox, chat_id=-100)
         assert any(
-            "Музыкант 2" in e.text and "редактирование утверждённого" in e.text for e in events
+            "гитарист" in e.text and "редактирование утверждённого" in e.text for e in events
         )
         request = (await uow.store.find(Outbox, chat_id=1))[0]
     await send(request.buttons[0][1], private=True)

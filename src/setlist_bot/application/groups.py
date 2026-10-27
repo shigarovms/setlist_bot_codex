@@ -37,7 +37,7 @@ class Groups:
     async def create(self, name: str, chat_id: int) -> Group:
         await self.check_creation_chat(chat_id)
         require(0 < len(name.strip()) <= 200, "group_name")
-        group = Group(name=name.strip(), language=self.user.language)
+        group = Group(name=name.strip(), language=self.user.language, owner_id=self.user.id)
         self.store.add(group)
         await self.store.flush()
         self.store.add(
@@ -112,10 +112,10 @@ class Groups:
         require(0 < len(musical_role.strip()) <= 200, "musical_role")
         group = await self.store.get(Group, group_id, lock=True)
         require(group.deleted_at is None, "in_trash")
-        require(
-            not await self.store.find(Membership, group_id=group_id, user_id=self.user.id),
-            "already_member",
-        )
+        existing = await self.store.find(Membership, group_id=group_id, user_id=self.user.id)
+        if existing:
+            existing[0].musical_role = musical_role.strip()
+            return existing[0]
         membership = Membership(
             group_id=group_id, user_id=self.user.id, musical_role=musical_role.strip()
         )
@@ -146,3 +146,20 @@ class Groups:
                 context.observed_version = None
                 context.selected_song_id = None
         return context
+
+    async def name(self, group_id: UUID, user_id: UUID | None = None) -> str:
+        target = user_id or self.user.id
+        rows = await self.store.find(Membership, group_id=group_id, user_id=target)
+        user = await self.store.get(User, target)
+        return (rows[0].musical_role if rows else "") or user.display_name or str(user.telegram_id)
+
+    async def administrator(self, group_id: UUID, member_id: UUID, grant: bool) -> None:
+        # RU: Владелец — отдельное право, оно не передаётся вместе с ролью admin.
+        # EN: Ownership is independent of the administrative role and cannot be granted here.
+        group = await self.access(group_id, admin=True)
+        require(group.owner_id == self.user.id, "owner_only")
+        member = await self.store.get(Membership, member_id, lock=True)
+        require(member.group_id == group_id and member.status == "active", "not_found")
+        require(member.user_id != group.owner_id, "owner_only")
+        require(member.role != ("admin" if grant else "member"), "already_done")
+        member.role = "admin" if grant else "member"

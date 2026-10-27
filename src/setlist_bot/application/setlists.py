@@ -18,6 +18,7 @@ from setlist_bot.application.catalog import Catalog
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.support import Support
+from setlist_bot.domain.display import entry_labels
 from setlist_bot.domain.entities import (
     Block,
     Concert,
@@ -372,6 +373,7 @@ class Setlists:
         require(not setlist.approved, "approved")
         content = await self._working(setlist)
         require(any(b["items"] for b in content["blocks"]), "empty_setlist")
+        content["approved_by"] = await self.groups.name(group_id)
         revision = await self._record(setlist, "approved", content)
         setlist.approved_revision_id = revision.id
         setlist.approved = True
@@ -380,11 +382,9 @@ class Setlists:
         support = Support(self.store, self.user)
         lines: list[str] = []
         for block in revision.snapshot["blocks"]:
-            for item in block["items"]:
+            for label, item in zip(entry_labels(block["items"]), block["items"], strict=True):
                 seconds = item["duration_seconds"]
-                lines.append(
-                    f"{len(lines) + 1}. {item['title']}  {seconds // 60:02d}:{seconds % 60:02d}"
-                )
+                lines.append(f"{label}. {item['title']}  {seconds // 60:02d}:{seconds % 60:02d}")
         await support.notify(
             f"Утверждён сет-лист · Версия {revision.number}\n"
             f"{group.name} · {concert.date:%d.%m.%Y} {concert.title}\n"

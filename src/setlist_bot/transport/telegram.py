@@ -25,6 +25,7 @@ from aiogram.types import (
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from setlist_bot.application.chat_cleanup import message_ids as known_message_ids
 from setlist_bot.application.command_inputs import CommandInputs
 from setlist_bot.application.setlist_menus import CARD, SetlistMenus
 from setlist_bot.application.song_selection import SongSelection
@@ -122,6 +123,10 @@ class Processor:
             controller.sender_username = sender_username
             controller.source_message_id = message_id if is_callback else None
             response: Response | None
+            before_dialogs = {
+                row.id: json.loads(row.command)
+                for row in await uow.store.find(Confirmation, user_id=user.id, chat_id=chat_id)
+            }
             input_reply_id = None
             try:
                 async with uow.session.begin_nested():
@@ -144,14 +149,18 @@ class Processor:
                                 ):
                                     if session.expires_at <= now():
                                         await uow.store.delete(session)
-                                        return Response(tr(user.language, "input_expired"))
+                                        return Response(
+                                            tr(user.language, "input_expired"),
+                                            delete_message_ids=[reply_message_id],
+                                        )
                                     delivered = await Support(uow.store, user).submit(command)
                                     await uow.store.delete(session)
                                     return Response(
                                         tr(
                                             user.language,
                                             "support_sent" if delivered else "support_unavailable",
-                                        )
+                                        ),
+                                        delete_message_ids=[reply_message_id],
                                     )
                     selection_before = await controller.selection.active() if private else None
                     references = (
@@ -226,6 +235,28 @@ class Processor:
                             response.keyboard_text = tr(
                                 controller.language, "selection_keyboard_closed"
                             )
+                    if response is not None:
+                        after_dialogs = {
+                            row.id: json.loads(row.command)
+                            for row in await uow.store.find(
+                                Confirmation, user_id=user.id, chat_id=chat_id
+                            )
+                        }
+                        for key, old in before_dialogs.items():
+                            if old.get("kind") == CARD:
+                                continue
+                            if (
+                                key not in after_dialogs
+                                or (response.force_reply and key == response.command_input_id)
+                                or (
+                                    old.get("kind") == "setlist_request"
+                                    and old.get("status") == "pending"
+                                    and after_dialogs.get(key, {}).get("status") != "pending"
+                                )
+                            ):
+                                response.delete_message_ids.extend(
+                                    known_message_ids(old) - set(response.edit_message_ids)
+                                )
                     await uow.store.flush()
             except (AppError, ValueError, IndexError) as exc:
                 code = exc.code if isinstance(exc, AppError) else "input"
@@ -298,6 +329,12 @@ class Processor:
                             response.menu_card_id = current.menu_card_id
                     except AppError:
                         pass
+            if response is not None:
+                if response.force_reply and response.command_input_id in before_dialogs:
+                    response.delete_message_ids.extend(
+                        known_message_ids(before_dialogs[response.command_input_id])
+                    )
+                response.navigation_owner_id = user.id
             return response
 
     async def remember_response(
@@ -310,9 +347,70 @@ class Processor:
             and response.group_creation_id is None
             and response.menu_card_id is None
             and response.command_input_id is None
+            and not response.buttons
+            and response.navigation_owner_id is None
         ):
             return
         async with PostgresUnitOfWork(self.engine) as uow:
+            if response.navigation_owner_id is not None and messages:
+                # RU: Храним только текущую навигационную панель, не историю сообщений.
+                # EN: One active navigation session per user/chat, never a message-history journal.
+                for old_panel in await uow.store.find(
+                    Confirmation, user_id=response.navigation_owner_id, chat_id=chat_id
+                ):
+                    old_data = json.loads(old_panel.command)
+                    if old_data.get("kind") == "navigation_panel":
+                        response.delete_message_ids.extend(
+                            known_message_ids(old_data) - {m.message_id for m in messages}
+                        )
+                        await uow.store.delete(old_panel)
+                bound = (
+                    response.force_reply
+                    or response.menu_card_id
+                    or response.selection_id
+                    or response.group_creation_id
+                    or response.suggestion_template_id
+                    or any(
+                        action.split()[0] in ("confirm", "position", "group_create_yes")
+                        for _, action in response.buttons
+                    )
+                )
+                if not bound:
+                    uow.store.add(
+                        Confirmation(
+                            user_id=response.navigation_owner_id,
+                            chat_id=chat_id,
+                            expires_at=now() + timedelta(days=2),
+                            command=json.dumps(
+                                {
+                                    "kind": "navigation_panel",
+                                    "message_ids": [m.message_id for m in messages],
+                                }
+                            ),
+                        )
+                    )
+            for _, action in response.buttons:
+                parts = action.split()
+                if len(parts) < 2 or parts[0] not in (
+                    "confirm",
+                    "confirm_cancel",
+                    "position",
+                    "group_create_yes",
+                    "group_create_edit",
+                ):
+                    continue
+                try:
+                    from uuid import UUID
+
+                    identifier = UUID(parts[1])
+                except ValueError:
+                    continue
+                rows = await uow.store.find(Confirmation, id=identifier, chat_id=chat_id)
+                if rows:
+                    data = json.loads(rows[0].command)
+                    rows[0].command = json.dumps(
+                        {**data, "message_ids": [message.message_id for message in messages]}
+                    )
             if response.support_prompt_id is not None and messages:
                 rows = await uow.store.find(
                     Confirmation, id=response.support_prompt_id, chat_id=chat_id
@@ -346,6 +444,23 @@ class Processor:
                 if cards:
                     data = SetlistMenus.data(cards[0])
                     if data.get("kind") == CARD:
+                        for old_card in await uow.store.find(Confirmation, chat_id=chat_id):
+                            old = json.loads(old_card.command)
+                            if (
+                                old_card.id != cards[0].id
+                                and old.get("kind") == CARD
+                                and not old.get("approved")
+                                and not old.get("closed")
+                                and old.get("group_id") == data["group_id"]
+                                and old.get("concert_id") == data["concert_id"]
+                                and old.get("personal") == data["personal"]
+                                and old.get("owner_id") == data["owner_id"]
+                                and old.get("version", 0) < data["version"]
+                            ):
+                                response.delete_message_ids.extend(
+                                    known_message_ids(old) - {m.message_id for m in messages}
+                                )
+                                SetlistMenus.write(old_card, {**old, "closed": True})
                         SetlistMenus.write(
                             cards[0], {**data, "message_ids": [m.message_id for m in messages]}
                         )
@@ -433,6 +548,8 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
         return []
     if response.callback_notice and not response.buttons and not response.files:
         return []
+    if response.force_reply and "/cancel" not in response.text:
+        response.text += "\n\n/cancel"
     output_text = response.text
     body = response.monospace_body or response.text
     body_start = output_text.find(body) if response.monospace else -1
@@ -531,13 +648,6 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
         await delete_selection_message(bot, chat_id, identifier)
     for markup in markup_batches:
         await bot.send_message(chat_id, "…", reply_markup=markup)
-    if response.force_reply and response.cancel_action:
-        controls = [(response.cancel_label, response.cancel_action)]
-        async for cancel_markup in keyboards(controls):
-            control = await bot.send_message(
-                chat_id, response.cancel_label, reply_markup=cancel_markup
-            )
-            response.auxiliary_message_ids.append(control.message_id)
     for filename, data in response.files:
         await bot.send_document(chat_id, BufferedInputFile(data, filename=filename))
     for identifier in dict.fromkeys(response.delete_message_ids):
@@ -654,11 +764,17 @@ def make_router(processor: Processor, username: str, *, diagnostics: bool = Fals
             if response:
                 if response.delete_input:
                     await delete_selection_message(bot, message.chat.id, message.message_id)
+                previously_deleted = set(response.delete_message_ids)
                 sent = await send_response(bot, message.chat.id, response)
                 await processor.remember_response(message.chat.id, response, sent)
+                for identifier in set(response.delete_message_ids) - previously_deleted:
+                    await delete_selection_message(bot, message.chat.id, identifier)
                 for target_chat, extra in response.deliveries:
+                    extra_deleted = set(extra.delete_message_ids)
                     extra_sent = await send_response(bot, target_chat, extra)
                     await processor.remember_response(target_chat, extra, extra_sent)
+                    for identifier in set(extra.delete_message_ids) - extra_deleted:
+                        await delete_selection_message(bot, target_chat, identifier)
 
     @router.callback_query(F.data)
     async def callback(query: CallbackQuery, event_update: Update, bot: Bot) -> None:
@@ -690,11 +806,17 @@ def make_router(processor: Processor, username: str, *, diagnostics: bool = Fals
             else:
                 await query.answer()
             if response:
+                previously_deleted = set(response.delete_message_ids)
                 sent = await send_response(bot, query.message.chat.id, response)
                 await processor.remember_response(query.message.chat.id, response, sent)
+                for identifier in set(response.delete_message_ids) - previously_deleted:
+                    await delete_selection_message(bot, query.message.chat.id, identifier)
                 for target_chat, extra in response.deliveries:
+                    extra_deleted = set(extra.delete_message_ids)
                     extra_sent = await send_response(bot, target_chat, extra)
                     await processor.remember_response(target_chat, extra, extra_sent)
+                    for identifier in set(extra.delete_message_ids) - extra_deleted:
+                        await delete_selection_message(bot, target_chat, identifier)
 
     @router.errors()
     async def failure(event: ErrorEvent, bot: Bot) -> bool:

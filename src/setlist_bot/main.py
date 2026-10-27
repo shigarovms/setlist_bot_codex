@@ -1,7 +1,9 @@
 import argparse
 import asyncio
 import contextlib
+import json
 import logging
+from datetime import datetime, time, timedelta
 from uuid import UUID
 
 from aiogram import Bot, Dispatcher
@@ -9,6 +11,8 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from setlist_bot.application import reminders
+from setlist_bot.application.chat_cleanup import message_ids as known_message_ids
 from setlist_bot.application.setlist_menus import REQUEST, SetlistMenus
 from setlist_bot.application.trash import TrashCleanup
 from setlist_bot.config import Settings
@@ -19,6 +23,9 @@ from setlist_bot.domain.entities import (
     Group,
     Membership,
     Outbox,
+    Reminder,
+    Setlist,
+    Submission,
     SupportMessage,
     SupportSettings,
     User,
@@ -30,7 +37,12 @@ from setlist_bot.transport.commands import collect_command_targets, synchronize_
 from setlist_bot.transport.controller import Response
 from setlist_bot.transport.i18n import tr
 from setlist_bot.transport.session import VerifiedSession
-from setlist_bot.transport.telegram import Processor, make_router, send_response
+from setlist_bot.transport.telegram import (
+    Processor,
+    delete_selection_message,
+    make_router,
+    send_response,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +72,18 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
             event.chat_id = settings[0].chat_id
             for route in await uow.store.find(SupportMessage, outbox_id=event.id):
                 route.chat_id = event.chat_id
+        reminders_for_event = await uow.store.find(Reminder, outbox_id=event.id)
+        if reminders_for_event:
+            setlists = await uow.store.find(Setlist, concert_id=event.concert_id)
+            if (
+                group is None
+                or not group.reminders_enabled
+                or not setlists
+                or setlists[0].approved
+                or reminders_for_event[0].day != now().astimezone(reminders.MOSCOW).date()
+            ):
+                event.sent = True
+                return
         request = None
         request_data = None
         if group is not None:
@@ -129,6 +153,30 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
                     else None,
                 ),
             )
+            if request is not None and request_data is not None:
+                SetlistMenus.write(
+                    request, {**request_data, "message_ids": [m.message_id for m in sent_messages]}
+                )
+            for button in event.buttons:
+                if button[1].startswith("apply_submission ") and sent_messages:
+                    submission_id = UUID(button[1].split()[1])
+                    submission = await uow.store.get(Submission, submission_id)
+                    uow.store.add(
+                        Confirmation(
+                            user_id=submission.author_id,
+                            chat_id=event.chat_id,
+                            command=json.dumps(
+                                {
+                                    "kind": "submission_panel",
+                                    "group_id": str(event.group_id),
+                                    "concert_id": str(event.concert_id),
+                                    "submission_id": str(submission_id),
+                                    "message_ids": [m.message_id for m in sent_messages],
+                                }
+                            ),
+                            expires_at=now() + timedelta(days=30),
+                        )
+                    )
             routes = await uow.store.find(SupportMessage, outbox_id=event.id)
             if routes and sent_messages:
                 routes[0].message_id = sent_messages[0].message_id
@@ -195,14 +243,44 @@ async def deliver_outbox(bot: Bot, engine: AsyncEngine) -> None:
         await asyncio.sleep(2)
 
 
-async def cleanup_trash(engine: AsyncEngine) -> None:
+async def cleanup_trash(engine: AsyncEngine, bot: Bot) -> None:
     while True:
         try:
             async with PostgresUnitOfWork(engine) as uow:
+                for expired in await uow.store.expired(Confirmation, "expires_at", now()):
+                    data = json.loads(expired.command)
+                    if data.get("kind") not in ("setlist_menu", "submission_panel"):
+                        for identifier in known_message_ids(data):
+                            await delete_selection_message(bot, expired.chat_id, identifier)
                 await TrashCleanup(uow.store).run()
         except Exception as exc:
             logger.warning("Trash cleanup failed (%s); will retry", type(exc).__name__)
         await asyncio.sleep(60)
+
+
+async def daily_reminders(engine: AsyncEngine) -> None:
+    # RU: Один план в день, затем ожидание назначенного времени каждого коллектива.
+    # EN: Build one daily plan, sleep until each due time, and deduplicate in PostgreSQL.
+    while True:
+        try:
+            local = now().astimezone(reminders.MOSCOW)
+            start = datetime.combine(local.date(), time(14), reminders.MOSCOW)
+            if local < start:
+                await asyncio.sleep((start - local).total_seconds())
+            async with PostgresUnitOfWork(engine) as uow:
+                plan = await reminders.plan(uow.store, now())
+            for due, concert_id in plan:
+                delay = (due - now()).total_seconds()
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                async with PostgresUnitOfWork(engine) as uow:
+                    await reminders.queue(uow.store, concert_id, now())
+            tomorrow = now().astimezone(reminders.MOSCOW).date() + timedelta(days=1)
+            next_run = datetime.combine(tomorrow, time(14), reminders.MOSCOW)
+            await asyncio.sleep(max(1, (next_run - now()).total_seconds()))
+        except Exception as exc:
+            logger.warning("Reminder planning failed (%s); retrying", type(exc).__name__)
+            await asyncio.sleep(60)
 
 
 async def run(*, check: bool = False, sync_only: bool = False) -> None:
@@ -249,7 +327,8 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
             )
             workers = [
                 asyncio.create_task(deliver_outbox(bot, engine)),
-                asyncio.create_task(cleanup_trash(engine)),
+                asyncio.create_task(cleanup_trash(engine, bot)),
+                asyncio.create_task(daily_reminders(engine)),
             ]
             try:
                 await dispatcher.start_polling(bot, allowed_updates=["message", "callback_query"])

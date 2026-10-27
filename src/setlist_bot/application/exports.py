@@ -95,7 +95,7 @@ class Exports:
                 "extra_info": concert.extra_info,
                 "performance_duration_seconds": concert.performance_duration_seconds,
                 "settings": settings(self.user.export_settings),
-                "layout_version": 2,
+                "layout_version": 3,
                 "bot_username": self.bot_username,
                 "concert_title": concert.title,
                 "version": version,
@@ -122,7 +122,7 @@ class Exports:
         lighting = await self._lighting_snapshot(source.group_id, source.payload["snapshot"])
         if (
             source.payload.get("settings") == config
-            and source.payload.get("layout_version") == 2
+            and source.payload.get("layout_version") == 3
             and source.payload.get("bot_username") == self.bot_username
             and source.payload.get("lighting_snapshot") == lighting
         ):
@@ -134,7 +134,7 @@ class Exports:
         payload = {
             **deepcopy(source.payload),
             "settings": config,
-            "layout_version": 2,
+            "layout_version": 3,
             "bot_username": self.bot_username,
             "lighting_snapshot": lighting,
         }

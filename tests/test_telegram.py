@@ -9,6 +9,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
 from aiogram.methods import (
     AnswerCallbackQuery,
+    DeleteMessage,
     EditMessageReplyMarkup,
     EditMessageText,
     GetChatAdministrators,
@@ -41,11 +42,15 @@ class FakeTelegram(BaseSession):
         self.admin_requests = 0
         self.markups = []
         self.edits = []
+        self.deleted = []
 
     async def close(self):
         pass
 
     async def make_request(self, bot, method, timeout=None):
+        if isinstance(method, DeleteMessage):
+            self.deleted.append(method)
+            return True
         if isinstance(method, GetChatAdministrators):
             self.admin_requests += 1
             return [
@@ -126,7 +131,7 @@ async def test_aiogram_end_to_end_with_fake_telegram_and_real_postgres(engine, t
         assert "Создан" in (await send("/group Репетиционная группа")).text
         assert "ожидает" in (await send("/register гитарист", actor=2)).text
         pending = await send("/members")
-        assert "Гитарист" in pending.text
+        assert "гитарист" in pending.text
         await send(pending.reply_markup.inline_keyboard[0][0].callback_data, callback=True)
         preview = await send("/song Комета  03:38  110  белый, красный")
         assert "Проверьте" in preview.text
@@ -142,7 +147,7 @@ async def test_aiogram_end_to_end_with_fake_telegram_and_real_postgres(engine, t
         await send(f"/use_concert {concert.id}", actor=2)
         assert "Комета" in (await send(f"/add {song.id}", actor=2)).text
         assert "Подводка:" not in (await send("/add Комета", actor=2)).text
-        assert "Средняя пауза: 00:30" in (await send("/pause 30", actor=2)).text
+        assert "Пауза: 30сек" in (await send("/pause 30", actor=2)).text
         assert "Подводка:" not in (await send("/pause 2 0", actor=2)).text
         assert "Подводка:" not in (await send("/pause 5", actor=2)).text
         assert "07:21" in (await send("/pause 2 default", actor=2)).text
@@ -152,7 +157,7 @@ async def test_aiogram_end_to_end_with_fake_telegram_and_real_postgres(engine, t
         approved = await send(
             approve.reply_markup.inline_keyboard[0][0].callback_data, callback=True
         )
-        assert "Утверждённый" in approved.text and "03:38" in approved.text
+        assert "Одобрен:" in approved.text and "03:38" in approved.text
         previous = len(session.sent)
         await send("/help@another_bot")
         assert len(session.sent) == previous
@@ -363,7 +368,7 @@ async def test_pdf_export_submenu_sends_both_a4_documents_through_aiogram(engine
         assert event.document.filename.endswith(".pdf")
         pdf = PdfReader(BytesIO(event.document.data))
         assert "Комета" in pdf.pages[0].extract_text()
-        assert "УТВЕРЖДЕНО" in pdf.pages[0].extract_text()
+        assert "Одобрен:" in pdf.pages[0].extract_text()
 
 
 async def test_group_creation_force_reply_binding_and_fresh_admin_checks_through_router(engine):

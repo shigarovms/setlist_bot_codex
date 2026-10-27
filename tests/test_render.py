@@ -12,7 +12,7 @@ from setlist_bot.transport.render import render_setlist
 def test_flat_render_number_padding_status_city_and_total_column(language):
     concert = Concert(group_id=uuid4(), date=date(2026, 12, 31), title="Концерт", city="Москва")
     items = [
-        {"title": f"Трек {i}", "duration_seconds": 60, "pause_before": None} for i in range(9)
+        {"title": f"Трек {i}", "duration_seconds": 60, "pause_before": None} for i in range(10)
     ] + [pause_item(150)]
     snapshot = {"default_pause_seconds": 5, "blocks": [{"items": items, "break_seconds": 0}]}
     result = render_setlist(snapshot, concert, language, 3)
@@ -21,8 +21,8 @@ def test_flat_render_number_padding_status_city_and_total_column(language):
     assert ("Version 3" if language == "en" else "Версия 3") in lines[1]
     first = next(line for line in lines if line.startswith("01."))
     last = lines[-1]
-    assert first.rindex("01:00") == last.rindex("12:10")
-    assert "Чистое" not in result and "10." in result
+    assert first.rindex("01:00") == last.rindex("13:15")
+    assert "Чистое" not in result and "10." in result and "xx. " in result
 
 
 def test_legacy_blocks_become_pause_rows_without_mutating_source():

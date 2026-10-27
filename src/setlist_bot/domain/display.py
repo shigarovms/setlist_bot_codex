@@ -1,6 +1,7 @@
 """Presentation-only translations and position labels; catalog values stay untouched."""
 
 import re
+from typing import Any
 
 COLORS = {
     "бел": "white",
@@ -76,3 +77,27 @@ def position_label(position: int, count: int) -> str:
 
 def pause_title(language: str, transliterate: bool = False) -> str:
     return "pause" if language == "en" or transliterate else "пауза"
+
+
+def entry_labels(items: list[dict[str, Any]]) -> list[str]:
+    """RU/EN: Номер считают только песни / pauses never consume a song number."""
+    from setlist_bot.domain.rules import is_pause
+
+    count = sum(not is_pause(item) for item in items)
+    number = 0
+    result = []
+    for item in items:
+        if is_pause(item):
+            result.append("xx" if count >= 10 else "x")
+        else:
+            number += 1
+            result.append(position_label(number, count))
+    return result
+
+
+def short_duration(seconds: int, language: str = "ru", *, minutes_only: bool = False) -> str:
+    minutes, rest = divmod(seconds, 60)
+    m, sec = ("мин", "сек") if language == "ru" else ("min", "sec")
+    if minutes_only or minutes:
+        return f"{minutes}{m}" + (f"{rest}{sec}" if rest else "")
+    return f"{rest}{sec}"
