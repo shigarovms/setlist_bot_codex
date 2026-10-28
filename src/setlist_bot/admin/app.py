@@ -141,7 +141,9 @@ async def boundary(request: web.Request, handler: HANDLER) -> web.StreamResponse
         {
             "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'",
             "X-Content-Type-Options": "nosniff",
-            "Referrer-Policy": "no-referrer",
+            # RU: no-referrer делает Origin POST-форм равным null и ломает вход.
+            # EN: Preserve same-origin form origins; send no referrer to other sites.
+            "Referrer-Policy": "same-origin",
             "X-Frame-Options": "DENY",
             "Cache-Control": "no-store",
             "Permissions-Policy": "camera=(), microphone=(), geolocation=()",

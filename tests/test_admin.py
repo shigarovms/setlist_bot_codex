@@ -136,6 +136,52 @@ async def test_authentication_cookies_csrf_and_host_guard(client, engine):
     assert (await client.get("/", allow_redirects=False)).status == 303
 
 
+async def test_browser_form_origin_is_preserved_for_login_and_actions(client):
+    page = await client.get("/login")
+    # RU: no-referrer превращает Origin браузерной POST-формы в null даже в SSH-туннеле.
+    # EN: Keep the origin on same-origin forms while hiding referrers from other sites.
+    assert page.headers["Referrer-Policy"] == "same-origin"
+    values = extract(await page.text(), "/login")
+    values.update(username="admin", password=PASSWORD)
+    origin = str(client.make_url("/").origin())
+    response = await client.post(
+        "/login",
+        data=values,
+        headers={"Origin": origin, "Sec-Fetch-Site": "same-origin"},
+        allow_redirects=False,
+    )
+    assert response.status == 303
+    dashboard = await client.get("/")
+    assert dashboard.headers["Referrer-Policy"] == "same-origin"
+    proof = extract(await dashboard.text(), "/actions/logout/session")
+    response = await client.post(
+        "/actions/logout/session",
+        data=proof,
+        headers={"Origin": origin, "Sec-Fetch-Site": "same-origin"},
+        allow_redirects=False,
+    )
+    assert response.status == 303
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Origin": "null"},
+        {"Origin": "http://evil.example"},
+        {"Origin": "http://127.0.0.1:1"},
+        {"Sec-Fetch-Site": "cross-site"},
+    ],
+)
+async def test_login_rejects_foreign_origins_even_with_valid_form(client, engine, headers):
+    page = await client.get("/login")
+    values = extract(await page.text(), "/login")
+    values.update(username="admin", password=PASSWORD)
+    response = await client.post("/login", data=values, headers=headers, allow_redirects=False)
+    assert response.status == 403
+    async with PostgresUnitOfWork(engine) as uow:
+        assert not await uow.store.find(AdminSession)
+
+
 async def test_persistent_login_throttle(client, engine):
     for _ in range(6):
         assert (await login(client, "wrong")).status == 401
