@@ -45,8 +45,8 @@ docker compose exec -T db createdb -U setlist setlist_test
 ```bash
 export TEST_DATABASE_URL=postgresql+asyncpg://setlist:setlist@localhost:5432/setlist_test
 uv lock --check
-uv run ruff check src tests migrations
-uv run ruff format --check src tests migrations
+uv run ruff check src tests migrations scripts
+uv run ruff format --check src tests migrations scripts
 uv run mypy src
 uv run pytest -q
 git diff --check

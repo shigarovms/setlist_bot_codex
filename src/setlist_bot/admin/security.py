@@ -31,6 +31,7 @@ class AdminSettings(BaseSettings):
     port: int = 8080
     allowed_hosts: str = "localhost,127.0.0.1"
     host_report: str = "/app/.admin-status/host.json"
+    production_host_report: str = "/app/.admin-status-production/host.json"
     production_database_url: SecretStr | None = None
     production_read_only: bool = True
     read_only: bool = False

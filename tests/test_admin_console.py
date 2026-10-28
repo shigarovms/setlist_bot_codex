@@ -1,5 +1,7 @@
 """Actual isolated PostgreSQL databases, scoped browser sessions and mutation forms."""
 
+import json
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -47,7 +49,7 @@ async def console_login(browser, prefix):
 
 
 async def test_console_databases_caches_sessions_and_forms_are_isolated(
-    engine, second_engine, world
+    engine, second_engine, world, tmp_path
 ):
     async with PostgresUnitOfWork(second_engine) as uow:
         operator = User(telegram_id=100)
@@ -55,6 +57,22 @@ async def test_console_databases_caches_sessions_and_forms_are_isolated(
         await uow.store.flush()
         production_group = await Groups(uow.store, operator).create("Другой контур", -999)
         production_id = production_group.id
+    reports = {}
+    for name in ("sandbox", "production"):
+        path = tmp_path / (name + ".json")
+        path.write_text(
+            json.dumps(
+                {
+                    "collected_at": datetime.now(UTC).isoformat(),
+                    "last_backup": name + "-only.dump",
+                    "backup_bytes": 1,
+                    "backup_age_seconds": 0,
+                    "disk_free_bytes": 100,
+                    "disk_total_bytes": 200,
+                }
+            )
+        )
+        reports[name] = str(path)
     config = settings(engine).model_copy(
         update={
             "allow_production": True,
@@ -62,6 +80,8 @@ async def test_console_databases_caches_sessions_and_forms_are_isolated(
                 second_engine.url.render_as_string(hide_password=False)
             ),
             "production_read_only": False,
+            "host_report": reports["sandbox"],
+            "production_host_report": reports["production"],
         }
     )
     console = create_console(config, {"sandbox": engine, "production": second_engine})
@@ -84,6 +104,15 @@ async def test_console_databases_caches_sessions_and_forms_are_isolated(
             "Location"
         ] == "/production/login"
         await console_login(browser, "/production")
+        for name, other in (("sandbox", "production"), ("production", "sandbox")):
+            monitoring = await (await browser.get("/" + name + "/runtime")).text()
+            assert name + "-only.dump" in monitoring and other + "-only.dump" not in monitoring
+            label = (
+                "Последняя копия основной базы"
+                if name == "production"
+                else "Последняя копия песочницы"
+            )
+            assert label in monitoring
         assert (await (await browser.get("/production/api/overview")).json())["users"] == 1
         page = await browser.get(f"/sandbox/groups/{world.group.id}")
         path = f"/sandbox/actions/group_reminders/{world.group.id}"

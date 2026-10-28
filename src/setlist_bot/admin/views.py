@@ -192,7 +192,7 @@ STATE_NAMES = {
 }
 
 
-def host_panel(host: dict[str, Any]) -> str:
+def host_panel(host: dict[str, Any], contour: str = "sandbox") -> str:
     """A host report is untrusted input too; malformed or stale data is not a green check."""
     try:
         collected = datetime.fromisoformat(str(host["collected_at"]))
@@ -222,14 +222,15 @@ def host_panel(host: dict[str, Any]) -> str:
             )
         pairs.append(("Нагрузка за минуту", h(host.get("load_1m", "—"))))
         backup_age = host.get("backup_age_seconds")
-        pairs.append(("Последняя копия песочницы", h(host.get("last_backup", "Копия не найдена"))))
+        label = "основной базы" if contour == "production" else "песочницы"
+        pairs.append(("Последняя копия " + label, h(host.get("last_backup", "Копия не найдена"))))
         if backup_age is not None:
             hours = int(backup_age) // 3600
             pairs.append(("Возраст копии", badge(f"{hours}ч", "warn" if hours > 30 else "good")))
         timer = str(host.get("backup_timer", "unknown"))
         pairs.append(
             (
-                "Таймер копий песочницы",
+                "Таймер копий " + label,
                 badge(
                     "Активен" if timer == "active" else "Не настроен / не активен",
                     "good" if timer == "active" else "warn",

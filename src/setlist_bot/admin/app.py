@@ -938,7 +938,7 @@ async def runtime(request: web.Request) -> web.Response:
     except (OSError, ValueError):
         pass
     if host:
-        body += v.host_panel(host)
+        body += v.host_panel(host, state.settings.contour)
     else:
         body += '<section class="panel"><h2>Сервер и резервные копии</h2><p class="hint">Сборщик отчёта хоста не подключён. Админка не имеет доступа к Docker socket и полным дампам. Настройка описана в docs/web-admin.md.</p></section>'
     body += (

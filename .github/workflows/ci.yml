@@ -28,8 +28,8 @@ jobs:
           version: "0.12.23"
       - run: uv sync --frozen --extra dev
       - run: uv lock --check
-      - run: bash -n scripts/setup-server.sh scripts/backup-server.sh
-      - run: uv run ruff check src tests migrations
-      - run: uv run ruff format --check src tests migrations
+      - run: for script in scripts/*.sh; do bash -n "$script"; done
+      - run: uv run ruff check src tests migrations scripts
+      - run: uv run ruff format --check src tests migrations scripts
       - run: uv run mypy src
       - run: uv run pytest -q

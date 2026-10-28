@@ -35,6 +35,9 @@ def create_console(
                 "contour": name,
                 "allow_production": name == "production",
                 "read_only": read_only,
+                "host_report": settings.production_host_report
+                if name == "production"
+                else settings.host_report,
                 "console_switch": True,
                 "production_available": settings.production_database_url is not None,
                 # RU: Подписи и сессии разделены, даже когда пароль одинаковый.

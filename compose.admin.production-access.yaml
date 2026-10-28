@@ -8,6 +8,8 @@ services:
     networks:
       - default
       - production_data
+    volumes:
+      - /opt/setlist_bot_codex/.admin-status:/app/.admin-status-production:ro
 networks:
   production_data:
     external: true

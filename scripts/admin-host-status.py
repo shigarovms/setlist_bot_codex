@@ -2,18 +2,19 @@
 """Read-only host metadata; no tokens, personal data or dump content is exported."""
 
 import argparse
-from datetime import UTC, datetime
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
 
 
-def collect(directory: Path) -> dict:
+def collect(directory: Path, backup_timer: str | None = None) -> dict:
     disk = shutil.disk_usage(directory)
     data = {
+        "contour": "sandbox" if directory.name == "setlist_bot_sandbox" else "production",
         "collected_at": datetime.now(UTC).isoformat(),
         "disk_free_bytes": disk.free,
         "disk_total_bytes": disk.total,
@@ -43,7 +44,16 @@ def collect(directory: Path) -> dict:
         pass
     try:
         result = subprocess.run(
-            ["systemctl", "is-active", "setlist-sandbox-backup.timer"],
+            [
+                "systemctl",
+                "is-active",
+                backup_timer
+                or (
+                    "setlist-sandbox-backup.timer"
+                    if directory.name == "setlist_bot_sandbox"
+                    else "setlist-backup.timer"
+                ),
+            ],
             capture_output=True,
             text=True,
             timeout=3,
