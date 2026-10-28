@@ -1,7 +1,9 @@
 import re
 from uuid import UUID
 
+from setlist_bot.application.activity import record_activity
 from setlist_bot.application.groups import Groups
+from setlist_bot.application.message_refresh import queue_card_refreshes
 from setlist_bot.application.ports import Store
 from setlist_bot.domain.entities import Concert, User
 from setlist_bot.domain.rules import parse_pause, require
@@ -37,4 +39,13 @@ class ConcertDetails:
                 "" if text == "-" else text,
             )
         concert.metadata_version += 1
+        record_activity(
+            self.store,
+            self.user,
+            "concert_details",
+            concert_id,
+            field=field,
+            version=concert.metadata_version,
+        )
+        await queue_card_refreshes(self.store, group_id, concert_id)
         return concert

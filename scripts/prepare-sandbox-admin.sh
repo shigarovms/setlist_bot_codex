@@ -28,7 +28,11 @@ for line in Path('.env').read_text().splitlines():
 if values.get('SANDBOX_BOT_TOKEN','').split(':',1)[0] != '1110437563':
     raise SystemExit('Unexpected sandbox token identity; stopping.')
 PY
-docker compose -f compose.sandbox.yaml build bot migrate
+if docker compose -f compose.sandbox.yaml ps --status running --services | grep -qx bot; then
+  echo "Sandbox bot already runs here. Use scripts/update-sandbox-admin.sh server|cloud for updates."
+  exit 1
+fi
+docker compose -f compose.sandbox.yaml build --build-arg "APP_REVISION=$(git rev-parse HEAD)" bot migrate
 docker compose -f compose.sandbox.yaml up -d --wait db
 if docker compose -f compose.sandbox.yaml exec -T db psql -U setlist -d setlist_sandbox -Atc "SELECT 1 FROM information_schema.tables WHERE table_name='groups'" | grep -q 1; then
   SETLIST_SANDBOX_DIR="$PWD" bash scripts/backup-sandbox.sh

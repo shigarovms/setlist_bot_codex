@@ -2,6 +2,8 @@ import json
 from datetime import timedelta
 from uuid import UUID
 
+from setlist_bot.application.activity import record_activity
+from setlist_bot.application.message_refresh import queue_card_refreshes
 from setlist_bot.application.ports import Store
 from setlist_bot.application.support import Support
 from setlist_bot.domain.entities import (
@@ -27,6 +29,11 @@ class Groups:
         # RU: Блокировка коллектива сериализует правки из разных чатов. Права проверены выше.
         # EN: The tenant row lock serializes mutations across group and private chats.
         group = await self.store.get(Group, group_id, lock=True)
+        # RU: Пока ожидали блокировку, администратор мог отозвать права участника.
+        # EN: Re-read permission under the tenant lock; never authorize from a stale role.
+        membership = await self.store.get(Membership, memberships[0].id, lock=True)
+        require(membership.status == "active", "forbidden")
+        require(not admin or membership.role == "admin", "admin_only")
         require(deleted or group.deleted_at is None, "in_trash")
         return group
 
@@ -49,6 +56,7 @@ class Groups:
         await support.notify(
             f"Создан коллектив: {group.name}\nАвтор: {support.actor}\nЧат: {chat_id}"
         )
+        record_activity(self.store, self.user, "group_created", group.id)
         return group
 
     async def clear_creation(self, chat_id: int) -> None:
@@ -163,3 +171,43 @@ class Groups:
         require(member.user_id != group.owner_id, "owner_only")
         require(member.role != ("admin" if grant else "member"), "already_done")
         member.role = "admin" if grant else "member"
+        record_activity(
+            self.store,
+            self.user,
+            "member_role",
+            member.id,
+            group_id=str(group_id),
+            role=member.role,
+        )
+
+    async def set_reminders(self, group_id: UUID, enabled: bool) -> Group:
+        group = await self.access(group_id, admin=True)
+        if group.reminders_enabled != enabled:
+            group.reminders_enabled = enabled
+            record_activity(self.store, self.user, "group_reminders", group_id, enabled=enabled)
+            await queue_card_refreshes(self.store, group_id)
+        return group
+
+    async def transfer_ownership(
+        self, group_id: UUID, member_id: UUID, expected_owner: str, confirmation: str
+    ) -> Group:
+        """Same lifecycle, role and conflict rules for either authenticated transport."""
+        group = await self.access(group_id, admin=True)
+        require(group.owner_id == self.user.id, "owner_only")
+        require(confirmation.strip() == group.name, "confirmation")
+        require(expected_owner == str(group.owner_id), "conflict")
+        member = await self.store.get(Membership, member_id, lock=True)
+        require(member.group_id == group_id and member.status == "active", "forbidden")
+        require(member.user_id != group.owner_id, "already_done")
+        previous = group.owner_id
+        member.role, group.owner_id = "admin", member.user_id
+        record_activity(
+            self.store,
+            self.user,
+            "group_owner",
+            group_id,
+            old_owner=str(previous),
+            new_owner=str(member.user_id),
+        )
+        await queue_card_refreshes(self.store, group_id)
+        return group

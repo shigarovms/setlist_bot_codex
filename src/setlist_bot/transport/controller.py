@@ -587,7 +587,7 @@ class Controller:
             reminder_action = reminder_args[0] if reminder_args else ""
             require(reminder_action in ("", "on", "off"), "input")
             if reminder_action:
-                group.reminders_enabled = reminder_action == "on"
+                group = await self.groups.set_reminders(group_id, reminder_action == "on")
             return Response(
                 self.t("reminders_on" if group.reminders_enabled else "reminders_off"),
                 [
@@ -2271,6 +2271,25 @@ class Controller:
 
     async def _refresh_card(self, row: Confirmation, data: dict[str, Any]) -> Response:
         context = await self._card_context(data)
+        response = await self._show(context, shared=data["shared"])
+        response.edit_message_ids = list(data["message_ids"])
+        self.menus.write(row, {**data, "closed": True})
+        return response
+
+    async def refresh_shared_card(self, row: Confirmation) -> Response:
+        """RU: Фоновое обновление не переключает выбранный пользователем концерт.
+
+        EN: Reuse normal rendering with a transient context; never read private drafts.
+        """
+        data = self.menus.data(row)
+        require(not self.private and not data["personal"] and data["owner_id"] is None, "forbidden")
+        await self.menus.validate(data)
+        context = Context(
+            user_id=self.user.id,
+            chat_id=self.chat_id,
+            group_id=UUID(data["group_id"]),
+            concert_id=UUID(data["concert_id"]),
+        )
         response = await self._show(context, shared=data["shared"])
         response.edit_message_ids = list(data["message_ids"])
         self.menus.write(row, {**data, "closed": True})

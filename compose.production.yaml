@@ -11,4 +11,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://setlist:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/setlist
   bot:
     environment:
+      RUNTIME_ENVIRONMENT: production
+      RUNTIME_LOCATION: production-server
+      EXPECTED_BOT_ID: "7430933141"
       DATABASE_URL: postgresql+asyncpg://setlist:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/setlist

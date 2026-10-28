@@ -39,6 +39,12 @@ from setlist_bot.domain.entities import AdminAudit, AdminLoginLimit, AdminSessio
 from setlist_bot.domain.rules import AppError, clock, flat_content, totals
 from setlist_bot.infrastructure.admin_queries import PAGE_SIZE, AdminQueries
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
+from setlist_bot.infrastructure.runtime import (
+    SCHEMA_REVISION,
+    SchemaMismatch,
+    build_revision,
+    check_schema,
+)
 from setlist_bot.transport.i18n import tr
 
 logger = logging.getLogger(__name__)
@@ -55,6 +61,8 @@ class State:
     cache_until: float = 0
     cache_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     password_slots: asyncio.Semaphore = field(default_factory=lambda: asyncio.Semaphore(2))
+    schema_checked_until: float = 0
+    revision: str = field(default_factory=build_revision)
 
 
 STATE = web.AppKey("admin_state", State)
@@ -63,6 +71,13 @@ SESSION = web.RequestKey("admin_session", AdminSession)
 
 def auth(request: web.Request) -> AdminSession:
     return request[SESSION]
+
+
+def cookie_name(request: web.Request, base: str = COOKIE) -> str:
+    # RU: Старые cookies с Path=/ не должны перекрывать cookies нового контура.
+    # EN: Distinct names also isolate a console upgrade from legacy root-path cookies.
+    settings = request.app[STATE].settings
+    return base + "_" + settings.contour if settings.url_prefix else base
 
 
 def render(request: web.Request, title: str, body: str, section: str = "") -> web.Response:
@@ -75,7 +90,7 @@ def render(request: web.Request, title: str, body: str, section: str = "") -> we
     return web.Response(
         text=v.page(
             state.settings,
-            request.cookies.get(COOKIE, ""),
+            request.cookies.get(cookie_name(request), ""),
             title,
             body,
             section=section,
@@ -88,9 +103,11 @@ def render(request: web.Request, title: str, body: str, section: str = "") -> we
 def action_form(
     request: web.Request, action: str, target: Any, body: str, label: str, danger: bool = False
 ) -> str:
+    if request.app[STATE].settings.read_only:
+        return '<p class="hint">Контур открыт только для просмотра.</p>'
     return v.form(
         request.app[STATE].settings,
-        request.cookies[COOKIE],
+        request.cookies[cookie_name(request)],
         action,
         target,
         body,
@@ -106,7 +123,25 @@ async def boundary(request: web.Request, handler: HANDLER) -> web.StreamResponse
         host = urlsplit("//" + request.host).hostname or ""
         if host.lower() not in {x.strip().lower() for x in settings.allowed_hosts.split(",")}:
             raise web.HTTPForbidden(text="Недопустимый адрес админки")
+        state = request.app[STATE]
+        local_path = request.path.removeprefix(settings.url_prefix)
+        if not local_path.startswith("/static/") and time.monotonic() > state.schema_checked_until:
+            await check_schema(state.engine)
+            if settings.console_switch:
+                identity = await state.queries.one(
+                    "SELECT bot_id,environment FROM deployment_identity WHERE key='main'"
+                )
+                expected = 7430933141 if settings.contour == "production" else 1110437563
+                if identity and (
+                    identity["bot_id"] != expected or identity["environment"] != settings.contour
+                ):
+                    raise web.HTTPConflict(
+                        text="Подключённая база привязана к другому боту или контуру. Проверьте настройки подключения."
+                    )
+            state.schema_checked_until = time.monotonic() + 20
         response = await handler(request)
+    except SchemaMismatch as exc:
+        response = web.Response(status=503, text=str(exc))
     except web.HTTPException as exc:
         response = exc
     except (ValueError, KeyError):
@@ -126,6 +161,8 @@ async def boundary(request: web.Request, handler: HANDLER) -> web.StreamResponse
             )
             else "Действие недоступно."
         )
+        if exc.code == "conflict":
+            message = "Данные изменились после открытия формы. Обновите страницу и проверьте последние действия."
         response = web.Response(status=409, text=message)
     except Exception as exc:
         logger.error("Admin request failed (%s)", type(exc).__name__)
@@ -149,15 +186,33 @@ async def boundary(request: web.Request, handler: HANDLER) -> web.StreamResponse
             "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
         }
     )
+    prefix = request.app[STATE].settings.url_prefix
+    if prefix:
+        location = response.headers.get("Location", "")
+        if location.startswith("/") and not location.startswith(prefix + "/"):
+            response.headers["Location"] = prefix + location
+        if (
+            response.content_type == "text/html"
+            and isinstance(response, web.Response)
+            and response.text
+        ):
+            response.text = re.sub(
+                r'(href|action|src)="/(?!/|_contour/)',
+                lambda match: match[1] + '="' + prefix + "/",
+                response.text,
+            )
+        for cookie in response.cookies.values():
+            cookie["path"] = prefix
     return response
 
 
 @web.middleware
 async def authenticate(request: web.Request, handler: HANDLER) -> web.StreamResponse:
-    if request.path in ("/login", "/healthz") or request.path.startswith("/static/"):
+    local_path = request.path.removeprefix(request.app[STATE].settings.url_prefix)
+    if local_path in ("/login", "/healthz") or local_path.startswith("/static/"):
         return await handler(request)
     state = request.app[STATE]
-    token = request.cookies.get(COOKIE, "")
+    token = request.cookies.get(cookie_name(request), "")
     if not re.fullmatch("[a-f0-9]{64}", token):
         raise web.HTTPSeeOther("/login")
     async with PostgresUnitOfWork(state.engine) as uow:
@@ -192,7 +247,7 @@ async def login_get(request: web.Request) -> web.Response:
     token = login_token(settings)
     response = web.Response(text=v.login(settings.username, token), content_type="text/html")
     response.set_cookie(
-        LOGIN_COOKIE,
+        cookie_name(request, LOGIN_COOKIE),
         token,
         httponly=True,
         samesite="Strict",
@@ -208,7 +263,7 @@ async def login_post(request: web.Request) -> web.Response:
     data = await request.post()
     token = str(data.get("csrf", ""))
     if not hmac.compare_digest(
-        token, request.cookies.get(LOGIN_COOKIE, "")
+        token, request.cookies.get(cookie_name(request, LOGIN_COOKIE), "")
     ) or not valid_login_token(state.settings, token):
         raise web.HTTPForbidden(text="Форма входа устарела. Откройте /login заново.")
     peer = request.remote or "local"
@@ -269,14 +324,14 @@ async def login_post(request: web.Request) -> web.Response:
             limits[0].attempts = 0
     response = web.HTTPSeeOther("/")
     response.set_cookie(
-        COOKIE,
+        cookie_name(request),
         raw,
         httponly=True,
         samesite="Strict",
         secure=state.settings.secure_cookie,
         max_age=int(SESSION_LIFETIME.total_seconds()),
     )
-    response.del_cookie(LOGIN_COOKIE)
+    response.del_cookie(cookie_name(request, LOGIN_COOKIE))
     return response
 
 
@@ -459,6 +514,7 @@ async def listing(request: web.Request) -> web.Response:
                 [
                     v.stamp(row["created_at"]),
                     v.h(row["actor"]),
+                    v.h(row["source"]),
                     v.h(row["action"]),
                     v.h(row["target"]),
                     v.h(json.dumps(row["details"], ensure_ascii=False)),
@@ -478,7 +534,7 @@ async def listing(request: web.Request) -> web.Response:
             "Действия",
         ],
         "support": ["Пользователь", "Telegram ID", "Создано", "Статус", "Обращение"],
-        "audit": ["Время", "Администратор", "Действие", "Объект", "Изменения"],
+        "audit": ["Время", "Автор", "Источник", "Действие", "Объект", "Изменения"],
     }[section]
     return render(
         request,
@@ -734,6 +790,7 @@ async def support_detail(request: web.Request) -> web.Response:
     if not case:
         raise web.HTTPNotFound()
     replies = await queries.replies(identifier)
+    version_field = f'<input type="hidden" name="expected_version" value="{case["version"]}">'
     body = (
         '<div class="grid"><section class="panel"><h2>Обращение</h2><p class="hint">'
         + v.stamp(case["created_at"])
@@ -745,7 +802,8 @@ async def support_detail(request: web.Request) -> web.Response:
         request,
         "support_reply",
         identifier,
-        '<label>Сообщение<textarea name="message" rows="7" maxlength="4000" required></textarea></label><label><input type="checkbox" name="close" value="yes">Закрыть обращение после ответа</label>',
+        version_field
+        + '<label>Сообщение<textarea name="message" rows="7" maxlength="4000" required></textarea></label><label><input type="checkbox" name="close" value="yes">Закрыть обращение после ответа</label>',
         "Отправить ответ",
     )
     body += (
@@ -753,7 +811,7 @@ async def support_detail(request: web.Request) -> web.Response:
             request,
             "support_close" if case["status"] == "open" else "support_reopen",
             identifier,
-            "",
+            version_field,
             "Закрыть без ответа" if case["status"] == "open" else "Открыть снова",
         )
         + '</section></div><section class="panel"><h2>Ответы и доставка</h2>'
@@ -765,6 +823,10 @@ async def support_detail(request: web.Request) -> web.Response:
             + v.badge(status, severity)
             + " <small>"
             + v.stamp(row["created_at"])
+            + " · "
+            + v.h(row["actor"] or "Автор до обновления неизвестен")
+            + " · "
+            + v.h(row["source"])
             + '</small><div class="pre">'
             + v.h(row["text"])
             + "</div></article>"
@@ -793,12 +855,16 @@ async def runtime(request: web.Request) -> web.Response:
                     "Нет свежего сигнала"
                     if stale
                     else v.STATE_NAMES.get(row["state"], row["state"]),
-                    "bad" if stale else "good",
+                    "bad"
+                    if stale or row["state"] in ("retrying", "error", "polling_error", "stopped")
+                    else "good",
                 ),
                 v.stamp(row["updated_at"]),
                 v.h(row["errors"]),
                 v.h(row["last_error"]),
                 v.stamp(row["next_run"]) if row["next_run"] else "—",
+                v.stamp(row["last_success_at"]) if row["last_success_at"] else "—",
+                v.stamp(row["last_error_at"]) if row["last_error_at"] else "—",
             ]
         )
     body = (
@@ -811,10 +877,41 @@ async def runtime(request: web.Request) -> web.Response:
                 "Ошибки за запуск",
                 "Последняя ошибка",
                 "Следующий запуск",
+                "Последний успех",
+                "Время ошибки",
             ],
             rendered,
         )
         + "</section>"
+    )
+    identity: dict[str, Any] = next(
+        (row["details"] for row in rows if row["component"] == "bot"), {}
+    )
+    identity_labels = {
+        "bot_username": "Бот",
+        "bot_id": "Telegram ID",
+        "environment": "Контур",
+        "location": "Место запуска",
+        "revision": "Версия кода",
+        "schema": "Схема при запуске",
+        "started_at": "Запущен (UTC)",
+        "instance_id": "Экземпляр",
+    }
+    identity_panel = (
+        '<section class="panel"><h2>Запущенный экземпляр</h2><dl class="meta">'
+        + "".join(
+            f"<dt>{label}</dt><dd>{v.h(identity.get(key, 'Неизвестно'))}</dd>"
+            for key, label in identity_labels.items()
+        )
+        + f"<dt>Схема для этого кода админки</dt><dd>{SCHEMA_REVISION}</dd><dt>Версия админки</dt><dd>{v.h(state.revision)}</dd></dl></section>"
+    )
+    data = await overview_data(state)
+    body = (
+        identity_panel
+        + body
+        + '<section class="panel"><h2>Ожидание в очереди</h2><p>Самое старое ожидающее сообщение: '
+        + str(max(0, int(data["oldest_pending_age_seconds"])))
+        + "сек.</p></section>"
     )
     host: dict[str, Any] = {}
     try:
@@ -863,6 +960,8 @@ async def action(request: web.Request) -> web.Response:
     check_origin(request)
     state = request.app[STATE]
     action_name = request.match_info["action"]
+    if state.settings.read_only and action_name not in ("logout", "revoke_sessions"):
+        raise web.HTTPForbidden(text="Этот контур открыт только для просмотра.")
     target = request.match_info["target"]
     fields = await request.post()
     values = {str(key): str(value) for key, value in fields.items()}
@@ -871,7 +970,9 @@ async def action(request: web.Request) -> web.Response:
         not re.fullmatch("[a-f0-9]{32}", nonce) or not re.fullmatch("[a-f0-9]{64}", proof)
     ) or not hmac.compare_digest(
         proof,
-        form_proof(state.settings, request.cookies[COOKIE], action_name, target, nonce),
+        form_proof(
+            state.settings, request.cookies[cookie_name(request)], action_name, target, nonce
+        ),
     ):
         raise web.HTTPForbidden(text="Подпись формы неверна. Обновите страницу.")
     allowed = {
@@ -889,7 +990,22 @@ async def action(request: web.Request) -> web.Response:
     }
     if action_name not in allowed:
         raise web.HTTPNotFound()
-    request_key = digest(request.cookies[COOKIE] + ":" + nonce)
+    if state.settings.contour == "production" and action_name not in ("logout", "revoke_sessions"):
+        processes = await state.queries.runtime()
+        compatible = any(
+            row["component"] == "bot"
+            and row["details"].get("schema") == SCHEMA_REVISION
+            and row["details"].get("environment") == "production"
+            and row["details"].get("bot_id") == 7430933141
+            and row["state"] != "stopped"
+            and now() - row["updated_at"] < timedelta(seconds=100)
+            for row in processes
+        )
+        if not compatible:
+            raise web.HTTPConflict(
+                text="Изменения недоступны: основной бот ещё не обновлён или нет свежего сигнала совместимой версии."
+            )
+    request_key = digest(request.cookies[cookie_name(request)] + ":" + nonce)
     actor = auth(request).actor
     try:
         async with PostgresUnitOfWork(state.engine) as uow:
@@ -924,7 +1040,7 @@ async def action(request: web.Request) -> web.Response:
     state.cache_until = 0
     if action_name in ("logout", "revoke_sessions"):
         response = web.HTTPSeeOther("/login")
-        response.del_cookie(COOKIE)
+        response.del_cookie(cookie_name(request))
         return response
     destination = (
         "/support/" + target

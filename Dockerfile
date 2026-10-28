@@ -11,6 +11,8 @@ RUN --mount=type=secret,id=ca_bundle \
     uv sync --frozen --no-dev
 COPY --chown=10001:10001 alembic.ini ./
 COPY --chown=10001:10001 migrations ./migrations
-RUN useradd --create-home --uid 10001 bot
+ARG APP_REVISION=unknown
+RUN printf '%s' "$APP_REVISION" > /app/.build-revision \
+    && useradd --create-home --uid 10001 bot
 USER bot
 CMD [".venv/bin/setlist-bot"]

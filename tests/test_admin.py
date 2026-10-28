@@ -364,6 +364,7 @@ async def test_runtime_signals_and_expired_sessions(client, engine):
     await login(client)
     response = await client.get("/runtime")
     assert response.status == 200 and "TelegramNetworkError" in await response.text()
+    assert 'class="badge bad"' in await response.text()
     async with PostgresUnitOfWork(engine) as uow:
         for session in await uow.store.find(AdminSession):
             session.expires_at = now() - timedelta(seconds=1)

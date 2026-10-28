@@ -10,7 +10,9 @@ if (document.querySelector('[data-metric]')) {
   setInterval(async () => {
     if (document.hidden) return;
     try {
-      const response = await fetch('/api/overview', {credentials: 'same-origin', cache: 'no-store'});
+      const script = document.querySelector('script[src$="/static/admin.js"]');
+      const prefix = new URL(script.src).pathname.replace(/\/static\/admin\.js$/, '');
+      const response = await fetch(prefix + '/api/overview', {credentials: 'same-origin', cache: 'no-store'});
       if (!response.ok || response.redirected) return;
       const data = await response.json();
       for (const element of document.querySelectorAll('[data-metric]')) {

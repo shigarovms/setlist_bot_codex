@@ -165,6 +165,9 @@ class Submission(Entity):
 
 @dataclass(kw_only=True)
 class Outbox(Entity):
+    actor: str = ""
+    source: str = "system"
+    payload: dict[str, Any] = field(default_factory=dict)
     created_at: datetime | None = field(default_factory=now)
     delivered_at: datetime | None = None
     discarded_at: datetime | None = None
@@ -291,6 +294,7 @@ class AdminLoginLimit(Entity):
 
 @dataclass(kw_only=True)
 class AdminAudit(Entity):
+    source: str = "web"
     actor: str
     action: str
     target: str
@@ -301,6 +305,9 @@ class AdminAudit(Entity):
 
 @dataclass(kw_only=True)
 class SupportCase(Entity):
+    version: int = 0
+    last_reply_by: str = ""
+    last_reply_source: str = ""
     request_id: UUID
     status: str = "open"
     updated_at: datetime = field(default_factory=now)
@@ -308,6 +315,9 @@ class SupportCase(Entity):
 
 @dataclass(kw_only=True)
 class RuntimeStatus(Entity):
+    last_success_at: datetime | None = None
+    last_error_at: datetime | None = None
+    details: dict[str, Any] = field(default_factory=dict)
     last_activity_at: datetime | None = None
     component: str
     updated_at: datetime
@@ -315,3 +325,10 @@ class RuntimeStatus(Entity):
     errors: int = 0
     last_error: str = ""
     next_run: datetime | None = None
+
+
+@dataclass(kw_only=True)
+class DeploymentIdentity(Entity):
+    key: str = "main"
+    bot_id: int
+    environment: str

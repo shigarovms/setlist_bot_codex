@@ -321,7 +321,7 @@ async def test_explicit_song_numbers_skip_pause(engine, world):
 
 
 async def test_migration_backfills_owner_and_frozen_approval(database_url, engine, world):
-    from test_migrations import alembic
+    from test_migrations import alembic, clear_synthetic_audit
 
     from setlist_bot.domain.entities import Revision
 
@@ -334,6 +334,7 @@ async def test_migration_backfills_owner_and_frozen_approval(database_url, engin
         approved.snapshot = {
             key: value for key, value in approved.snapshot.items() if key != "approved_by"
         }
+    await clear_synthetic_audit(engine)
     alembic(database_url, "downgrade", "e42b8c190a76")
     alembic(database_url, "upgrade", "head")
     async with PostgresUnitOfWork(engine) as uow:

@@ -1,0 +1,14 @@
+# Optional, only after a separately approved production migration/update.
+# Combine with compose.sandbox.yaml and compose.admin.sandbox.yaml.
+services:
+  admin:
+    environment:
+      # Both networks have a service named db. Pin the sandbox container explicitly.
+      WEB_ADMIN_DATABASE_URL: postgresql+asyncpg://setlist:setlist@setlist-sandbox-db-1:5432/setlist_sandbox
+    networks:
+      - default
+      - production_data
+networks:
+  production_data:
+    external: true
+    name: setlist_bot_codex_default

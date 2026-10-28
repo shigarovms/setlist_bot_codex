@@ -7,6 +7,7 @@ from uuid import UUID
 
 from setlist_bot.application.catalog import Catalog
 from setlist_bot.application.groups import Groups
+from setlist_bot.application.message_refresh import queue_card_refreshes
 from setlist_bot.application.ports import Store
 from setlist_bot.domain.entities import CatalogImport, Song, SongAlias, User, now
 from setlist_bot.domain.importing import ImportRow, ParsedImport, parse_import, read_table
@@ -99,8 +100,10 @@ class Importer:
         plan = await self.preview(group_id, job_id)
         require(plan.fingerprint == fingerprint, "import_changed")
         require(not plan.parsed.error and not plan.errors and bool(plan.new), "import_fix")
-        catalog = Catalog(self.store, self.user)
+        # RU/EN: Batch import refreshes cards once, not once per imported song.
+        catalog = Catalog(self.store, self.user, refresh_cards=False)
         for data in plan.new:
             await catalog.save(group_id, data)
         job.status = "done"
+        await queue_card_refreshes(self.store, group_id)
         return len(plan.new)

@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     LargeBinary,
     MetaData,
@@ -269,6 +270,9 @@ table(
 table(
     e.Outbox,
     "outbox",
+    col("actor", String(100), server_default=""),
+    col("source", String(20), server_default="system"),
+    col("payload", JSONB, server_default=text("'{}'::jsonb")),
     col("support_request_id", Uuid, ForeignKey("outbox.id"), nullable=True, index=True),
     col("created_at", DateTime(timezone=True), nullable=True, index=True),
     col("delivered_at", DateTime(timezone=True), nullable=True),
@@ -361,6 +365,11 @@ table(
     col("command", Text),
     col("expires_at", DateTime(timezone=True)),
 )
+Index(
+    "ix_confirmations_chat_id_expires_at",
+    metadata.tables["confirmations"].c.chat_id,
+    metadata.tables["confirmations"].c.expires_at,
+)
 
 
 # RU: Глобальная поддержка отделена от коллективов; личные черновики сюда не попадают.
@@ -412,6 +421,7 @@ table(
 table(
     e.AdminAudit,
     "admin_audit",
+    col("source", String(20), server_default="web"),
     col("actor", String(100)),
     col("action", String(60)),
     col("target", String(100)),
@@ -422,6 +432,9 @@ table(
 table(
     e.SupportCase,
     "support_cases",
+    col("version", Integer, server_default="0"),
+    col("last_reply_by", String(100), server_default=""),
+    col("last_reply_source", String(20), server_default=""),
     col("request_id", Uuid, ForeignKey("outbox.id"), unique=True),
     col("status", String(12)),
     col("updated_at", DateTime(timezone=True)),
@@ -430,6 +443,9 @@ table(
 table(
     e.RuntimeStatus,
     "runtime_status",
+    col("last_success_at", DateTime(timezone=True), nullable=True),
+    col("last_error_at", DateTime(timezone=True), nullable=True),
+    col("details", JSONB, server_default=text("'{}'::jsonb")),
     col("component", String(40), unique=True),
     col("last_activity_at", DateTime(timezone=True), nullable=True),
     col("updated_at", DateTime(timezone=True)),
@@ -437,6 +453,13 @@ table(
     col("errors", Integer),
     col("last_error", String(120)),
     col("next_run", DateTime(timezone=True), nullable=True),
+)
+table(
+    e.DeploymentIdentity,
+    "deployment_identity",
+    col("key", String(20), unique=True),
+    col("bot_id", BigInteger),
+    col("environment", String(20)),
 )
 
 

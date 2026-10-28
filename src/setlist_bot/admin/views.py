@@ -87,7 +87,19 @@ def page(
         f'<a class="nav-link {"selected" if key == section else ""}" href="{path}">{label}</a>'
         for key, label, path in NAV
     )
-    environment = "ОСНОВНАЯ БАЗА" if settings.allow_production else "ТЕСТОВЫЙ КОНТУР"
+    environment = "ОСНОВНАЯ БАЗА" if settings.contour == "production" else "ТЕСТОВЫЙ КОНТУР"
+    if settings.read_only:
+        environment += " · ТОЛЬКО ПРОСМОТР"
+    if settings.console_switch:
+        environment += (
+            '<div class="inline-actions"><a href="/_contour/sandbox">Тестовый</a>'
+            + (
+                '<a href="/_contour/production">Основной</a>'
+                if settings.production_available
+                else '<span class="hint">Основной ещё не подключён</span>'
+            )
+            + "</div>"
+        )
     return document(
         title,
         f"""<aside class="sidebar"><a class="brand" href="/"><span class="brand-mark">S</span><span>setlist<span class="brand-sub">CONTROL ROOM</span></span></a><div class="environment">{environment}</div><nav>{navigation}</nav><div class="sidebar-bottom"><span>{h(settings.username)}</span>{logout}</div></aside><main><header><div><div class="eyebrow">АДМИНИСТРИРОВАНИЕ БОТА</div><h1>{h(title)}</h1></div><span class="clock">Москва · UTC+3</span></header>{'<div class="notice">' + h(notice) + "</div>" if notice else ""}{body}<footer>Личные черновики скрыты. Изменения записываются в журнал. <a href="/runtime">Состояние системы →</a></footer></main>""",
@@ -160,6 +172,7 @@ def metric(label: str, value: Any, hint: str, key: str = "") -> str:
 
 
 COMPONENT_NAMES = {
+    "telegram_api": "Связь с Telegram API",
     "bot": "Процесс бота",
     "outbox": "Отправка сообщений",
     "cleanup": "Уборка данных",

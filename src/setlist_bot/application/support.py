@@ -2,8 +2,16 @@
 
 from uuid import UUID
 
+from setlist_bot.application.activity import record_activity
 from setlist_bot.application.ports import Store
-from setlist_bot.domain.entities import Outbox, SupportMessage, SupportSettings, User
+from setlist_bot.domain.entities import (
+    Outbox,
+    SupportCase,
+    SupportMessage,
+    SupportSettings,
+    User,
+    now,
+)
 from setlist_bot.domain.rules import require
 
 
@@ -68,19 +76,45 @@ class Support:
         await self.reply_to_request(rows[0].outbox_id, text)
         return True
 
-    async def reply_to_request(self, request_id: UUID, text: str) -> Outbox:
+    async def case(self, request_id: UUID, expected: int | None = None) -> SupportCase:
+        request = await self.store.get(Outbox, request_id, lock=True)
+        require(request.support_kind == "request", "not_found")
+        require(bool(await self.store.find(SupportMessage, outbox_id=request_id)), "not_found")
+        cases = await self.store.find(SupportCase, request_id=request_id)
+        case = cases[0] if cases else SupportCase(request_id=request_id)
+        if not cases:
+            self.store.add(case)
+        require(expected is None or expected == case.version, "conflict")
+        return case
+
+    async def reply_to_request(
+        self,
+        request_id: UUID,
+        text: str,
+        *,
+        expected_version: int | None = None,
+        source: str = "telegram",
+        actor: str | None = None,
+    ) -> Outbox:
         """RU/EN: Отвечаем только на реальное обращение / never send to an arbitrary ID."""
         require(0 < len(text.strip()) <= 4000, "input")
-        request = await self.store.get(Outbox, request_id)
-        require(request.support_kind == "request", "not_found")
+        case = await self.case(request_id, expected_version)
         routes = await self.store.find(SupportMessage, outbox_id=request_id)
         require(bool(routes), "not_found")
         user = await self.store.get(User, routes[0].user_id)
         event = Outbox(
+            actor=actor or f"telegram:{self.user.telegram_id}",
+            source=source,
             chat_id=user.telegram_id,
             support_kind="reply",
             support_request_id=request_id,
             text=f"Ответ поддержки / Support reply\n\n{text.strip()}",
         )
         self.store.add(event)
+        case.version += 1
+        case.updated_at = now()
+        case.last_reply_by, case.last_reply_source = event.actor, source
+        record_activity(
+            self.store, self.user, "support_reply", request_id, reply_outbox_id=str(event.id)
+        )
         return event

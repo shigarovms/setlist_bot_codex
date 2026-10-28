@@ -15,12 +15,21 @@ def alembic(database_url, *args, check=True):
     )
 
 
+async def clear_synthetic_audit(engine):
+    # RU: world создаёт современные события. Для проверки старой схемы удаляем
+    # только эти синтетические записи; защиту отката журнала проверяем отдельно.
+    # EN: Legacy migration fixtures predate audit, but preserve all actual domain rows.
+    async with engine.begin() as connection:
+        await connection.execute(text("DELETE FROM admin_audit WHERE source='telegram'"))
+
+
 async def test_migration_round_trip_and_schema_match(database_url, engine):
     for args in [("downgrade", "base"), ("upgrade", "head"), ("check",)]:
         alembic(database_url, *args)
 
 
 async def test_new_migration_refuses_loss_of_event_details(database_url, engine, world):
+    await clear_synthetic_audit(engine)
     async with engine.begin() as connection:
         await connection.execute(
             text("UPDATE concerts SET city='Москва' WHERE id=:id"), {"id": world.concert.id}
@@ -64,6 +73,7 @@ async def test_legacy_blocks_upgrade_preserves_actual_rows_and_time(database_url
     from setlist_bot.domain.rules import totals
     from setlist_bot.infrastructure.database import PostgresUnitOfWork
 
+    await clear_synthetic_audit(engine)
     alembic(database_url, "downgrade", "7c9e02d6a415")
     async with engine.begin() as connection:
         setlist_id = (
@@ -123,6 +133,7 @@ async def test_pause_downgrade_refuses_data_loss(database_url, engine, world):
         service = Setlists(uow.store, world.admin)
         await service.edit_songs(world.group.id, world.concert.id, 0, ["Комета", "2 мин"])
         before = await service.read(world.group.id, world.concert.id)
+    await clear_synthetic_audit(engine)
     result = alembic(database_url, "downgrade", "7c9e02d6a415", check=False)
     assert result.returncode != 0 and "downgrade would lose data" in result.stderr
     async with PostgresUnitOfWork(engine) as uow:

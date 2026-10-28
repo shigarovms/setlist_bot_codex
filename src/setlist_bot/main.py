@@ -8,7 +8,7 @@ from uuid import UUID
 
 from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from sqlalchemy import or_, select, text
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from setlist_bot.application import reminders
@@ -24,6 +24,7 @@ from setlist_bot.domain.entities import (
     Membership,
     Outbox,
     Reminder,
+    RuntimeStatus,
     Setlist,
     Submission,
     SupportMessage,
@@ -33,22 +34,75 @@ from setlist_bot.domain.entities import (
 )
 from setlist_bot.domain.rules import AppError
 from setlist_bot.infrastructure.database import PostgresUnitOfWork, metadata
+from setlist_bot.infrastructure.runtime import BotInstance, check_schema, identity_details
 from setlist_bot.infrastructure.telemetry import Monitor, PollingStatusHandler
 from setlist_bot.transport.commands import collect_command_targets, synchronize_commands
-from setlist_bot.transport.controller import Response
+from setlist_bot.transport.controller import Controller, Response
 from setlist_bot.transport.i18n import tr
 from setlist_bot.transport.session import VerifiedSession
 from setlist_bot.transport.telegram import (
     Processor,
     delete_selection_message,
     make_router,
+    remember_setlist_response,
     send_response,
 )
 
 logger = logging.getLogger(__name__)
 
 
-async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
+async def deliver_card_refresh(bot: Bot, uow: PostgresUnitOfWork, event: Outbox) -> None:
+    """RU: Обновляем только связанную общую карточку; старые задания безопасно завершаются.
+
+    EN: Reuse the normal renderer and message binding; do not publish private content.
+    """
+    cards = await uow.store.find(
+        Confirmation, id=UUID(event.payload["card_id"]), chat_id=event.chat_id
+    )
+    group = await uow.store.get(Group, event.group_id) if event.group_id else None
+    if not cards or group is None or group.deleted_at is not None or group.owner_id is None:
+        event.sent = True
+        return
+    card = cards[0]
+    data = SetlistMenus.data(card)
+    setlists = await uow.store.find(Setlist, group_id=group.id, concert_id=event.concert_id)
+    bindings = await uow.store.find(ChatBinding, group_id=group.id, chat_id=event.chat_id)
+    if (
+        not bindings
+        or not setlists
+        or card.expires_at <= now()
+        or data.get("kind") != "setlist_menu"
+        or data.get("closed")
+        or data.get("personal")
+        or data.get("private_chat")
+        or data.get("owner_id") is not None
+        or not data.get("message_ids")
+        or data.get("group_id") != str(group.id)
+        or data.get("concert_id") != str(event.concert_id)
+        or data.get("version") != setlists[0].version
+        or data.get("approved") != setlists[0].approved
+    ):
+        event.sent = True
+        return
+    owner = await uow.store.get(User, group.owner_id)
+    runtime_rows = await uow.store.find(RuntimeStatus, component="bot")
+    username = runtime_rows[0].details.get("bot_username", "") if runtime_rows else ""
+    controller = Controller(uow.store, owner, event.chat_id, private=False, bot_username=username)
+    controller.language = group.language
+    try:
+        await controller.menus.validate(data)
+    except AppError:
+        event.sent = True
+        return
+    response = await controller.refresh_shared_card(card)
+    messages = await send_response(bot, event.chat_id, response)
+    await remember_setlist_response(uow.store, event.chat_id, response, messages)
+    event.sent, event.delivered_at = True, now()
+    event.attempts += 1
+    event.last_error, event.next_attempt_at = "", None
+
+
+async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
     event_id = None
     try:
         async with PostgresUnitOfWork(engine) as uow:
@@ -70,7 +124,7 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
                 )
             ).first()
             if pending is None:
-                return
+                return False
             event_id = pending.id
             group = (
                 await uow.store.get(Group, pending.group_id, lock=True)
@@ -79,12 +133,20 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
             )
             event = await uow.store.get(Outbox, pending.id, lock=True)
             if event.sent:
-                return
+                return False
+            if event.support_kind == "refresh":
+                try:
+                    await deliver_card_refresh(bot, uow, event)
+                except TelegramForbiddenError as exc:
+                    event.sent, event.discarded_at = True, now()
+                    event.attempts += 1
+                    event.last_error = type(exc).__name__
+                return event.delivered_at is not None
             if event.support_kind in ("event", "request"):
                 settings = await uow.store.find(SupportSettings, key="main")
                 if not settings:
                     event.sent = True
-                    return
+                    return False
                 # RU: После смены чата даже уже поставленные в очередь обращения идут в новый чат.
                 # EN: Reconfiguration also redirects pending support events to the new destination.
                 event.chat_id = settings[0].chat_id
@@ -101,7 +163,7 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
                     or reminders_for_event[0].day != now().astimezone(reminders.MOSCOW).date()
                 ):
                     event.sent = True
-                    return
+                    return False
             request = None
             request_data = None
             if group is not None:
@@ -146,7 +208,7 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
                             ):
                                 SetlistMenus.write(request, {**request_data, "status": "stale"})
                             event.sent = True
-                            return
+                            return False
                         try:
                             await SetlistMenus(uow.store, admin, event.chat_id).validate(
                                 request_data, fresh=True
@@ -154,14 +216,14 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
                         except AppError:
                             SetlistMenus.write(request, {**request_data, "status": "stale"})
                             event.sent = True
-                            return
+                            return False
                 if (
                     group.deleted_at is not None
                     or (not bindings and request is None)
                     or (concert and concert.deleted_at is not None)
                 ):
                     event.sent = True
-                    return
+                    return False
             try:
                 event.attempts += 1
                 sent_messages = await send_response(
@@ -244,7 +306,7 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
                                         ),
                                     )
                                 )
-                        return
+                        return False
                     raise
                 if isinstance(exc, TelegramBadRequest) and not any(
                     reason in exc.message.lower() for reason in ("chat not found", "user not found")
@@ -260,6 +322,7 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
                     )
                 )
             event.sent = True
+            return event.delivered_at is not None
     except Exception as exc:
         if event_id is not None:
             try:
@@ -281,9 +344,9 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
 async def deliver_outbox(bot: Bot, engine: AsyncEngine, monitor: Monitor | None = None) -> None:
     while True:
         try:
-            await deliver_one_outbox(bot, engine)
+            delivered = await deliver_one_outbox(bot, engine)
             if monitor:
-                monitor.set("outbox", "running")
+                monitor.set("outbox", "running", success=delivered)
         except Exception as exc:
             if monitor:
                 monitor.set("outbox", "retrying", error=type(exc).__name__)
@@ -345,71 +408,93 @@ async def daily_reminders(engine: AsyncEngine, monitor: Monitor | None = None) -
 
 async def run(*, check: bool = False, sync_only: bool = False) -> None:
     settings = Settings()
-    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    engine = create_async_engine(
+        settings.database_url,
+        pool_pre_ping=True,
+        connect_args={"timeout": 8, "command_timeout": 15},
+    )
     try:
-        async with engine.connect() as connection:
-            version: str = (
-                await connection.execute(text("SELECT version_num FROM alembic_version"))
-            ).scalar_one()
-            await connection.execute(text("SELECT id FROM groups LIMIT 1"))
+        version = await check_schema(engine)
         if check:
             print(f"PostgreSQL OK; migration {version}")
             return
         if settings.bot_token is None or not settings.bot_token.get_secret_value():
             raise SystemExit("Set BOT_TOKEN in .env; see README.md. Never put tokens in Git.")
-        async with Bot(settings.bot_token.get_secret_value(), session=VerifiedSession()) as bot:
+        monitor = Monitor()
+        async with Bot(
+            settings.bot_token.get_secret_value(), session=VerifiedSession(monitor)
+        ) as bot:
             me = await bot.get_me()
             if settings.expected_bot_id is not None and me.id != settings.expected_bot_id:
                 raise SystemExit(
                     "Bot identity does not match EXPECTED_BOT_ID; polling is forbidden"
                 )
-            try:
-                targets = await collect_command_targets(
-                    engine,
-                    extra_scopes=settings.bot_command_extra_scopes,
-                    legacy_languages=settings.bot_command_legacy_languages,
-                )
-                report = await synchronize_commands(bot, targets)
-            except Exception as exc:
-                logger.error("Command menu synchronization failed (%s)", type(exc).__name__)
-                raise SystemExit(
-                    "Command menu synchronization failed; retry startup or --sync-commands"
-                ) from None
-            if sync_only:
-                print(
-                    f"Telegram commands OK; checked {report.checked}; removed {report.removed}; "
-                    f"registered {report.registered}; unavailable {report.unavailable}"
-                )
-                return
-            monitor = Monitor()
-            monitor.set("bot", "polling")
-            monitor.set("telegram", "no_errors_recorded")
-            dispatcher = Dispatcher()
-            dispatcher.include_router(
-                make_router(
-                    Processor(engine, bot_username=me.username or "", monitor=monitor),
+            async with BotInstance(engine, me.id, settings.runtime_environment) as instance:
+                monitor.identity = identity_details(
+                    me.id,
                     me.username or "",
-                    diagnostics=settings.telegram_diagnostics,
+                    settings.runtime_environment,
+                    settings.runtime_location,
                 )
-            )
-            workers = [
-                asyncio.create_task(deliver_outbox(bot, engine, monitor)),
-                asyncio.create_task(cleanup_trash(engine, bot, monitor)),
-                asyncio.create_task(daily_reminders(engine, monitor)),
-                asyncio.create_task(monitor.persist(engine)),
-            ]
-            polling_status = PollingStatusHandler(monitor)
-            polling_logger = logging.getLogger("aiogram.dispatcher")
-            polling_logger.addHandler(polling_status)
-            try:
-                await dispatcher.start_polling(bot, allowed_updates=["message", "callback_query"])
-            finally:
-                polling_logger.removeHandler(polling_status)
-                for worker in workers:
-                    worker.cancel()
-                for worker in workers:
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await worker
+                try:
+                    targets = await collect_command_targets(
+                        engine,
+                        extra_scopes=settings.bot_command_extra_scopes,
+                        legacy_languages=settings.bot_command_legacy_languages,
+                    )
+                    report = await synchronize_commands(bot, targets)
+                except Exception as exc:
+                    logger.error("Command menu synchronization failed (%s)", type(exc).__name__)
+                    raise SystemExit(
+                        "Command menu synchronization failed; retry startup or --sync-commands"
+                    ) from None
+                if sync_only:
+                    print(
+                        f"Telegram commands OK; checked {report.checked}; "
+                        f"removed {report.removed}; "
+                        f"registered {report.registered}; unavailable {report.unavailable}"
+                    )
+                    return
+                monitor.set("bot", "polling")
+                monitor.set("telegram", "no_errors_recorded")
+                dispatcher = Dispatcher()
+                dispatcher.include_router(
+                    make_router(
+                        Processor(engine, bot_username=me.username or "", monitor=monitor),
+                        me.username or "",
+                        diagnostics=settings.telegram_diagnostics,
+                    )
+                )
+                workers = [
+                    asyncio.create_task(deliver_outbox(bot, engine, monitor)),
+                    asyncio.create_task(cleanup_trash(engine, bot, monitor)),
+                    asyncio.create_task(daily_reminders(engine, monitor)),
+                    asyncio.create_task(monitor.persist(engine)),
+                ]
+                polling = asyncio.create_task(
+                    dispatcher.start_polling(bot, allowed_updates=["message", "callback_query"])
+                )
+                watchdog = asyncio.create_task(instance.watch())
+                polling_status = PollingStatusHandler(monitor)
+                polling_logger = logging.getLogger("aiogram.dispatcher")
+                polling_logger.addHandler(polling_status)
+                try:
+                    done, _ = await asyncio.wait(
+                        [polling, watchdog], return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for task in done:
+                        task.result()
+                except Exception as exc:
+                    monitor.set("bot", "stopped", error=type(exc).__name__)
+                    raise
+                finally:
+                    polling_logger.removeHandler(polling_status)
+                    for task in [polling, watchdog, *workers]:
+                        task.cancel()
+                    await asyncio.gather(polling, watchdog, *workers, return_exceptions=True)
+                    monitor.set("bot", "stopped")
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait_for(monitor.flush(engine), timeout=3)
     finally:
         await engine.dispose()
 

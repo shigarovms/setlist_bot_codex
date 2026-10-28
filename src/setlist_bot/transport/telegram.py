@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from setlist_bot.application.chat_cleanup import message_ids as known_message_ids
 from setlist_bot.application.command_inputs import CommandInputs
+from setlist_bot.application.ports import Store
 from setlist_bot.application.setlist_menus import CARD, SetlistMenus
 from setlist_bot.application.song_selection import SongSelection
 from setlist_bot.application.support import Support
@@ -444,33 +445,6 @@ class Processor:
                                 identifiers.append(response.keyboard_message_id)
                             data["transient_message_ids"] = list(dict.fromkeys(identifiers))
                         CommandInputs.write(rows[0], data)
-            if response.menu_card_id is not None and messages:
-                cards = await uow.store.find(
-                    Confirmation, id=response.menu_card_id, chat_id=chat_id
-                )
-                if cards:
-                    data = SetlistMenus.data(cards[0])
-                    if data.get("kind") == CARD:
-                        for old_card in await uow.store.find(Confirmation, chat_id=chat_id):
-                            old = json.loads(old_card.command)
-                            if (
-                                old_card.id != cards[0].id
-                                and old.get("kind") == CARD
-                                and not old.get("approved")
-                                and not old.get("closed")
-                                and old.get("group_id") == data["group_id"]
-                                and old.get("concert_id") == data["concert_id"]
-                                and old.get("personal") == data["personal"]
-                                and old.get("owner_id") == data["owner_id"]
-                                and old.get("version", 0) < data["version"]
-                            ):
-                                response.delete_message_ids.extend(
-                                    known_message_ids(old) - {m.message_id for m in messages}
-                                )
-                                SetlistMenus.write(old_card, {**old, "closed": True})
-                        SetlistMenus.write(
-                            cards[0], {**data, "message_ids": [m.message_id for m in messages]}
-                        )
             if response.group_creation_id is not None and messages:
                 sessions = await uow.store.find(
                     Confirmation, id=response.group_creation_id, chat_id=chat_id
@@ -494,32 +468,62 @@ class Processor:
                         if response.keyboard_message_id is not None:
                             data["keyboard_message_id"] = response.keyboard_message_id
                         SongSelection.write(session, data)
-            if response.suggestion_template_id is None:
-                for message in messages:
-                    if message.message_id in response.edit_message_ids:
-                        for binding in await uow.store.find(
-                            SetlistMessage, chat_id=chat_id, message_id=message.message_id
-                        ):
-                            await uow.store.delete(binding)
-                return
-            templates = await uow.store.find(SongListTemplate, id=response.suggestion_template_id)
-            # Cleanup may expire a template between sending and recording its message.
-            if not templates:
-                return
-            for message in messages:
-                bindings = await uow.store.find(
-                    SetlistMessage, chat_id=chat_id, message_id=message.message_id
-                )
-                if bindings and message.message_id in response.edit_message_ids:
-                    bindings[0].template_id = response.suggestion_template_id
-                elif not bindings:
-                    uow.store.add(
-                        SetlistMessage(
-                            template_id=response.suggestion_template_id,
-                            chat_id=chat_id,
-                            message_id=message.message_id,
+            await remember_setlist_response(uow.store, chat_id, response, messages)
+
+
+async def remember_setlist_response(
+    store: Store, chat_id: int, response: Response, messages: list[Message]
+) -> None:
+    """RU/EN: One binding mechanism for ordinary replies and queued card refreshes."""
+    if response.menu_card_id is not None and messages:
+        cards = await store.find(Confirmation, id=response.menu_card_id, chat_id=chat_id)
+        if cards:
+            data = SetlistMenus.data(cards[0])
+            if data.get("kind") == CARD:
+                for old_card in await store.find(Confirmation, chat_id=chat_id):
+                    old = json.loads(old_card.command)
+                    if (
+                        old_card.id != cards[0].id
+                        and old.get("kind") == CARD
+                        and not old.get("approved")
+                        and not old.get("closed")
+                        and old.get("group_id") == data["group_id"]
+                        and old.get("concert_id") == data["concert_id"]
+                        and old.get("personal") == data["personal"]
+                        and old.get("owner_id") == data["owner_id"]
+                        and old.get("version", 0) < data["version"]
+                    ):
+                        response.delete_message_ids.extend(
+                            known_message_ids(old) - {m.message_id for m in messages}
                         )
-                    )
+                        SetlistMenus.write(old_card, {**old, "closed": True})
+                SetlistMenus.write(
+                    cards[0], {**data, "message_ids": [m.message_id for m in messages]}
+                )
+    if response.suggestion_template_id is None:
+        for message in messages:
+            if message.message_id in response.edit_message_ids:
+                for binding in await store.find(
+                    SetlistMessage, chat_id=chat_id, message_id=message.message_id
+                ):
+                    await store.delete(binding)
+        return
+    templates = await store.find(SongListTemplate, id=response.suggestion_template_id)
+    # Cleanup may expire a template between sending and recording its message.
+    if not templates:
+        return
+    for message in messages:
+        bindings = await store.find(SetlistMessage, chat_id=chat_id, message_id=message.message_id)
+        if bindings and message.message_id in response.edit_message_ids:
+            bindings[0].template_id = response.suggestion_template_id
+        elif not bindings:
+            store.add(
+                SetlistMessage(
+                    template_id=response.suggestion_template_id,
+                    chat_id=chat_id,
+                    message_id=message.message_id,
+                )
+            )
 
 
 async def keyboards(

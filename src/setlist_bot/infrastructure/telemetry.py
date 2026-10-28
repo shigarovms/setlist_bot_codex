@@ -16,11 +16,18 @@ logger = logging.getLogger(__name__)
 
 
 class Monitor:
-    def __init__(self) -> None:
+    def __init__(self, identity: dict[str, Any] | None = None) -> None:
         self.components: dict[str, dict[str, Any]] = {}
+        self.identity = identity or {}
 
     def set(
-        self, component: str, state: str, *, error: str = "", next_run: datetime | None = None
+        self,
+        component: str,
+        state: str,
+        *,
+        error: str = "",
+        next_run: datetime | None = None,
+        success: bool = False,
     ) -> None:
         old = self.components.get(component, {})
         self.components[component] = {
@@ -29,6 +36,9 @@ class Monitor:
             "errors": old.get("errors", 0) + bool(error),
             "last_error": error or old.get("last_error", ""),
             "next_run": next_run,
+            "last_success_at": now() if success else old.get("last_success_at"),
+            "last_error_at": now() if error else old.get("last_error_at"),
+            "details": self.identity if component == "bot" else old.get("details", {}),
         }
 
     async def flush(self, engine: AsyncEngine) -> None:
@@ -50,6 +60,9 @@ class Monitor:
                                 "errors",
                                 "last_error",
                                 "next_run",
+                                "last_success_at",
+                                "last_error_at",
+                                "details",
                             )
                         },
                     )

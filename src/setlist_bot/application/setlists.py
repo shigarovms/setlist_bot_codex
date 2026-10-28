@@ -14,6 +14,7 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
+from setlist_bot.application.activity import record_activity
 from setlist_bot.application.catalog import Catalog
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
@@ -363,6 +364,14 @@ class Setlists:
             proposer_id=proposer_id,
         )
         self.store.add(revision)
+        record_activity(
+            self.store,
+            self.user,
+            "setlist_" + action,
+            setlist.concert_id,
+            version=setlist.version,
+            group_id=str(setlist.group_id),
+        )
         await self.store.flush()
         return revision
 

@@ -222,8 +222,10 @@ def test_historical_scope_configuration_validates_json_and_languages():
         Settings(database_url="postgresql+asyncpg://test", bot_command_legacy_languages=["RU"])
 
 
-async def test_sync_only_runs_menu_sync_without_starting_polling(monkeypatch, database_url):
-    fake = SimpleNamespace(get_me=AsyncMock(return_value=SimpleNamespace(username="test_bot")))
+async def test_sync_only_runs_menu_sync_without_starting_polling(monkeypatch, database_url, engine):
+    fake = SimpleNamespace(
+        get_me=AsyncMock(return_value=SimpleNamespace(id=123456, username="test_bot"))
+    )
 
     class FakeBot:
         def __init__(self, *args, **kwargs):

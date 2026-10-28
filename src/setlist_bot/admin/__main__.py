@@ -8,7 +8,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from setlist_bot.admin.app import create_app
+from setlist_bot.admin.console import create_console
 from setlist_bot.admin.security import AdminSettings, password_hash
 
 
@@ -56,7 +56,7 @@ def main() -> None:
         configure(args.create_config)
         return
     settings = AdminSettings()
-    web.run_app(create_app(settings), host=settings.host, port=settings.port, access_log=None)
+    web.run_app(create_console(settings), host=settings.host, port=settings.port, access_log=None)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,8 @@ class AdminQueries:
           (SELECT count(*) FROM concerts WHERE deleted_at IS NULL AND date >= :today)
             AS concerts,
           (SELECT count(*) FROM outbox WHERE NOT sent) AS pending,
+          coalesce((SELECT extract(epoch FROM (now()-min(created_at)))::float
+                    FROM outbox WHERE NOT sent),0) AS oldest_pending_age_seconds,
           (SELECT count(*) FROM outbox WHERE NOT sent AND last_error <> '') AS failed,
           (SELECT count(*) FROM processed_updates WHERE created_at >= now()-interval
             '24 hours') AS updates,
@@ -110,7 +112,7 @@ class AdminQueries:
             'open' ELSE :state END)
             ORDER BY o.created_at DESC NULLS LAST,o.id LIMIT :limit OFFSET :offset""",
             "audit": """
-            SELECT id,created_at,actor,action,target,details FROM admin_audit
+            SELECT id,created_at,actor,source,action,target,details FROM admin_audit
             WHERE (actor ILIKE :q OR action ILIKE :q OR target ILIKE :q)
             ORDER BY created_at DESC,id LIMIT :limit OFFSET :offset""",
             "catalog": """
@@ -200,7 +202,9 @@ class AdminQueries:
 
     async def ticket(self, identifier: UUID) -> dict[str, Any]:
         return await self.one(
-            """SELECT o.id,o.created_at,o.text,coalesce(c.status,'open') AS status
+            """SELECT o.id,o.created_at,o.text,coalesce(c.status,'open') AS status,
+            coalesce(c.version,0) AS version,coalesce(c.last_reply_by,'') AS last_reply_by,
+            coalesce(c.last_reply_source,'') AS last_reply_source
             FROM outbox o LEFT JOIN support_cases c ON c.request_id=o.id
             WHERE o.id=:id AND o.support_kind='request'""",
             id=identifier,
@@ -208,13 +212,15 @@ class AdminQueries:
 
     async def replies(self, identifier: UUID) -> list[dict[str, Any]]:
         return await self.rows(
-            """SELECT id,text,created_at,delivered_at,discarded_at,last_error,sent FROM outbox
+            """SELECT id,text,created_at,delivered_at,discarded_at,last_error,sent,actor,source
+            FROM outbox
             WHERE support_request_id=:id ORDER BY created_at,id LIMIT 100""",
             id=identifier,
         )
 
     async def runtime(self) -> list[dict[str, Any]]:
         return await self.rows(
-            "SELECT component,updated_at,last_activity_at,state,errors,last_error,next_run "
+            "SELECT component,updated_at,last_activity_at,last_success_at,last_error_at,details,"
+            "state,errors,last_error,next_run "
             "FROM runtime_status ORDER BY component"
         )

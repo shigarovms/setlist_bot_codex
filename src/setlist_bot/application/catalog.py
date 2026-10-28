@@ -3,7 +3,9 @@ from uuid import UUID
 
 from rapidfuzz.fuzz import WRatio
 
+from setlist_bot.application.activity import record_activity
 from setlist_bot.application.groups import Groups
+from setlist_bot.application.message_refresh import queue_card_refreshes
 from setlist_bot.application.ports import Store
 from setlist_bot.domain.entities import CatalogProposal, Membership, Song, SongAlias, User
 from setlist_bot.domain.rules import SongListError, normalize, require, search_key, validate_song
@@ -12,8 +14,9 @@ SONG_FIELDS = ("title", "duration_seconds", "bpm", "lights", "comment")
 
 
 class Catalog:
-    def __init__(self, store: Store, user: User) -> None:
+    def __init__(self, store: Store, user: User, *, refresh_cards: bool = True) -> None:
         self.store, self.user = store, user
+        self.refresh_cards = refresh_cards
         self.groups = Groups(store, user)
 
     async def list_songs(self, group_id: UUID, *, archived: bool = False) -> list[Song]:
@@ -56,6 +59,7 @@ class Catalog:
         return await self._save(group_id, data, song)
 
     async def _save(self, group_id: UUID, data: dict[str, Any], song: Song | None) -> Song:
+        created = song is None
         if song is None:
             song = Song(group_id=group_id, **data)
             self.store.add(song)
@@ -64,6 +68,17 @@ class Catalog:
                 setattr(song, key, data.get(key, "" if key in ("lights", "comment") else None))
             song.version += 1
         await self.store.flush()
+        record_activity(
+            self.store,
+            self.user,
+            "song_created" if created else "song_changed",
+            song.id,
+            group_id=str(group_id),
+            version=song.version,
+            fields=sorted(data),
+        )
+        if self.refresh_cards:
+            await queue_card_refreshes(self.store, group_id)
         return song
 
     async def archive(self, group_id: UUID, song_id: UUID, expected: int, archived: bool) -> None:
@@ -71,6 +86,14 @@ class Catalog:
         song = await self.song(group_id, song_id)
         require(song.version == expected, "conflict")
         song.archived, song.version = archived, song.version + 1
+        record_activity(
+            self.store,
+            self.user,
+            "song_archived",
+            song_id,
+            group_id=str(group_id),
+            archived=archived,
+        )
 
     async def alias(self, group_id: UUID, song_id: UUID, title: str) -> SongAlias | CatalogProposal:
         await self.groups.access(group_id)

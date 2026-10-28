@@ -2,6 +2,9 @@
 
 from uuid import UUID
 
+from setlist_bot.application.activity import web_activity
+from setlist_bot.application.groups import Groups
+from setlist_bot.application.message_refresh import queue_card_refreshes
 from setlist_bot.application.ports import Store
 from setlist_bot.application.support import Support
 from setlist_bot.application.trash import Trash
@@ -9,9 +12,7 @@ from setlist_bot.domain.entities import (
     AdminAudit,
     Concert,
     Group,
-    Membership,
     Outbox,
-    SupportCase,
     SupportMessage,
     User,
     now,
@@ -28,6 +29,12 @@ class Administration:
     async def execute(
         self, action: str, identifier: UUID, values: dict[str, str], request_key: str
     ) -> None:
+        with web_activity():
+            await self._execute(action, identifier, values, request_key)
+
+    async def _execute(
+        self, action: str, identifier: UUID, values: dict[str, str], request_key: str
+    ) -> None:
         # RU: Ключ формы коммитится вместе с действием; двойной клик не повторяет отправку.
         # EN: Audit nonce and mutation share a transaction; duplicate POSTs roll back atomically.
         audit = AdminAudit(
@@ -39,19 +46,22 @@ class Administration:
             request = await self.store.get(Outbox, identifier, lock=True)
             routes = await self.store.find(SupportMessage, outbox_id=identifier)
             require(request.support_kind == "request" and bool(routes), "not_found")
-            cases = await self.store.find(SupportCase, request_id=identifier)
-            case = cases[0] if cases else SupportCase(request_id=identifier)
-            if not cases:
-                self.store.add(case)
+            user = await self.store.get(User, routes[0].user_id)
+            support = Support(self.store, user)
+            case = await support.case(identifier, int(values["expected_version"]))
             if action == "support_reply":
-                user = await self.store.get(User, routes[0].user_id)
-                event = await Support(self.store, user).reply_to_request(
-                    identifier, values.get("message", "")
+                event = await support.reply_to_request(
+                    identifier,
+                    values.get("message", ""),
+                    expected_version=case.version,
+                    source="web",
+                    actor=self.actor,
                 )
                 audit.details = {"reply_outbox_id": str(event.id)}
                 case.status = "closed" if values.get("close") == "yes" else "open"
             else:
                 case.status = "closed" if action == "support_close" else "open"
+                case.version += 1
             case.updated_at = now()
         elif action in ("queue_retry", "queue_discard"):
             event = await self.store.get(Outbox, identifier, lock=True)
@@ -78,21 +88,26 @@ class Administration:
                 await service.restore_concert(group.id, concert.id, epoch)
             else:
                 await service.restore_group(group.id, epoch)
+            await queue_card_refreshes(self.store, group.id, concert.id if concert else None)
         elif action in ("group_reminders", "group_owner"):
             group = await self.store.get(Group, identifier, lock=True)
             require(group.deleted_at is None, "in_trash")
+            require(group.owner_id is not None, "not_found")
+            assert group.owner_id is not None
+            owner = await self.store.get(User, group.owner_id)
+            service_groups = Groups(self.store, owner)
             if action == "group_reminders":
                 require(values.get("enabled") in ("yes", "no"), "input")
-                group.reminders_enabled = values["enabled"] == "yes"
+                await service_groups.set_reminders(group.id, values["enabled"] == "yes")
                 audit.details = {"enabled": group.reminders_enabled}
             else:
-                require(values.get("confirmation", "").strip() == group.name, "confirmation")
-                require(values.get("expected_owner") == str(group.owner_id), "conflict")
-                member = await self.store.get(Membership, UUID(values["member_id"]), lock=True)
-                require(member.group_id == group.id and member.status == "active", "forbidden")
-                require(member.user_id != group.owner_id, "already_done")
-                audit.details = {"old_owner": str(group.owner_id), "new_owner": str(member.user_id)}
-                member.role = "admin"
-                group.owner_id = member.user_id
+                previous = group.owner_id
+                await service_groups.transfer_ownership(
+                    group.id,
+                    UUID(values["member_id"]),
+                    values.get("expected_owner", ""),
+                    values.get("confirmation", ""),
+                )
+                audit.details = {"old_owner": str(previous), "new_owner": str(group.owner_id)}
         else:
             require(False, "input")
