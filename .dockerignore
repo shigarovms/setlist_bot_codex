@@ -18,3 +18,5 @@ postgres_data
 *.sqlite3
 build
 dist
+
+.admin-status

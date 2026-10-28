@@ -65,6 +65,7 @@ def table(entity: type[e.Entity], name: str, *columns: Any) -> None:
 table(
     e.User,
     "users",
+    col("last_seen_at", DateTime(timezone=True), nullable=True, index=True),
     col("telegram_id", BigInteger, unique=True),
     col("language", String(2)),
     col("display_name", String(200)),
@@ -268,6 +269,13 @@ table(
 table(
     e.Outbox,
     "outbox",
+    col("support_request_id", Uuid, ForeignKey("outbox.id"), nullable=True, index=True),
+    col("created_at", DateTime(timezone=True), nullable=True, index=True),
+    col("delivered_at", DateTime(timezone=True), nullable=True),
+    col("discarded_at", DateTime(timezone=True), nullable=True),
+    col("attempts", Integer, server_default="0"),
+    col("last_error", String(120), server_default=""),
+    col("next_attempt_at", DateTime(timezone=True), nullable=True, index=True),
     col("support_kind", String(10), server_default=""),
     col("chat_id", BigInteger),
     col("text", Text),
@@ -339,7 +347,12 @@ table(
     col("has_header", Boolean, nullable=True),
     col("status", String(12)),
 )
-table(e.ProcessedUpdate, "processed_updates", col("update_id", BigInteger, unique=True))
+table(
+    e.ProcessedUpdate,
+    "processed_updates",
+    col("update_id", BigInteger, unique=True),
+    col("created_at", DateTime(timezone=True), nullable=True, index=True),
+)
 table(
     e.Confirmation,
     "confirmations",
@@ -378,6 +391,52 @@ table(
     col("day", Date),
     col("outbox_id", Uuid, ForeignKey("outbox.id"), unique=True),
     UniqueConstraint("concert_id", "day"),
+)
+
+
+table(
+    e.AdminSession,
+    "admin_sessions",
+    col("token_hash", String(64), unique=True),
+    col("actor", String(100)),
+    col("created_at", DateTime(timezone=True)),
+    col("expires_at", DateTime(timezone=True), index=True),
+)
+table(
+    e.AdminLoginLimit,
+    "admin_login_limits",
+    col("key", String(64), unique=True),
+    col("window_start", DateTime(timezone=True)),
+    col("attempts", Integer),
+)
+table(
+    e.AdminAudit,
+    "admin_audit",
+    col("actor", String(100)),
+    col("action", String(60)),
+    col("target", String(100)),
+    col("request_key", String(64), unique=True),
+    col("created_at", DateTime(timezone=True), index=True),
+    col("details", JSONB),
+)
+table(
+    e.SupportCase,
+    "support_cases",
+    col("request_id", Uuid, ForeignKey("outbox.id"), unique=True),
+    col("status", String(12)),
+    col("updated_at", DateTime(timezone=True)),
+    CheckConstraint("status IN ('open', 'closed')", name="status"),
+)
+table(
+    e.RuntimeStatus,
+    "runtime_status",
+    col("component", String(40), unique=True),
+    col("last_activity_at", DateTime(timezone=True), nullable=True),
+    col("updated_at", DateTime(timezone=True)),
+    col("state", String(40)),
+    col("errors", Integer),
+    col("last_error", String(120)),
+    col("next_run", DateTime(timezone=True), nullable=True),
 )
 
 

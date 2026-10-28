@@ -34,6 +34,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://setlist:setlist@db:5432/setlist_sandbox
       BOT_COMMAND_LEGACY_LANGUAGES: "[]"
       BOT_COMMAND_EXTRA_SCOPES: "[]"
+      EXPECTED_BOT_ID: "1110437563"
       TELEGRAM_DIAGNOSTICS: ${TELEGRAM_DIAGNOSTICS:-true}
     restart: unless-stopped
     depends_on:

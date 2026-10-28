@@ -15,6 +15,7 @@ class Entity:
 
 @dataclass(kw_only=True)
 class User(Entity):
+    last_seen_at: datetime | None = None
     telegram_id: int
     language: str = "ru"
     display_name: str = ""
@@ -164,6 +165,13 @@ class Submission(Entity):
 
 @dataclass(kw_only=True)
 class Outbox(Entity):
+    created_at: datetime | None = field(default_factory=now)
+    delivered_at: datetime | None = None
+    discarded_at: datetime | None = None
+    attempts: int = 0
+    last_error: str = ""
+    next_attempt_at: datetime | None = None
+    support_request_id: UUID | None = None
     support_kind: str = ""
     chat_id: int
     text: str
@@ -231,6 +239,7 @@ class CatalogImport(Entity):
 
 @dataclass(kw_only=True)
 class ProcessedUpdate(Entity):
+    created_at: datetime | None = field(default_factory=now)
     update_id: int
 
 
@@ -263,3 +272,46 @@ class Reminder(Entity):
     concert_id: UUID
     day: date
     outbox_id: UUID
+
+
+@dataclass(kw_only=True)
+class AdminSession(Entity):
+    token_hash: str
+    actor: str
+    created_at: datetime
+    expires_at: datetime
+
+
+@dataclass(kw_only=True)
+class AdminLoginLimit(Entity):
+    key: str
+    window_start: datetime
+    attempts: int = 0
+
+
+@dataclass(kw_only=True)
+class AdminAudit(Entity):
+    actor: str
+    action: str
+    target: str
+    request_key: str
+    created_at: datetime = field(default_factory=now)
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(kw_only=True)
+class SupportCase(Entity):
+    request_id: UUID
+    status: str = "open"
+    updated_at: datetime = field(default_factory=now)
+
+
+@dataclass(kw_only=True)
+class RuntimeStatus(Entity):
+    last_activity_at: datetime | None = None
+    component: str
+    updated_at: datetime
+    state: str
+    errors: int = 0
+    last_error: str = ""
+    next_run: datetime | None = None

@@ -1,0 +1,28 @@
+# Combine only with compose.sandbox.yaml. This web service never receives a bot token.
+services:
+  admin:
+    image: setlist-sandbox-app
+    build: .
+    command: [".venv/bin/python", "-m", "setlist_bot.admin"]
+    env_file:
+      - .env.admin
+    ports:
+      - "127.0.0.1:8088:8080"
+    volumes:
+      - ./.admin-status:/app/.admin-status:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.75
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", ".venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

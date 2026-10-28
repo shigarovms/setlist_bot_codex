@@ -8,6 +8,7 @@ class Settings(BaseSettings):
 
     database_url: str
     bot_token: SecretStr | None = None
+    expected_bot_id: int | None = Field(default=None, gt=0)
     telegram_diagnostics: bool = False
     bot_command_legacy_languages: list[str] = Field(default_factory=list)
     bot_command_extra_scopes: list[BotCommandScopeUnion] = Field(default_factory=list)

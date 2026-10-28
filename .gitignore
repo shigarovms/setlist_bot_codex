@@ -20,3 +20,5 @@ postgres_data/
 *.sqlite
 *.sqlite3
 .DS_Store
+
+.admin-status/

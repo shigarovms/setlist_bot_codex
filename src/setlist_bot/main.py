@@ -8,7 +8,7 @@ from uuid import UUID
 
 from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from setlist_bot.application import reminders
@@ -33,6 +33,7 @@ from setlist_bot.domain.entities import (
 )
 from setlist_bot.domain.rules import AppError
 from setlist_bot.infrastructure.database import PostgresUnitOfWork, metadata
+from setlist_bot.infrastructure.telemetry import Monitor, PollingStatusHandler
 from setlist_bot.transport.commands import collect_command_targets, synchronize_commands
 from setlist_bot.transport.controller import Response
 from setlist_bot.transport.i18n import tr
@@ -48,202 +49,249 @@ logger = logging.getLogger(__name__)
 
 
 async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> None:
-    async with PostgresUnitOfWork(engine) as uow:
-        pending = (
-            await uow.session.scalars(
-                select(Outbox).where(metadata.tables["outbox"].c.sent.is_(False)).limit(1)
-            )
-        ).first()
-        if pending is None:
-            return
-        group = (
-            await uow.store.get(Group, pending.group_id, lock=True) if pending.group_id else None
-        )
-        event = await uow.store.get(Outbox, pending.id, lock=True)
-        if event.sent:
-            return
-        if event.support_kind in ("event", "request"):
-            settings = await uow.store.find(SupportSettings, key="main")
-            if not settings:
-                event.sent = True
-                return
-            # RU: После смены чата даже уже поставленные в очередь обращения идут в новый чат.
-            # EN: Reconfiguration also redirects pending support events to the new destination.
-            event.chat_id = settings[0].chat_id
-            for route in await uow.store.find(SupportMessage, outbox_id=event.id):
-                route.chat_id = event.chat_id
-        reminders_for_event = await uow.store.find(Reminder, outbox_id=event.id)
-        if reminders_for_event:
-            setlists = await uow.store.find(Setlist, concert_id=event.concert_id)
-            if (
-                group is None
-                or not group.reminders_enabled
-                or not setlists
-                or setlists[0].approved
-                or reminders_for_event[0].day != now().astimezone(reminders.MOSCOW).date()
-            ):
-                event.sent = True
-                return
-        request = None
-        request_data = None
-        if group is not None:
-            bindings = await uow.store.find(ChatBinding, group_id=group.id, chat_id=event.chat_id)
-            concert = await uow.store.get(Concert, event.concert_id) if event.concert_id else None
-            if event.chat_id > 0 and event.buttons and event.buttons[0][1].startswith("slreq "):
-                requests = await uow.store.find(
-                    Confirmation, id=UUID(event.buttons[0][1].split()[1])
+    event_id = None
+    try:
+        async with PostgresUnitOfWork(engine) as uow:
+            pending = (
+                await uow.session.scalars(
+                    select(Outbox)
+                    .where(
+                        metadata.tables["outbox"].c.sent.is_(False),
+                        or_(
+                            metadata.tables["outbox"].c.next_attempt_at.is_(None),
+                            metadata.tables["outbox"].c.next_attempt_at <= now(),
+                        ),
+                    )
+                    .order_by(
+                        metadata.tables["outbox"].c.created_at.asc().nulls_first(),
+                        metadata.tables["outbox"].c.id,
+                    )
+                    .limit(1)
                 )
-                if requests:
-                    request = requests[0]
-                    request_data = SetlistMenus.data(request)
-                    admin = await uow.store.get(User, request.user_id)
-                    if not (
-                        request_data.get("kind") == REQUEST
-                        and request_data["status"] == "pending"
-                        and request.expires_at > now()
-                        and request.chat_id == event.chat_id == admin.telegram_id
-                        and request_data["group_id"] == str(event.group_id)
-                        and request_data["concert_id"] == str(event.concert_id)
-                        and await uow.store.find(
-                            Membership,
-                            group_id=group.id,
-                            user_id=admin.id,
-                            role="admin",
-                            status="active",
+            ).first()
+            if pending is None:
+                return
+            event_id = pending.id
+            group = (
+                await uow.store.get(Group, pending.group_id, lock=True)
+                if pending.group_id
+                else None
+            )
+            event = await uow.store.get(Outbox, pending.id, lock=True)
+            if event.sent:
+                return
+            if event.support_kind in ("event", "request"):
+                settings = await uow.store.find(SupportSettings, key="main")
+                if not settings:
+                    event.sent = True
+                    return
+                # RU: После смены чата даже уже поставленные в очередь обращения идут в новый чат.
+                # EN: Reconfiguration also redirects pending support events to the new destination.
+                event.chat_id = settings[0].chat_id
+                for route in await uow.store.find(SupportMessage, outbox_id=event.id):
+                    route.chat_id = event.chat_id
+            reminders_for_event = await uow.store.find(Reminder, outbox_id=event.id)
+            if reminders_for_event:
+                setlists = await uow.store.find(Setlist, concert_id=event.concert_id)
+                if (
+                    group is None
+                    or not group.reminders_enabled
+                    or not setlists
+                    or setlists[0].approved
+                    or reminders_for_event[0].day != now().astimezone(reminders.MOSCOW).date()
+                ):
+                    event.sent = True
+                    return
+            request = None
+            request_data = None
+            if group is not None:
+                bindings = await uow.store.find(
+                    ChatBinding, group_id=group.id, chat_id=event.chat_id
+                )
+                concert = (
+                    await uow.store.get(Concert, event.concert_id) if event.concert_id else None
+                )
+                if event.chat_id > 0 and event.buttons and event.buttons[0][1].startswith("slreq "):
+                    requests = await uow.store.find(
+                        Confirmation, id=UUID(event.buttons[0][1].split()[1])
+                    )
+                    if requests:
+                        request = requests[0]
+                        request_data = SetlistMenus.data(request)
+                        admin = await uow.store.get(User, request.user_id)
+                        if not (
+                            request_data.get("kind") == REQUEST
+                            and request_data["status"] == "pending"
+                            and request.expires_at > now()
+                            and request.chat_id == event.chat_id == admin.telegram_id
+                            and request_data["group_id"] == str(event.group_id)
+                            and request_data["concert_id"] == str(event.concert_id)
+                            and await uow.store.find(
+                                Membership,
+                                group_id=group.id,
+                                user_id=admin.id,
+                                role="admin",
+                                status="active",
+                            )
+                            and await uow.store.find(
+                                Membership,
+                                group_id=group.id,
+                                user_id=UUID(request_data["requester_id"]),
+                                status="active",
+                            )
+                        ):
+                            if (
+                                request_data.get("kind") == REQUEST
+                                and request_data.get("status") == "pending"
+                            ):
+                                SetlistMenus.write(request, {**request_data, "status": "stale"})
+                            event.sent = True
+                            return
+                        try:
+                            await SetlistMenus(uow.store, admin, event.chat_id).validate(
+                                request_data, fresh=True
+                            )
+                        except AppError:
+                            SetlistMenus.write(request, {**request_data, "status": "stale"})
+                            event.sent = True
+                            return
+                if (
+                    group.deleted_at is not None
+                    or (not bindings and request is None)
+                    or (concert and concert.deleted_at is not None)
+                ):
+                    event.sent = True
+                    return
+            try:
+                event.attempts += 1
+                sent_messages = await send_response(
+                    bot,
+                    event.chat_id,
+                    Response(
+                        event.text,
+                        [(b[0], b[1]) for b in event.buttons],
+                        monospace=event.monospace,
+                        monospace_body=event.text[event.monospace_offset :]
+                        if event.monospace
+                        else None,
+                    ),
+                )
+                event.delivered_at = now()
+                event.last_error = ""
+                event.next_attempt_at = None
+                if request is not None and request_data is not None:
+                    SetlistMenus.write(
+                        request,
+                        {**request_data, "message_ids": [m.message_id for m in sent_messages]},
+                    )
+                for button in event.buttons:
+                    if button[1].startswith("apply_submission ") and sent_messages:
+                        submission_id = UUID(button[1].split()[1])
+                        submission = await uow.store.get(Submission, submission_id)
+                        uow.store.add(
+                            Confirmation(
+                                user_id=submission.author_id,
+                                chat_id=event.chat_id,
+                                command=json.dumps(
+                                    {
+                                        "kind": "submission_panel",
+                                        "group_id": str(event.group_id),
+                                        "concert_id": str(event.concert_id),
+                                        "submission_id": str(submission_id),
+                                        "message_ids": [m.message_id for m in sent_messages],
+                                    }
+                                ),
+                                expires_at=now() + timedelta(days=30),
+                            )
                         )
-                        and await uow.store.find(
-                            Membership,
-                            group_id=group.id,
-                            user_id=UUID(request_data["requester_id"]),
-                            status="active",
+                routes = await uow.store.find(SupportMessage, outbox_id=event.id)
+                if routes and sent_messages:
+                    routes[0].message_id = sent_messages[0].message_id
+                    for message in sent_messages[1:]:
+                        uow.store.add(
+                            SupportMessage(
+                                outbox_id=event.id,
+                                user_id=routes[0].user_id,
+                                chat_id=event.chat_id,
+                                message_id=message.message_id,
+                            )
+                        )
+            except (TelegramForbiddenError, TelegramBadRequest) as exc:
+                event.last_error = type(exc).__name__
+                if request is None or request_data is None or group is None:
+                    if event.support_kind and (
+                        isinstance(exc, TelegramForbiddenError)
+                        or any(
+                            reason in exc.message.lower()
+                            for reason in ("chat not found", "user not found", "bot was kicked")
                         )
                     ):
-                        if (
-                            request_data.get("kind") == REQUEST
-                            and request_data.get("status") == "pending"
-                        ):
-                            SetlistMenus.write(request, {**request_data, "status": "stale"})
+                        logger.warning(
+                            "Notification destination unavailable; retiring event %s", event.id
+                        )
                         event.sent = True
-                        return
-                    try:
-                        await SetlistMenus(uow.store, admin, event.chat_id).validate(
-                            request_data, fresh=True
-                        )
-                    except AppError:
-                        SetlistMenus.write(request, {**request_data, "status": "stale"})
-                        event.sent = True
-                        return
-            if (
-                group.deleted_at is not None
-                or (not bindings and request is None)
-                or (concert and concert.deleted_at is not None)
-            ):
-                event.sent = True
-                return
-        try:
-            sent_messages = await send_response(
-                bot,
-                event.chat_id,
-                Response(
-                    event.text,
-                    [(b[0], b[1]) for b in event.buttons],
-                    monospace=event.monospace,
-                    monospace_body=event.text[event.monospace_offset :]
-                    if event.monospace
-                    else None,
-                ),
-            )
-            if request is not None and request_data is not None:
-                SetlistMenus.write(
-                    request, {**request_data, "message_ids": [m.message_id for m in sent_messages]}
-                )
-            for button in event.buttons:
-                if button[1].startswith("apply_submission ") and sent_messages:
-                    submission_id = UUID(button[1].split()[1])
-                    submission = await uow.store.get(Submission, submission_id)
-                    uow.store.add(
-                        Confirmation(
-                            user_id=submission.author_id,
-                            chat_id=event.chat_id,
-                            command=json.dumps(
-                                {
-                                    "kind": "submission_panel",
-                                    "group_id": str(event.group_id),
-                                    "concert_id": str(event.concert_id),
-                                    "submission_id": str(submission_id),
-                                    "message_ids": [m.message_id for m in sent_messages],
-                                }
-                            ),
-                            expires_at=now() + timedelta(days=30),
-                        )
-                    )
-            routes = await uow.store.find(SupportMessage, outbox_id=event.id)
-            if routes and sent_messages:
-                routes[0].message_id = sent_messages[0].message_id
-                for message in sent_messages[1:]:
-                    uow.store.add(
-                        SupportMessage(
-                            outbox_id=event.id,
-                            user_id=routes[0].user_id,
-                            chat_id=event.chat_id,
-                            message_id=message.message_id,
-                        )
-                    )
-        except (TelegramForbiddenError, TelegramBadRequest) as exc:
-            if request is None or request_data is None or group is None:
-                if event.support_kind and (
-                    isinstance(exc, TelegramForbiddenError)
-                    or any(
-                        reason in exc.message.lower()
-                        for reason in ("chat not found", "user not found", "bot was kicked")
-                    )
-                ):
-                    logger.warning(
-                        "Notification destination unavailable; retiring event %s", event.id
-                    )
-                    event.sent = True
-                    if event.support_kind == "reply":
-                        settings = await uow.store.find(SupportSettings, key="main")
-                        if settings:
-                            uow.store.add(
-                                Outbox(
-                                    chat_id=settings[0].chat_id,
-                                    support_kind="event",
-                                    text=(
-                                        "Ответ поддержки не доставлен пользователю "
-                                        f"{event.chat_id}. "
-                                        "Бот заблокирован или личный чат недоступен."
-                                    ),
+                        if event.support_kind == "reply":
+                            settings = await uow.store.find(SupportSettings, key="main")
+                            if settings:
+                                uow.store.add(
+                                    Outbox(
+                                        chat_id=settings[0].chat_id,
+                                        support_kind="event",
+                                        text=(
+                                            "Ответ поддержки не доставлен пользователю "
+                                            f"{event.chat_id}. "
+                                            "Бот заблокирован или личный чат недоступен."
+                                        ),
+                                    )
                                 )
-                            )
-                    return
-                raise
-            if isinstance(exc, TelegramBadRequest) and not any(
-                reason in exc.message.lower() for reason in ("chat not found", "user not found")
-            ):
-                raise
-            SetlistMenus.write(request, {**request_data, "status": "undeliverable"})
-            uow.store.add(
-                Outbox(
-                    group_id=group.id,
-                    concert_id=event.concert_id,
-                    chat_id=request_data["source_chat_id"],
-                    text=tr(group.language, "request_delivery_failed"),
+                        return
+                    raise
+                if isinstance(exc, TelegramBadRequest) and not any(
+                    reason in exc.message.lower() for reason in ("chat not found", "user not found")
+                ):
+                    raise
+                SetlistMenus.write(request, {**request_data, "status": "undeliverable"})
+                uow.store.add(
+                    Outbox(
+                        group_id=group.id,
+                        concert_id=event.concert_id,
+                        chat_id=request_data["source_chat_id"],
+                        text=tr(group.language, "request_delivery_failed"),
+                    )
                 )
-            )
-        event.sent = True
+            event.sent = True
+    except Exception as exc:
+        if event_id is not None:
+            try:
+                async with PostgresUnitOfWork(engine) as failed:
+                    event = await failed.store.get(Outbox, event_id, lock=True)
+                    if not event.sent:
+                        event.attempts += 1
+                        event.last_error = type(exc).__name__[:120]
+                        retry_after = getattr(exc, "retry_after", 0)
+                        delay = max(2, min(3600, max(retry_after, 2 ** min(event.attempts, 10))))
+                        event.next_attempt_at = now() + timedelta(seconds=delay)
+            except Exception as metadata_error:
+                logger.warning(
+                    "Could not persist delivery failure (%s)", type(metadata_error).__name__
+                )
+        raise
 
 
-async def deliver_outbox(bot: Bot, engine: AsyncEngine) -> None:
+async def deliver_outbox(bot: Bot, engine: AsyncEngine, monitor: Monitor | None = None) -> None:
     while True:
         try:
             await deliver_one_outbox(bot, engine)
+            if monitor:
+                monitor.set("outbox", "running")
         except Exception as exc:
+            if monitor:
+                monitor.set("outbox", "retrying", error=type(exc).__name__)
             logger.warning("Outbox delivery failed (%s); will retry", type(exc).__name__)
         await asyncio.sleep(2)
 
 
-async def cleanup_trash(engine: AsyncEngine, bot: Bot) -> None:
+async def cleanup_trash(engine: AsyncEngine, bot: Bot, monitor: Monitor | None = None) -> None:
     while True:
         try:
             async with PostgresUnitOfWork(engine) as uow:
@@ -253,12 +301,16 @@ async def cleanup_trash(engine: AsyncEngine, bot: Bot) -> None:
                         for identifier in known_message_ids(data):
                             await delete_selection_message(bot, expired.chat_id, identifier)
                 await TrashCleanup(uow.store).run()
+            if monitor:
+                monitor.set("cleanup", "waiting", next_run=now() + timedelta(seconds=60))
         except Exception as exc:
+            if monitor:
+                monitor.set("cleanup", "retrying", error=type(exc).__name__)
             logger.warning("Trash cleanup failed (%s); will retry", type(exc).__name__)
         await asyncio.sleep(60)
 
 
-async def daily_reminders(engine: AsyncEngine) -> None:
+async def daily_reminders(engine: AsyncEngine, monitor: Monitor | None = None) -> None:
     # RU: Один план в день, затем ожидание назначенного времени каждого коллектива.
     # EN: Build one daily plan, sleep until each due time, and deduplicate in PostgreSQL.
     while True:
@@ -266,19 +318,27 @@ async def daily_reminders(engine: AsyncEngine) -> None:
             local = now().astimezone(reminders.MOSCOW)
             start = datetime.combine(local.date(), time(14), reminders.MOSCOW)
             if local < start:
+                if monitor:
+                    monitor.set("reminders", "waiting", next_run=start)
                 await asyncio.sleep((start - local).total_seconds())
             async with PostgresUnitOfWork(engine) as uow:
                 plan = await reminders.plan(uow.store, now())
             for due, concert_id in plan:
                 delay = (due - now()).total_seconds()
                 if delay > 0:
+                    if monitor:
+                        monitor.set("reminders", "waiting", next_run=due)
                     await asyncio.sleep(delay)
                 async with PostgresUnitOfWork(engine) as uow:
                     await reminders.queue(uow.store, concert_id, now())
             tomorrow = now().astimezone(reminders.MOSCOW).date() + timedelta(days=1)
             next_run = datetime.combine(tomorrow, time(14), reminders.MOSCOW)
+            if monitor:
+                monitor.set("reminders", "waiting", next_run=next_run)
             await asyncio.sleep(max(1, (next_run - now()).total_seconds()))
         except Exception as exc:
+            if monitor:
+                monitor.set("reminders", "retrying", error=type(exc).__name__)
             logger.warning("Reminder planning failed (%s); retrying", type(exc).__name__)
             await asyncio.sleep(60)
 
@@ -299,6 +359,10 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
             raise SystemExit("Set BOT_TOKEN in .env; see README.md. Never put tokens in Git.")
         async with Bot(settings.bot_token.get_secret_value(), session=VerifiedSession()) as bot:
             me = await bot.get_me()
+            if settings.expected_bot_id is not None and me.id != settings.expected_bot_id:
+                raise SystemExit(
+                    "Bot identity does not match EXPECTED_BOT_ID; polling is forbidden"
+                )
             try:
                 targets = await collect_command_targets(
                     engine,
@@ -317,22 +381,30 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
                     f"registered {report.registered}; unavailable {report.unavailable}"
                 )
                 return
+            monitor = Monitor()
+            monitor.set("bot", "polling")
+            monitor.set("telegram", "no_errors_recorded")
             dispatcher = Dispatcher()
             dispatcher.include_router(
                 make_router(
-                    Processor(engine, bot_username=me.username or ""),
+                    Processor(engine, bot_username=me.username or "", monitor=monitor),
                     me.username or "",
                     diagnostics=settings.telegram_diagnostics,
                 )
             )
             workers = [
-                asyncio.create_task(deliver_outbox(bot, engine)),
-                asyncio.create_task(cleanup_trash(engine, bot)),
-                asyncio.create_task(daily_reminders(engine)),
+                asyncio.create_task(deliver_outbox(bot, engine, monitor)),
+                asyncio.create_task(cleanup_trash(engine, bot, monitor)),
+                asyncio.create_task(daily_reminders(engine, monitor)),
+                asyncio.create_task(monitor.persist(engine)),
             ]
+            polling_status = PollingStatusHandler(monitor)
+            polling_logger = logging.getLogger("aiogram.dispatcher")
+            polling_logger.addHandler(polling_status)
             try:
                 await dispatcher.start_polling(bot, allowed_updates=["message", "callback_query"])
             finally:
+                polling_logger.removeHandler(polling_status)
                 for worker in workers:
                     worker.cancel()
                 for worker in workers:

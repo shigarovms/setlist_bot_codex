@@ -1,5 +1,7 @@
 """RU: Переписка поддержки и события. EN: Durable support routing and audit notices."""
 
+from uuid import UUID
+
 from setlist_bot.application.ports import Store
 from setlist_bot.domain.entities import Outbox, SupportMessage, SupportSettings, User
 from setlist_bot.domain.rules import require
@@ -63,12 +65,22 @@ class Support:
         rows = await self.store.find(SupportMessage, chat_id=chat_id, message_id=message_id)
         if not rows:
             return False
-        user = await self.store.get(User, rows[0].user_id)
-        self.store.add(
-            Outbox(
-                chat_id=user.telegram_id,
-                support_kind="reply",
-                text=f"Ответ поддержки / Support reply\n\n{text}",
-            )
-        )
+        await self.reply_to_request(rows[0].outbox_id, text)
         return True
+
+    async def reply_to_request(self, request_id: UUID, text: str) -> Outbox:
+        """RU/EN: Отвечаем только на реальное обращение / never send to an arbitrary ID."""
+        require(0 < len(text.strip()) <= 4000, "input")
+        request = await self.store.get(Outbox, request_id)
+        require(request.support_kind == "request", "not_found")
+        routes = await self.store.find(SupportMessage, outbox_id=request_id)
+        require(bool(routes), "not_found")
+        user = await self.store.get(User, routes[0].user_id)
+        event = Outbox(
+            chat_id=user.telegram_id,
+            support_kind="reply",
+            support_request_id=request_id,
+            text=f"Ответ поддержки / Support reply\n\n{text.strip()}",
+        )
+        self.store.add(event)
+        return event

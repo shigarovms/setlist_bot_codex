@@ -40,6 +40,7 @@ from setlist_bot.domain.entities import (
 )
 from setlist_bot.domain.rules import AppError
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
+from setlist_bot.infrastructure.telemetry import Monitor
 from setlist_bot.transport.controller import Controller, Response
 from setlist_bot.transport.i18n import tr
 
@@ -66,7 +67,10 @@ def chunks(value: str, limit: int = 3500) -> list[str]:
 
 
 class Processor:
-    def __init__(self, engine: AsyncEngine, *, bot_username: str = "") -> None:
+    def __init__(
+        self, engine: AsyncEngine, *, bot_username: str = "", monitor: Monitor | None = None
+    ) -> None:
+        self.monitor = monitor
         self.engine = engine
         self.bot_username = bot_username
 
@@ -105,10 +109,13 @@ class Processor:
             if await uow.store.find(ProcessedUpdate, update_id=update_id):
                 return None
             uow.store.add(ProcessedUpdate(update_id=update_id))
+            if self.monitor:
+                self.monitor.set("telegram", "updates_received")
             users = await uow.store.find(User, telegram_id=telegram_id)
             user = users[0] if users else User(telegram_id=telegram_id)
             if not users:
                 uow.store.add(user)
+            user.last_seen_at = now()
             if display_name:
                 user.display_name = display_name[:200]
             await uow.store.flush()
@@ -820,6 +827,8 @@ def make_router(processor: Processor, username: str, *, diagnostics: bool = Fals
 
     @router.errors()
     async def failure(event: ErrorEvent, bot: Bot) -> bool:
+        if processor.monitor:
+            processor.monitor.set("telegram", "error", error=type(event.exception).__name__)
         # SQL exceptions may contain private payloads. Log only type and update ID.
         logger.error(
             "Update %s failed (%s)", event.update.update_id, type(event.exception).__name__
