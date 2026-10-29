@@ -137,7 +137,7 @@ async def test_aiogram_end_to_end_with_fake_telegram_and_real_postgres(engine, t
         assert "Проверьте" in preview.text
         await send(preview.reply_markup.inline_keyboard[0][0].callback_data, callback=True)
         question = await send("/concert 2026-12-31  Первый концерт")
-        assert "Создать мероприятие" in question.text
+        assert "Создать выступление" in question.text
         await send(question.reply_markup.inline_keyboard[0][0].callback_data, callback=True)
         async with PostgresUnitOfWork(engine) as uow:
             song = (await uow.store.find(Song))[0]

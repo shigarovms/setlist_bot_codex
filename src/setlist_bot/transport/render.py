@@ -68,15 +68,23 @@ def render_setlist(
         title = pause_title(language) if is_pause(item) else item["title"]
         labels.append(f"{numbers[pos - 1]}. {' '.join(title.split())}")
     total_label = tr(language, "timing_total", time="").rstrip()
-    width = max(len(total_label), min(27, max((len(label) for label in labels), default=20)))
     time_width = max([len(clock(total)), *[len(clock(item["duration_seconds"])) for item in items]])
+    # RU: Telegram не сообщает ширину экрана. Узкая таблица оставляет место аватару;
+    # переносим только название, сохраняя номер и время на первой строке.
+    # EN: Telegram exposes no viewport width. Keep rows narrow and wrap titles only.
+    width = max(
+        len(total_label),
+        min(27 - 2 - time_width, max((len(label) for label in labels), default=20)),
+    )
     separator = "─" * (width + 2 + time_width)
     lines.append(separator)
     for pos, item in enumerate(items, 1):
-        label = labels[pos - 1]
         number = numbers[pos - 1]
-        title_lines = wrap(label, width=width, subsequent_indent=" " * (len(number) + 2))
-        lines.append(f"{title_lines[0]:<{width}}  {clock(item['duration_seconds']):>{time_width}}")
-        lines.extend(title_lines[1:])
+        indent = " " * (len(number) + 2)
+        title = pause_title(language) if is_pause(item) else item["title"]
+        title_lines = wrap(" ".join(title.split()), width=max(1, width - len(indent))) or [""]
+        label = f"{number}. {title_lines[0]}"
+        lines.append(f"{label:<{width}}  {clock(item['duration_seconds']):>{time_width}}")
+        lines.extend(indent + part for part in title_lines[1:])
     lines += [separator, f"{total_label:<{width}}  {clock(total):>{time_width}}"]
     return "\n".join(lines)

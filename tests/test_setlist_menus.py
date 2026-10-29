@@ -89,10 +89,12 @@ async def test_three_levels_variants_refresh_and_no_context_changes_during_navig
     assert [label for label, _ in empty.buttons] == [
         "Предложить свой вариант",
         "⚙️ Опции",
-        "✅ Утвердить",
+        "◀️ Назад к выступлениям",
     ]
     assert "📋 Варианты" not in dict((await options(send, empty)).buttons)
-    assert (await send(action(empty, "✅ Утвердить"), actor=2, source=40)).callback_notice
+    assert (
+        await send(f"slact {empty.menu_card_id.hex} approve", actor=2, source=40)
+    ).callback_notice
     assert not await requests(engine)
     first = await send("/suggestion\nКомета", remember=50)
     assert (await send(action(first, "⚙️ Опции"), source=51)).callback_notice
@@ -206,9 +208,9 @@ async def test_private_draft_menus_cannot_approve_or_expose_other_owners_data(en
     await send(f"/use_group {world.group.id}", actor=2, private=True)
     card = await send(f"/use_concert {world.concert.id}", actor=2, private=True)
     assert [label for label, _ in card.buttons] == [
-        "Предложить этот вариант",
         "Изменить",
         "⚙️ Опции",
+        "◀️ Назад к выступлениям",
     ]
     assert (await send(action(card, "⚙️ Опции"), private=True)).callback_notice
     forged = f"slact {card.menu_card_id.hex} approve"

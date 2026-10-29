@@ -145,7 +145,8 @@ def parse_import(
 
         def value(key: str, row_cells: list[str] = cells) -> str:
             index = mapping.get(key, -1)
-            return row_cells[index] if index >= 0 else ""
+            cell = row_cells[index] if index >= 0 else ""
+            return "" if key in ("lights", "bpm", "comment") and cell in ("-", "—") else cell
 
         row = ImportRow(number, value("title"))
         result.rows.append(row)

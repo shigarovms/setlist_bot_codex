@@ -89,6 +89,20 @@ def is_pause(item: dict[str, Any]) -> bool:
     return item.get("kind") == "pause"
 
 
+def editable_content(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """RU: Сравниваем ввод, а не подписи утверждения/каталог. EN: Compare editable content only."""
+    flat = flat_content(snapshot)
+    return {
+        "default_pause_seconds": flat["default_pause_seconds"],
+        "entries": [
+            {"pause": item["duration_seconds"]}
+            if is_pause(item)
+            else {"song_id": item["song_id"], "pause_before": item.get("pause_before")}
+            for item in flat["blocks"][0]["items"]
+        ],
+    }
+
+
 def pause_item(seconds: int) -> dict[str, Any]:
     require(0 < seconds <= 86400, "pause_duration")
     return {

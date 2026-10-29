@@ -2,6 +2,33 @@ from typing import Any
 
 MESSAGES = {
     "ru": {
+        "support_help": "Справка по командам и работе бота: /help.",
+        "import_clarify_columns": "Не удалось разобрать таблицу. Давайте уточним столбцы.",
+        "input_add_new_songs": "Название  03:38  свет  110  комментарий\nПоследние три поля необязательны; - — пустое поле. Можно вставить таблицу текстом или как Article в ответ на это сообщение.",
+        "article_format": "Не удалось прочитать формат Article. Пришлите простую таблицу с текстом в ячейках.",
+        "article_one_table": "В одном сообщении должна быть одна таблица песен. Отправьте таблицы отдельно.",
+        "article_table_required": "В Article не найдена таблица песен. Используйте /add_new_songs.",
+        "article_merged_cells": "В таблице есть объединённые ячейки. Разъедините их и отправьте таблицу снова.",
+        "article_input": "Для добавления таблицы отправьте /add_new_songs и ответьте на запрос бота таблицей Article.",
+        "catalog_article": "Каталог песен · часть {page}/{pages}",
+        "catalog_title": "Название",
+        "catalog_time": "Время",
+        "catalog_lights": "Свет",
+        "catalog_comment": "Комментарий",
+        "back_concerts": "◀️ Назад к выступлениям",
+        "concert_title_label": "Название",
+        "concert_type_label": "Тип выступления",
+        "input_concert_title": "Введите название выступления (до 200 символов). Знак - убирает название.",
+        "input_concert_type": "Выберите тип выступления или введите свой вариант (до 200 символов). Знак - убирает тип.",
+        "concert_type_solo": "Сольник",
+        "concert_type_corporate": "Корпорат",
+        "concert_type_festival": "Фест",
+        "concert_type_custom": "Свой вариант",
+        "concert_type_clear": "Убрать тип",
+        "current_value": "Сейчас: {value}",
+        "draft_unchanged": "Этот вариант совпадает с общим сет-листом. Сначала измените личный черновик.",
+        "suggestion_keyboard_hint": "В личном чате со мной можно собрать вариант удобнее — выбирая песни кнопками.",
+        "suggested_from_performance": "На выступлении {date} вы играли сет-лист похожей длительности — {time}",
         "cleanup_yes": "Да, прибраться",
         "remove_entry": "Удалить позицию «{title}»?",
         "owner_only": "Только владелец коллектива может управлять правами администраторов.",
@@ -15,9 +42,9 @@ MESSAGES = {
         "approved_by": "Одобрен: {name} · версия {version}",
         "compact_header": "Пауза: {pause} · Выступаем: {planned}",
         "cleanup_button": "Прибраться в чате",
-        "cleanup_prompt": "Удалить доступные сообщения бота за последние 48 часов, включая сообщения с сет-листами? Сами сет-листы, песни, концерты и все варианты бот запомнит.",
+        "cleanup_prompt": "Удалить доступные сообщения бота за последние 48 часов, включая сообщения с сет-листами? Сами сет-листы, песни, выступления и все варианты бот запомнит.",
         "cleanup_done": "Уборка выполнена для доступных сообщений. Данные сохранены; Telegram может запрещать удаление старых сообщений.",
-        "reminders_on": "Напоминания включены: накануне мероприятия, с 14:00 до 15:00 по Москве, если сет-лист не утверждён.",
+        "reminders_on": "Напоминания включены: накануне выступления, с 14:00 до 15:00 по Москве, если сет-лист не утверждён.",
         "reminders_off": "Напоминания для этого коллектива отключены.",
         "reminder_disable": "Отключить напоминания",
         "reminder_enable": "Включить напоминания",
@@ -44,15 +71,15 @@ MESSAGES = {
         "concert_duration_label": "Длительность выступления",
         "concert_city_label": "Город",
         "concert_info_label": "Доп. информация",
-        "concert_create_preview": "Создать мероприятие {date} {title}?",
-        "concert_details_intro": "Эти поля необязательны. Их можно задать сейчас или позже в Опциях сет-листа этого мероприятия.",
-        "concert_created": "Мероприятие создано.",
+        "concert_create_preview": "Создать выступление {date} {title}?",
+        "concert_details_intro": "Эти поля необязательны. Их можно задать сейчас или позже в Опциях сет-листа этого выступления.",
+        "concert_created": "Выступление создано.",
         "set_field": "Задать: {field}",
         "change_field": "Изменить: {field}",
-        "concert_settings": "Параметры мероприятия",
+        "concert_settings": "Параметры выступления",
         "open_setlist": "Открыть сет-лист",
         "past_concerts": "Прошедшие",
-        "new_concert": "Новый концерт",
+        "new_concert": "Новое выступление",
         "input_concert_duration": "Введите длительность выступления: 1ч 42мин, 90 мин или 1:15 (1 час 15 минут). Число без единиц — минуты. Знак - убирает значение.",
         "input_concert_city": "Введите город. Знак - убирает значение.",
         "input_concert_info": "Введите дополнительную информацию (до 2000 символов). Знак - убирает значение.",
@@ -71,28 +98,27 @@ MESSAGES = {
         "draft_edit": "Изменить",
         "welcome": "Бот для репертуара и сет-листов. /help — команды.\nАдминистратор создаёт коллектив командой /group Название в общем чате. Участники: /register Ваша роль.",
         "help": (
-            "Начало работы\nПоддержка: /support.\nАдминистратор Telegram-чата создаёт коллектив: /group Название. Он становится владельцем и назначает администраторов через /members.\nВступление: /register Имя в коллективе. После подтверждения заявки доступны сет-листы; участникам команда меняет имя.\nВ личном чате: /groups — выбрать коллектив. Можно участвовать в нескольких коллективах.\nЯзык интерфейса: /language ru; язык коллектива: /group_language ru.\n\nОсновная команда — /concerts. Предстоящие и прошедшие мероприятия; ✅ означает, что сет-лист утверждён. Выберите мероприятие, чтобы открыть список, предложить вариант или перейти к настройкам. Кнопка «Новый концерт» создаёт мероприятие.\nНапоминания накануне: /reminders.\n\n"
+            "Начало работы\nПоддержка: /support.\nАдминистратор Telegram-чата создаёт коллектив: /group Название. Он становится владельцем и назначает администраторов через /members.\nВступление: /register Имя в коллективе. После подтверждения заявки доступны сет-листы; участникам команда меняет имя.\nВ личном чате: /groups — выбрать коллектив. Можно участвовать в нескольких коллективах.\nЯзык интерфейса: /language ru; язык коллектива: /group_language ru.\n\nОсновная команда — /concerts. Предстоящие и прошедшие выступления; ✅ означает, что сет-лист утверждён. Выберите выступление, чтобы открыть список, предложить вариант или перейти к настройкам. Кнопка «Новое выступление» создаёт выступление.\nНапоминания накануне: /reminders.\n\n"
+            "Добавить новые песни: /add_new_songs Название  03:38  свет  110  комментарий.\n"
+            "Последние три поля необязательны. Между полями — два и более пробела; - — пустое поле. Можно вставить таблицу текстом или как Article ответом на запрос команды.\n"
             "Каталог: /catalog [поиск]; архив песен: /archived.\n"
-            "Песня: /song Название  03:38  110  свет  комментарий.\n"
-            "Последние три поля необязательны. Между полями — два и более пробела; - очищает необязательное поле.\n"
-            "Импорт таблицы: /import Строки таблицы. Колонки: название, время, свет, BPM, комментарий.\n"
             "Изменить песню: /edit Название  Новое название  03:38  110  свет  комментарий.\n"
             "Скопировать: /copy Название  Новое название  05:00.\n"
             "Алиас: /alias Название  Альтернативное название.\n"
             "Архивировать: /archive Название; восстановить: /unarchive Название.\n"
             "Предложения по каталогу: /proposals. Изменения участника одобряет администратор.\n"
             "\n"
-            "Концерт: /concert 2026-12-31  Название; выбор концерта: /concerts.\n"
+            "Выступление: /concert 2026-12-31  Название; выбор выступления: /concerts.\n"
             "Список: /setlist; общий вариант: /shared.\n"
             "Добавить: /add Комета. Для списка — одна песня или длительность паузы на строку: 5 мин, 2:30, 1 час 13 минут 43 секунды.\n"
             "Новый вариант: /suggestion Названия песен. История сохраняется.\n"
             "Удалить песню или паузу: /remove 2.\n"
             "Переставить песню или паузу: /move 2  3.\n"
             "Средняя пауза: /pause 30. Явные паузы вводите длительностью на отдельной строке.\n"
-            "Пауза для новых концертов: /group_pause 5 (администратор).\n"
+            "Пауза для новых выступлений: /group_pause 5 (администратор).\n"
             "Стандартные паузы учитываются в итогах и не показываются перед песнями.\n"
             "\n"
-            "В личном черновике — «Предложить этот вариант», «Изменить», «⚙️ Опции». В группе — предложение, опции, утверждение.\n"
+            "В личном черновике — «Изменить», «Предложить этот вариант» (если он отличается от общего), «⚙️ Опции». В группе — предложение, опции, утверждение.\n"
             "Экспорт утверждённого сет-листа: /export — PDF для музыкантов, световика или оба файла.\n"
             "Утвердить: /approve; вернуть в работу: /reopen (администратор).\n"
             "Участник кнопками запрашивает у администратора утверждение или редактирование.\n"
@@ -107,7 +133,7 @@ MESSAGES = {
         "ok": "Готово.",
         "empty": "Пока пусто.",
         "choose_group": "Выберите коллектив:",
-        "choose_concert": "Выберите концерт:",
+        "choose_concert": "Выберите выступление:",
         "selected": "Выбрано: {name}",
         "created_group": "Создан коллектив «{name}». Вы — администратор.",
         "invited": "Одноразовый код на 24 часа: {token}\nУчастник отправляет боту в личном чате /join {token}",
@@ -150,7 +176,7 @@ MESSAGES = {
         "request_no": "❌ Отказать",
         "request_sent": "Запрос поставлен в очередь отправки администратору в личные сообщения.",
         "request_duplicate": "Вы уже отправили запрос для этого варианта. Ожидайте решения администратора.",
-        "request_group": "{name} запросил у администратора: {action}.\nКонцерт: {concert}, версия {version}.",
+        "request_group": "{name} запросил у администратора: {action}.\nВыступление: {concert}, версия {version}.",
         "request_accepted": "Запрос подтверждён.",
         "request_rejected": "В запросе отказано. Сет-лист не изменён.",
         "request_result": "Решение администратора по запросу «{action}»: {result}",
@@ -204,26 +230,26 @@ MESSAGES = {
         "timing_breaks": "Перерывы: {time}",
         "timing_total": "Итого: {time}",
         "template_expired": "Срок действия кнопки истёк. Откройте вариант заново и нажмите новую кнопку.",
-        "in_trash": "Концерт или коллектив удалён. Администратор может восстановить его через /trash в течение 30 дней.",
+        "in_trash": "Выступление или коллектив удалён. Администратор может восстановить его через /trash в течение 30 дней.",
         "trash_expired": "Срок восстановления истёк: прошло 30 дней после удаления.",
         "chat_taken": "Чат уже связан с другим коллективом. Сначала освободите чат, затем повторите восстановление.",
         "delete_changed": "Данные изменились после предпросмотра. Начните удаление заново, чтобы проверить актуальный состав.",
         "trash_title": "Корзина. Восстановление доступно администратору в течение 30 дней:",
-        "trash_empty": "В вашей корзине нет доступных для восстановления коллективов и концертов.",
+        "trash_empty": "В вашей корзине нет доступных для восстановления коллективов и выступлений.",
         "trash_group": "Коллектив «{name}» — восстановление до {until}.",
-        "trash_concert": "Концерт «{name}» — восстановление до {until}.",
+        "trash_concert": "Выступление «{name}» — восстановление до {until}.",
         "restore_group_button": "Восстановить коллектив: {name}",
-        "restore_concert_button": "Восстановить концерт: {name}",
+        "restore_concert_button": "Восстановить выступление: {name}",
         "group_restored": "Коллектив «{name}» восстановлен. Выберите его через /groups в личном чате или продолжайте в общем чате.",
-        "concert_restored": "Концерт «{name}» восстановлен со всеми вариантами и черновиками. Выберите его через /concerts.",
-        "group_delete_preview": "Удалить коллектив «{name}» вместе с каталогом, концертами, всеми вариантами и личными черновиками?\nСначала можно скачать ZIP с общими данными. Личные черновики в ZIP не включаются. Восстановление через /trash доступно 30 дней, затем данные будут окончательно удалены.\nЭто первое из двух подтверждений.",
+        "concert_restored": "Выступление «{name}» восстановлено со всеми вариантами и черновиками. Выберите его через /concerts.",
+        "group_delete_preview": "Удалить коллектив «{name}» вместе с каталогом, выступлениями, всеми вариантами и личными черновиками?\nСначала можно скачать ZIP с общими данными. Личные черновики в ZIP не включаются. Восстановление через /trash доступно 30 дней, затем данные будут окончательно удалены.\nЭто первое из двух подтверждений.",
         "group_delete_final": "Последнее подтверждение удаления коллектива «{name}» и всех его данных. Коллектив перейдёт в корзину на 30 дней; его чат освободится. Нажмите «Подтвердить», чтобы удалить.",
         "group_deleted": "Коллектив «{name}» перемещён в корзину на 30 дней. Восстановление: /trash. Чат доступен для создания нового коллектива.",
-        "concert_delete_preview": "Удалить концерт «{name}» вместе со всеми версиями сет-листа, предложениями и личными черновиками участников? Каталог песен сохраняется. Восстановление через /trash доступно 30 дней, затем данные концерта будут окончательно удалены.",
-        "concert_deleted": "Концерт «{name}» перемещён в корзину на 30 дней. Восстановление: /trash.",
-        "delete_concert_button": "Удалить концерт",
+        "concert_delete_preview": "Удалить выступление «{name}» вместе со всеми версиями сет-листа, предложениями и личными черновиками участников? Каталог песен сохраняется. Восстановление через /trash доступно 30 дней, затем данные выступления будут окончательно удалены.",
+        "concert_deleted": "Выступление «{name}» перемещено в корзину на 30 дней. Восстановление: /trash.",
+        "delete_concert_button": "Удалить выступление",
         "backup_button": "Скачать общие данные ZIP",
-        "backup_ready": "ZIP содержит каталог, концерты, общие версии и опубликованные предложения в JSON и CSV. Личные черновики и Telegram ID не включены. Восстановление из корзины: /trash; обратный импорт ZIP пока не реализован.",
+        "backup_ready": "ZIP содержит каталог, выступления, общие версии и опубликованные предложения в JSON и CSV. Личные черновики и Telegram ID не включены. Восстановление из корзины: /trash; обратный импорт ZIP пока не реализован.",
         "variant_label": "{name} · вариант {number}",
         "revision_label": "{name} · версия {number}",
         "member_name": "Участник",
@@ -234,7 +260,7 @@ MESSAGES = {
         "song_list_line": "Строка {number} «{title}»: {reason}.",
         "add_list": "добавление списка песен",
         "suggestion": "новый вариант сет-листа",
-        "group_pause_setting": "{name}\nПауза по умолчанию для новых концертов: {time}.\nТекущие концерты и черновики сохраняют свои настройки. Изменить: /group_pause секунды (администратор).",
+        "group_pause_setting": "{name}\nПауза по умолчанию для новых выступлений: {time}.\nТекущие выступления и черновики сохраняют свои настройки. Изменить: /group_pause секунды (администратор).",
         "pause_usage": "Средняя пауза: /pause 5. Явные паузы: отдельная строка длительности в /add или /suggestion.",
         "pause_input": "Укажите целое число секунд от 0 до 86400. Например, /pause 30 или /pause 1 2 0.",
         "published": "Черновик опубликован в общем чате.",
@@ -247,7 +273,7 @@ MESSAGES = {
         "chat_admin": "Создать коллектив может администратор Telegram-чата.",
         "not_found": "Объект не найден или недоступен.",
         "select_group": "Сначала выберите коллектив: /groups.",
-        "select_concert": "Сначала выберите концерт: /concerts.",
+        "select_concert": "Сначала выберите выступление: /concerts.",
         "bind_first": "Сначала администратор должен создать в этом чате коллектив: /group Название.",
         "view_first": "Сначала откройте /setlist, чтобы увидеть актуальную версию.",
         "conflict": "Данные уже изменились. Откройте актуальный список и повторите действие.",
@@ -267,18 +293,18 @@ MESSAGES = {
         "input_alias": "Название песни  Альтернативное название",
         "input_archive": "Название песни для архивирования.",
         "input_unarchive": "Название песни из архива для восстановления.",
-        "input_concert": "Введите дату и, при желании, название мероприятия.\nНапример: 22 декабря Сольный концерт",
+        "input_concert": "Введите дату и, при желании, название выступления.\nНапример: 22 декабря Сольное выступление",
         "input_register": "Как другие участники коллектива будут видеть вас в боте? Например: Илья — гитара.",
         "input_language": "Язык интерфейса: ru или en.",
         "input_group_language": "Язык общего чата: ru или en.",
-        "input_group_pause": "Средняя пауза для новых концертов в секундах, например: 5. Старые концерты не изменятся.",
+        "input_group_pause": "Средняя пауза для новых выступлений в секундах, например: 5. Старые выступления не изменятся.",
         "input_pause": "Средняя пауза в секундах, например: 5. Явные паузы добавляются отдельной строкой списка: 5 мин или 2:30.",
         "input_move": "Исходная и новая позиции песни или паузы: 2  3",
         "input_remove": "Позиция песни или паузы, например: 2",
         "input_add": "Название песни, например: Комета. Несколько песен — по одной на строку. Паузы — длительностью на отдельной строке: 5 мин, 2:30, 3 мин 30 сек.",
         "input_add_ambiguous": "Нашлось несколько песен. Уточните полное название ответом на этот вопрос:",
         "setlist_input": "Проверьте позиции и аргументы. /help — формат команды.",
-        "concert_input": "Введите дату и, при желании, название мероприятия.\nНапример: 22 декабря Сольный концерт",
+        "concert_input": "Введите дату и, при желании, название выступления.\nНапример: 22 декабря Сольное выступление",
         "group_name": "Укажите название коллектива от 1 до 200 символов.",
         "group_creation_prompt": "🎸 Создание нового коллектива\n\nВведите название вашего коллектива ответом на это сообщение.\n/cancel — отмена.",
         "group_creation_review": "Вы хотите создать коллектив с названием «{name}»?\n\nВсё правильно?",
@@ -294,7 +320,7 @@ MESSAGES = {
         "already_done": "Это действие уже выполнено.",
         "archived": "Архивную песню нельзя добавить в новый вариант.",
         "catalog_changed": "Каталог изменился после публикации. Автору нужно обновить и повторно опубликовать черновик.",
-        "confirmation": "Подтверждение истекло, отменено или относится к другому пользователю, чату либо концерту.",
+        "confirmation": "Подтверждение истекло, отменено или относится к другому пользователю, чату либо выступлению.",
         "no_chat": "Общий чат коллектива недоступен.",
         "musical_role": "Укажите имя в коллективе: например, /register Илья — гитара.",
         "registered": "Заявка принята и ожидает подтверждения администратора. /members — список заявок для администратора.",
@@ -362,6 +388,33 @@ MESSAGES = {
         "proposal_applied": "применение предложения",
     },
     "en": {
+        "support_help": "Bot instructions and commands: /help.",
+        "import_clarify_columns": "Could not read the table. Let’s clarify the columns.",
+        "input_add_new_songs": "Title  03:38  lights  110  comment\nThe last three fields are optional; - means empty. Paste a text table or reply to this message with an Article table.",
+        "article_format": "Cannot read this Article format. Send a simple table containing text cells.",
+        "article_one_table": "Send one song table per message. Send multiple tables separately.",
+        "article_table_required": "No song table found in this Article. Use /add_new_songs.",
+        "article_merged_cells": "The table contains merged cells. Unmerge them and send the table again.",
+        "article_input": "To add this table, send /add_new_songs and reply to the bot prompt with the Article table.",
+        "catalog_article": "Song catalog · part {page}/{pages}",
+        "catalog_title": "Title",
+        "catalog_time": "Time",
+        "catalog_lights": "Lights",
+        "catalog_comment": "Comment",
+        "back_concerts": "◀️ Back to performances",
+        "concert_title_label": "Title",
+        "concert_type_label": "Performance type",
+        "input_concert_title": "Enter performance title (up to 200 characters). Use - to clear.",
+        "input_concert_type": "Choose a performance type or enter your own (up to 200 characters). Use - to clear.",
+        "concert_type_solo": "Solo show",
+        "concert_type_corporate": "Corporate event",
+        "concert_type_festival": "Festival",
+        "concert_type_custom": "Custom type",
+        "concert_type_clear": "Clear type",
+        "current_value": "Current: {value}",
+        "draft_unchanged": "This variant matches the shared setlist. Edit your personal draft first.",
+        "suggestion_keyboard_hint": "In our private chat you can build your variant more easily by choosing songs with buttons.",
+        "suggested_from_performance": "At the performance on {date} you played a setlist of similar duration — {time}",
         "cleanup_yes": "Yes, clean up",
         "remove_entry": "Remove entry “{title}”?",
         "owner_only": "Only the group owner can manage administrators.",
@@ -432,10 +485,9 @@ MESSAGES = {
         "welcome": "Repertoire and setlist bot. /help — commands.\nA Telegram chat administrator creates the group with /group Name in the group chat. Members: /register Your role.",
         "help": (
             "Getting started\nSupport: /support.\nA Telegram chat administrator creates a group: /group Name, becomes its owner and manages administrators through /members.\nJoin: /register Group display name. Existing members use it to change their name.\nPrivate chat: /groups — choose a group; you can belong to several.\nLanguage: /language en; group language: /group_language en.\n\nYour main tool is /concerts: upcoming and past performances; ✅ means the setlist is approved. Select an event to open its setlist, propose a variant or change settings. New concert creates an event.\nDay-before reminders: /reminders.\n\n"
+            "Add new songs: /add_new_songs Title  03:38  lights  110  comment.\n"
+            "The last three fields are optional. Separate fields with two or more spaces; - means empty. Paste a text table or reply to the command prompt with an Article table.\n"
             "Catalog: /catalog [search]; archived songs: /archived.\n"
-            "Song: /song Title  03:38  110  lights  comment.\n"
-            "The last three fields are optional. Separate fields with two or more spaces; - clears an optional field.\n"
-            "Table import: /import Table rows. Columns: title, time, lights, BPM, comment.\n"
             "Edit: /edit Title  New title  03:38  110  lights  comment.\n"
             "Copy: /copy Title  New title  05:00.\n"
             "Alias: /alias Title  Alternative title.\n"

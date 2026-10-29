@@ -8,7 +8,8 @@ from setlist_bot.application.ports import Store
 from setlist_bot.domain.entities import Concert, User
 from setlist_bot.domain.rules import parse_pause, require
 
-FIELDS = {"concert_duration", "concert_city", "concert_info"}
+FIELDS = {"concert_duration", "concert_type", "concert_title", "concert_city", "concert_info"}
+PRESET_TYPES = {"solo": "Сольник", "corporate": "Корпорат", "festival": "Фест"}
 
 
 class ConcertDetails:
@@ -32,10 +33,16 @@ class ConcertDetails:
             require(text == "-" or seconds is not None, "pause_duration")
             concert.performance_duration_seconds = seconds
         else:
-            require(0 < len(text) <= (200 if field == "concert_city" else 2000), "input")
+            require(0 < len(text) <= (2000 if field == "concert_info" else 200), "input")
+            require(field == "concert_info" or not any(ord(char) < 32 for char in text), "input")
             setattr(
                 concert,
-                "city" if field == "concert_city" else "extra_info",
+                {
+                    "concert_city": "city",
+                    "concert_info": "extra_info",
+                    "concert_title": "title",
+                    "concert_type": "performance_type",
+                }[field],
                 "" if text == "-" else text,
             )
         concert.metadata_version += 1

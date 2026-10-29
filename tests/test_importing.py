@@ -241,9 +241,8 @@ async def test_changed_catalog_invalidates_import_confirmation(engine, world):
 async def test_manual_column_mapping_persists_between_commands(engine, world):
     processor = Processor(engine)
     preview = await processor.process(100, 1, -100, "/song\n03:43\tНовая", private=False)
-    start = next(data for _, data in preview.buttons if data.startswith("map_start "))
-    headers = await processor.process(101, 1, -100, start, private=False)
-    step = await processor.process(102, 1, -100, headers.buttons[1][1], private=False)
+    assert "Давайте уточним столбцы" in preview.text
+    step = await processor.process(102, 1, -100, preview.buttons[1][1], private=False)
     # Title is column 2; time is column 1; optional columns are absent.
     for update, choice in enumerate((1, 0, -1, -1, -1), 103):
         callback = next(data for _, data in step.buttons if data.endswith(f" {choice}"))
@@ -279,3 +278,94 @@ async def test_cancelled_import_cannot_be_reopened_by_old_button(engine, world):
     assert "уже выполнено" in response.text
     async with PostgresUnitOfWork(engine) as uow:
         assert (await uow.store.find(CatalogImport))[0].status == "cancelled"
+
+
+async def test_all_invalid_rows_start_mapping_without_long_preview_and_can_be_saved(engine, world):
+    processor = Processor(engine)
+    source = "\n".join(f"03:43\tНовая {number}" for number in range(80))
+    response = await processor.process(200, 1, -100, "/add_new_songs\n" + source, private=False)
+    assert "Давайте уточним столбцы" in response.text
+    assert len(response.text) < 300 and "Строка " not in response.text
+    assert "ошибочных строк" not in response.text
+    assert [data.split()[0] for _, data in response.buttons] == [
+        "map_header",
+        "map_header",
+        "import_cancel",
+    ]
+    async with PostgresUnitOfWork(engine) as uow:
+        assert len(await Catalog(uow.store, world.admin).list_songs(world.group.id)) == 1
+        job = (await uow.store.find(CatalogImport))[0]
+        assert job.source == source and job.status == "pending"
+    step = await processor.process(201, 1, -100, response.buttons[1][1], private=False)
+    for update, choice in enumerate((1, 0, -1, -1, -1), 202):
+        callback = next(data for _, data in step.buttons if data.endswith(f" {choice}"))
+        step = await processor.process(update, 1, -100, callback, private=False)
+    assert "новых — 80" in step.text and "ошибочных строк — 0" in step.text
+    saved = await processor.process(207, 1, -100, step.buttons[0][1], private=False)
+    assert "Добавлено песен: 80" in saved.text
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "Исполнитель\tTIME\nПесня\t03:20",
+        "03:99\tПесня",
+        "Название\tНазвание\tTIME\nПесня\tДругая\t03:20",
+    ],
+)
+async def test_column_detection_failures_go_directly_to_mapping_and_cancel(engine, world, source):
+    processor = Processor(engine)
+    response = await processor.process(210, 1, -100, "/add_new_songs\n" + source, private=False)
+    assert "Давайте уточним столбцы" in response.text and len(response.text) < 300
+    cancel = next(data for _, data in response.buttons if data.startswith("import_cancel "))
+    await processor.process(212, 1, -100, cancel, private=False)
+    async with PostgresUnitOfWork(engine) as uow:
+        assert not await uow.store.find(CatalogImport, status="committed")
+        assert len(await Catalog(uow.store, world.admin).list_songs(world.group.id)) == 1
+
+
+async def test_partial_errors_duplicates_and_header_only_do_not_start_mapping(engine, world):
+    processor = Processor(engine)
+    for update, source in enumerate(
+        (
+            "Новая\t03:20\nПлохая\t00:00",
+            "Комета\t03:38\nПлохая\t00:00",
+            "Комета\t03:38",
+            "TRACKS\tTIME",
+        ),
+        220,
+    ):
+        response = await processor.process(
+            update, 1, -100, "/add_new_songs\n" + source, private=False
+        )
+        assert "Давайте уточним столбцы" not in response.text
+        assert not any(data.startswith("map_header ") for _, data in response.buttons)
+        assert not any(data.startswith("confirm ") for _, data in response.buttons)
+
+
+async def test_article_force_reply_enters_mapping_without_repeating_input_prompt(engine, world):
+    from test_article_import import article
+    from test_setlist_menus import sender
+
+    from setlist_bot.application.command_inputs import CommandInputs
+    from setlist_bot.domain.entities import Confirmation
+
+    send = sender(engine)
+    prompt = await send("/add_new_songs", remember=301)
+    response = await Processor(engine).process(
+        230,
+        1,
+        -100,
+        "",
+        private=False,
+        reply_message_id=301,
+        article=article([["03:20", "Первая"], ["03:40", "Вторая"]]),
+    )
+    assert "Давайте уточним столбцы" in response.text
+    assert not response.force_reply and not response.deliveries
+    async with PostgresUnitOfWork(engine) as uow:
+        assert not await uow.store.find(Confirmation, id=prompt.command_input_id)
+        assert not any(
+            CommandInputs.data(row).get("kind") == "command_input"
+            for row in await uow.store.find(Confirmation)
+        )

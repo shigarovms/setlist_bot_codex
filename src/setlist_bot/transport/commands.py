@@ -45,22 +45,24 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     ),
     "catalog": ("Репертуар и поиск песен", "Repertoire and song search"),
     "archived": ("Архивные песни", "Archived songs"),
-    "concerts": ("Выбрать концерт", "Select a concert"),
-    "setlist": ("Сет-лист выбранного концерта", "Setlist for the selected concert"),
+    "concerts": ("Выбрать выступление", "Select a concert"),
+    "setlist": ("Сет-лист выбранного выступления", "Setlist for the selected concert"),
     "shared": ("Показать общий сет-лист", "Show the shared setlist"),
     "export": ("PDF утверждённого сет-листа", "Approved setlist PDFs"),
-    "add": ("Добавить песню или список по строкам", "Add a song or a list, one title per line"),
+    "add": ("Добавить песни в сет-лист", "Add songs to the setlist"),
     "suggestion": (
         "Создать свой вариант из списка песен",
         "Create your variant from a list of songs",
     ),
     "versions": ("Варианты сет-листа и история", "Setlist variants and history"),
     "history": ("История изменений сет-листа", "Setlist change history"),
-    "pause": ("Средняя пауза или подводка перед песней", "Average pause or lead-in before a song"),
+    "pause": ("Настроить среднюю паузу между песнями", "Set the average pause between songs"),
     "move": ("Переставить: /move откуда куда", "Reorder: /move from to"),
     "remove": ("Убрать песню: /remove позиция", "Remove a song: /remove position"),
-    "song": ("Добавить песню или вставить таблицу", "Add a song or paste a table"),
-    "import": ("Импорт таблицы с предпросмотром (админ)", "Import a table with preview (admin)"),
+    "add_new_songs": (
+        "Добавить новые песни или вставить таблицу",
+        "Add new songs or paste a table",
+    ),
     "edit": ("Изменить песню или предложить правку", "Edit a song or propose a change"),
     "copy": ("Создать независимую копию песни", "Create an independent song copy"),
     "alias": ("Добавить альтернативное название песни", "Add an alternative song title"),
@@ -76,15 +78,21 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     ),
     "proposals": ("Предложения по каталогу (админ)", "Catalog proposals (admin)"),
     "concert": (
-        "Создать мероприятие: дата и название (админ)",
+        "Создать новое выступление (админ)",
         "Create a concert: date  title (admin)",
     ),
     "approve": ("Утвердить общий сет-лист (админ)", "Approve the shared setlist (admin)"),
     "reopen": ("Вернуть сет-лист в работу (админ)", "Reopen the shared setlist (admin)"),
     "group_language": ("Язык коллектива: ru или en (админ)", "Group language: ru or en (admin)"),
-    "group_pause": ("Пауза для новых концертов (админ)", "Default pause for new concerts (admin)"),
+    "group_pause": (
+        "Пауза для новых выступлений (админ)",
+        "Default pause for new concerts (admin)",
+    ),
     "backup": ("Скачать общие данные ZIP (админ)", "Download shared data as ZIP (admin)"),
-    "delete_concert": ("Удалить выбранный концерт (админ)", "Delete the selected concert (admin)"),
+    "delete_concert": (
+        "Удалить выбранное выступление (админ)",
+        "Delete the selected concert (admin)",
+    ),
     "delete_group": (
         "Удалить выбранный коллектив (админ)",
         "Delete the selected musical group (admin)",
@@ -95,6 +103,7 @@ COMMON = (
     "support",
     "start",
     "concerts",
+    "add_new_songs",
     "help",
     "catalog",
     "setlist",
@@ -107,7 +116,6 @@ COMMON = (
     "pause",
     "move",
     "remove",
-    "song",
     "edit",
     "copy",
     "alias",
@@ -121,7 +129,6 @@ ADMIN = (
     "concert",
     "group_language",
     "group_pause",
-    "import",
     "archive",
     "unarchive",
     "backup",
@@ -130,7 +137,7 @@ ADMIN = (
     "trash",
 )
 MENUS: dict[Menu, tuple[str, ...]] = {
-    "default": ("support", "start", "concerts", "help"),
+    "default": COMMON[:5],
     "private": COMMON + ("groups", "publish", "language") + ADMIN,
     "group": COMMON + ("register",),
     "admin": COMMON + ("register", "group", "approve", "reopen") + ADMIN,
@@ -154,7 +161,7 @@ def menu_commands(menu: Menu, language: str) -> list[BotCommand]:
             BotCommand(
                 command=c.command,
                 description=(
-                    "Мой черновик выбранного концерта"
+                    "Мой черновик выбранного выступления"
                     if language != "en"
                     else "My draft for the selected concert"
                 )

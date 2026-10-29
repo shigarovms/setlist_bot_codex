@@ -68,7 +68,7 @@ class Setlists:
         await self._record(setlist, "created", await self._working(setlist), increment=False)
         support = Support(self.store, self.user)
         await support.notify(
-            f"Создано мероприятие: {when:%d.%m.%Y} {title}\n"
+            f"Создано выступление: {when:%d.%m.%Y} {title}\n"
             f"Коллектив: {group.name}\nАвтор: {support.actor}"
         )
         return concert

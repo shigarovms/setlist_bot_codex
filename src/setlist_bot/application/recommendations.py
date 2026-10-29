@@ -2,6 +2,7 @@
 
 from collections import Counter
 from dataclasses import dataclass
+from datetime import date
 
 from setlist_bot.application.catalog import Catalog
 from setlist_bot.application.ports import Store
@@ -15,6 +16,8 @@ class Suggestion:
     titles: list[str]
     new: list[str]
     popular: list[str]
+    source_date: date | None = None
+    duration_seconds: int = 0
 
 
 async def suggested_titles(store: Store, user: User, concert: Concert) -> Suggestion:
@@ -36,17 +39,29 @@ async def suggested_titles(store: Store, user: User, concert: Concert) -> Sugges
             for item in block["items"]
             if not is_pause(item)
         )
-        if setlist.concert_id in past:
+        if setlist.concert_id in past and any(
+            not is_pause(item) and item["song_id"] in active
+            for item in snapshot["blocks"][0]["items"]
+        ):
             candidates.append((past[setlist.concert_id], snapshot, totals(snapshot)[2]))
     target = concert.performance_duration_seconds
     if target and candidates:
-        similar = [entry for entry in candidates if abs(entry[2] - target) <= target * 0.2]
-        candidates = (
-            sorted(similar, key=lambda entry: entry[0].date, reverse=True)
-            if similar
-            else sorted(
-                candidates, key=lambda entry: (abs(entry[2] - target), -entry[0].date.toordinal())
-            )
+        # RU: Тип имеет приоритет только в пределах ±20%; затем решает близость времени.
+        # EN: Prefer a matching type only within tolerance, then minimize duration distance.
+        same_type = [
+            entry
+            for entry in candidates
+            if concert.performance_type
+            and normalize(entry[0].performance_type) == normalize(concert.performance_type)
+            and abs(entry[2] - target) <= target * 0.2
+        ]
+        candidates = sorted(
+            same_type or candidates,
+            key=lambda entry: (
+                abs(entry[2] - target),
+                -entry[0].date.toordinal(),
+                str(entry[0].id),
+            ),
         )
     else:
         candidates.sort(key=lambda entry: entry[0].date, reverse=True)
@@ -54,8 +69,6 @@ async def suggested_titles(store: Store, user: User, concert: Concert) -> Sugges
     used: set[str] = set()
     if candidates:
         for entry in candidates[0][1]["blocks"][0]["items"]:
-            if len(base) >= 194:
-                break
             if is_pause(entry):
                 base.append(clock(entry["duration_seconds"]))
             elif entry["song_id"] in active:
@@ -66,4 +79,12 @@ async def suggested_titles(store: Store, user: User, concert: Concert) -> Sugges
     used.update(str(song.id) for song in new)
     popular = sorted(songs, key=lambda song: (-counts[str(song.id)], normalize(song.title)))
     top = [song for song in popular if counts[str(song.id)] and str(song.id) not in used][:3]
-    return Suggestion(base, [s.title for s in new], [s.title for s in top])
+    # RU: В подписи показываем фактическую длительность утверждённого источника.
+    # EN: The caption describes the approved performance, including its original pauses.
+    return Suggestion(
+        base,
+        [s.title for s in new],
+        [s.title for s in top],
+        candidates[0][0].date if candidates and base else None,
+        candidates[0][2] if candidates and base else 0,
+    )

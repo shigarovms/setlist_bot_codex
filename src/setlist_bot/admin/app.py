@@ -353,7 +353,7 @@ async def overview(request: web.Request) -> web.Response:
             ("groups", "Коллективы", "Без удалённых"),
             ("support", "Открытые обращения", "Ожидают ответа поддержки"),
             ("failed", "Ошибки отправки", "Не завершённые отправки"),
-            ("concerts", "Предстоящие концерты", "Сегодня и позднее"),
+            ("concerts", "Предстоящие выступления", "Сегодня и позднее"),
             ("updates", "Обновления за 24 часа", "Учёт после установки мониторинга"),
             ("deliveries", "Доставлено за 24 часа", "Подтверждённые отправки"),
             ("pending", "В очереди", "С учётом отложенных повторов"),
@@ -396,7 +396,7 @@ async def api_overview(request: web.Request) -> web.Response:
 LIST_TITLES = {
     "users": "Пользователи",
     "groups": "Коллективы",
-    "concerts": "Мероприятия",
+    "concerts": "Выступления",
     "queue": "Очередь отправки",
     "support": "Поддержка",
     "audit": "Журнал действий",
@@ -522,8 +522,8 @@ async def listing(request: web.Request) -> web.Response:
             )
     headers = {
         "users": ["Пользователь", "Telegram ID", "Язык", "Коллективы", "Последняя активность"],
-        "groups": ["Коллектив", "Владелец", "Участники", "Концерты", "Состояние"],
-        "concerts": ["Мероприятие", "Коллектив", "Город", "Сет-лист", "Версия"],
+        "groups": ["Коллектив", "Владелец", "Участники", "Выступления", "Состояние"],
+        "concerts": ["Выступление", "Коллектив", "Город", "Сет-лист", "Версия"],
         "queue": [
             "Создано",
             "Получатель",
@@ -628,7 +628,7 @@ async def group_detail(request: web.Request) -> web.Response:
         )
     body += (
         '<div class="inline-actions">'
-        + v.link("/concerts?group=" + str(identifier), "Мероприятия →")
+        + v.link("/concerts?group=" + str(identifier), "Выступления →")
         + " "
         + v.link("/groups/" + str(identifier) + "/catalog", "Каталог →")
         + "</div></section><h2>Участники</h2>"
@@ -751,13 +751,13 @@ async def concert_detail(request: web.Request) -> web.Response:
     )
     if concert["deleted_at"]:
         body += (
-            '<section class="panel"><h2>Мероприятие в корзине</h2>'
+            '<section class="panel"><h2>Выступление в корзине</h2>'
             + action_form(
                 request,
                 "restore_concert",
                 concert["id"],
                 f'<input type="hidden" name="epoch" value="{concert["lifecycle_version"]}"><label><input type="checkbox" name="confirmed" value="yes" required>Подтверждаю восстановление</label>',
-                "Восстановить мероприятие",
+                "Восстановить выступление",
             )
             + "</section>"
         )
@@ -777,7 +777,7 @@ async def concert_detail(request: web.Request) -> web.Response:
     )
     return render(
         request,
-        str(concert["date"]) + " · " + (concert["title"] or "Мероприятие"),
+        str(concert["date"]) + " · " + (concert["title"] or "Выступление"),
         body,
         "concerts",
     )

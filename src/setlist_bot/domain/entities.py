@@ -95,6 +95,7 @@ class Concert(Entity):
     date: date
     title: str = ""
     performance_duration_seconds: int | None = None
+    performance_type: str = ""
     city: str = ""
     extra_info: str = ""
     metadata_version: int = 0

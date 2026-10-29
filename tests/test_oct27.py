@@ -149,10 +149,11 @@ def test_daily_offsets_and_command_order():
     due = reminders.due_at(UUID(int=3599), at)
     assert due.hour == 14 and due.minute == 59 and due.second == 59
     for menu in ("private", "group", "admin", "default"):
-        assert [c.command for c in menu_commands(menu, "ru")][:4] == [
+        assert [c.command for c in menu_commands(menu, "ru")][:5] == [
             "support",
             "start",
             "concerts",
+            "add_new_songs",
             "help",
         ]
 
@@ -277,8 +278,7 @@ async def test_concert_flags_and_exact_options_order(engine, world):
     )
     assert [label for label, _ in options.buttons] == [
         "Параметры экспорта",
-        "Параметры мероприятия",
-        "Удалить концерт",
+        "Параметры выступления",
         "Прибраться в чате",
         "Связаться с поддержкой",
         "◀️ Назад",

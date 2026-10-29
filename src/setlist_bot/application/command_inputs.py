@@ -25,6 +25,7 @@ KIND = "command_input"
 GROUP_INPUTS = frozenset(
     {
         "song",
+        "add_new_songs",
         "import",
         "edit",
         "edit_bpm",
@@ -132,10 +133,10 @@ class CommandInputs:
         return None
 
     async def restore(self, row: Confirmation) -> dict[str, Any]:
-        """RU: Ответ относится к исходному вопросу, а не к последнему выбранному концерту.
+        """RU: Ответ относится к исходному вопросу, а не к последнему выбранному выступлению.
 
         Повторно проверяем владельца, чат, срок, роль и версии: кнопка/вопрос могли
-        остаться в Telegram после изменения данных или удаления мероприятия.
+        остаться в Telegram после изменения данных или удаления выступления.
         EN: Bind replies to their original prompt, not the latest selected concert.
         Revalidate ownership, chat, expiry, permissions and versions at execution.
         """

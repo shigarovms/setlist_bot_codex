@@ -157,6 +157,7 @@ table(
     col("date", Date),
     col("title", String(200)),
     col("performance_duration_seconds", Integer, nullable=True),
+    col("performance_type", String(200), server_default=""),
     col("city", String(200), server_default=""),
     col("extra_info", Text, server_default=""),
     col("metadata_version", Integer, server_default="0"),

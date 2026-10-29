@@ -1568,7 +1568,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiogram", specifier = ">=3.20,<4" },
+    { name = "aiogram", specifier = ">=3.31,<4" },
     { name = "aiohttp", specifier = ">=3.14,<4" },
     { name = "alembic", specifier = ">=1.15,<2" },
     { name = "asyncpg", specifier = ">=0.30,<1" },

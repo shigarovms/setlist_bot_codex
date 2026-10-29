@@ -24,6 +24,26 @@ from setlist_bot.transport.i18n import tr
 from setlist_bot.transport.telegram import Processor
 
 
+@pytest.mark.parametrize("language", ["ru", "en"])
+@pytest.mark.parametrize("private,configured", [(False, False), (True, False), (True, True)])
+async def test_support_entry_always_links_to_help(engine, world, language, private, configured):
+    async with PostgresUnitOfWork(engine) as uow:
+        from setlist_bot.domain.entities import Group, User
+
+        user = await uow.store.get(User, world.admin.id)
+        user.language = language
+        group = await uow.store.get(Group, world.group.id)
+        group.language = language
+        if configured:
+            await Support(uow.store, user).configure(-900, "shigarovms")
+    response = await Processor(engine, bot_username="test_bot").process(
+        890001, 1, 1 if private else -100, "/support", private=private
+    )
+    assert "/help" in response.text
+    if private and configured:
+        assert response.force_reply and response.support_prompt_id
+
+
 def test_support_public_but_setup_hidden():
     assert "support" in DESCRIPTIONS
     assert "set_support_chat" not in DESCRIPTIONS

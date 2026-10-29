@@ -3,10 +3,11 @@ import logging
 from asyncio import Lock
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from weakref import WeakValueDictionary
 
 from aiogram import Bot, F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramNotFound
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
@@ -15,6 +16,7 @@ from aiogram.types import (
     ForceReply,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputRichMessage,
     KeyboardButton,
     Message,
     MessageEntity,
@@ -42,6 +44,11 @@ from setlist_bot.domain.entities import (
 from setlist_bot.domain.rules import AppError
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.infrastructure.telemetry import Monitor
+from setlist_bot.transport.article_import import (
+    IMPORT_COMMANDS,
+    article_heading,
+    article_table_source,
+)
 from setlist_bot.transport.controller import Controller, Response
 from setlist_bot.transport.i18n import tr
 
@@ -89,12 +96,15 @@ class Processor:
         reply_message_id: int | None = None,
         message_id: int | None = None,
         is_callback: bool | None = None,
+        article: dict[str, Any] | None = None,
     ) -> Response | None:
         # RU: Здесь меняем только состояние БД. Отправка Telegram выполняется после
         # завершения транзакции. Вложенная транзакция ниже откатывает неудачную правку,
         # сохраняя возможность вернуть понятное сообщение об ошибке пользователю.
         # EN: Persist state first; Telegram delivery runs after transaction completion.
         # The nested savepoint rolls back a failed use case before returning its error.
+        if article is not None:
+            is_callback = False
         if is_callback is None:
             # Preserve direct Processor callers that pass internal callback commands.
             is_callback = (
@@ -138,6 +148,29 @@ class Processor:
             input_reply_id = None
             try:
                 async with uow.session.begin_nested():
+                    if article is not None:
+                        source = article_table_source(article)
+                        heading = article_heading(article)
+                        head = heading.split(maxsplit=1)[0] if heading else ""
+                        if head.startswith("/"):
+                            article_command = head[1:].split("@", 1)[0].lower()
+                            if article_command not in IMPORT_COMMANDS:
+                                return None
+                            command = head + "\n" + source
+                        elif reply_message_id is not None:
+                            target = await controller.inputs.reply(reply_message_id)
+                            if (
+                                target is None
+                                or CommandInputs.data(target)["command"] not in IMPORT_COMMANDS
+                            ):
+                                response = Response(tr(controller.language, "article_input"))
+                                response.navigation_owner_id = user.id
+                                return response
+                            command = "/add_new_songs\n" + source
+                        elif private:
+                            command = "/add_new_songs\n" + source
+                        else:
+                            return None
                     # RU: Ответ принимается на сохранённое сообщение в текущем чате поддержки.
                     # EN: Route only exact, persisted reply targets in the configured support chat.
                     if not is_callback and not command.lstrip().startswith("/"):
@@ -194,7 +227,12 @@ class Processor:
                     if input_reply is not None and command.lstrip().startswith("/"):
                         parts = command.lstrip().split(maxsplit=1)
                         name = parts[0].lstrip("/").split("@", 1)[0].lower()
-                        if len(parts) < 2 or name != CommandInputs.data(input_reply)["command"]:
+                        expected_name = CommandInputs.data(input_reply)["command"]
+                        if len(parts) < 2 or not (
+                            name == expected_name
+                            or name in IMPORT_COMMANDS
+                            and expected_name in IMPORT_COMMANDS
+                        ):
                             input_reply = None
                     if (
                         (reply_message_id is not None or not private)
@@ -343,6 +381,20 @@ class Processor:
                         known_message_ids(before_dialogs[response.command_input_id])
                     )
                 response.navigation_owner_id = user.id
+                if response.navigation_slot == "song":
+                    # RU: Меняем свою последнюю карточку, сохраняя отдельно каталог.
+                    # EN: Reuse only this user's card in this chat, never the catalog message.
+                    for panel in await uow.store.find(
+                        Confirmation, user_id=user.id, chat_id=chat_id
+                    ):
+                        data = json.loads(panel.command)
+                        if (
+                            data.get("kind") == "navigation_panel"
+                            and data.get("slot") == "song"
+                            and panel.expires_at > now()
+                        ):
+                            response.edit_message_ids = list(data.get("message_ids", []))
+                            break
             return response
 
     async def remember_response(
@@ -361,13 +413,16 @@ class Processor:
             return
         async with PostgresUnitOfWork(self.engine) as uow:
             if response.navigation_owner_id is not None and messages:
-                # RU: Храним только текущую навигационную панель, не историю сообщений.
-                # EN: One active navigation session per user/chat, never a message-history journal.
+                # RU: Отдельно держим текущий каталог, карточку песни и обычную панель.
+                # EN: Three bounded navigation slots, not a message-history journal.
                 for old_panel in await uow.store.find(
                     Confirmation, user_id=response.navigation_owner_id, chat_id=chat_id
                 ):
                     old_data = json.loads(old_panel.command)
-                    if old_data.get("kind") == "navigation_panel":
+                    if (
+                        old_data.get("kind") == "navigation_panel"
+                        and old_data.get("slot", "main") == response.navigation_slot
+                    ):
                         response.delete_message_ids.extend(
                             known_message_ids(old_data) - {m.message_id for m in messages}
                         )
@@ -392,6 +447,7 @@ class Processor:
                             command=json.dumps(
                                 {
                                     "kind": "navigation_panel",
+                                    "slot": response.navigation_slot,
                                     "message_ids": [m.message_id for m in messages],
                                 }
                             ),
@@ -542,6 +598,29 @@ async def keyboards(
 
 
 async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Message]:
+    if response.articles:
+        messages = []
+        for page in response.articles:
+            try:
+                messages.append(
+                    await bot.send_rich_message(
+                        chat_id,
+                        InputRichMessage.model_validate(
+                            {"blocks": page.blocks, "skip_entity_detection": True}
+                        ),
+                    )
+                )
+            except (TelegramBadRequest, TelegramNotFound) as exc:
+                # RU: Отклонённый Article заменяем текстом. При сетевом таймауте
+                # не отправляем копию: Telegram мог уже принять первое сообщение.
+                # EN: Fall back only on explicit rejection, never ambiguous network errors.
+                logger.info("Catalog Article rejected; using text (%s)", type(exc).__name__)
+                messages.extend(
+                    await send_response(bot, chat_id, Response(page.text, page.buttons))
+                )
+        for identifier in dict.fromkeys(response.delete_message_ids):
+            await delete_selection_message(bot, chat_id, identifier)
+        return messages
     if response.markup_only:
         batches = [markup async for markup in keyboards(response.buttons, response.button_columns)]
         if response.edit_message_ids:
@@ -688,7 +767,9 @@ def trace_message_route(message: Message, update_id: int, bot_id: int, username:
     )
     head_length = len(head.encode("utf-16-le")) // 2
     name = head.partition("@")[0].casefold()
-    command_name = name[1:] if name in ("/song", "/import", "/start", "/help") else "other"
+    command_name = (
+        name[1:] if name in ("/add_new_songs", "/song", "/import", "/start", "/help") else "other"
+    )
     reply = message.reply_to_message
     logger.info(
         "Telegram message route: update=%s starts_command=%s addressed=%s address_matches=%s "
@@ -729,16 +810,31 @@ def make_router(processor: Processor, username: str, *, diagnostics: bool = Fals
             locks[chat_id] = lock
         return lock
 
-    @router.message(F.text)
+    @router.message(F.text | F.rich_message)
     async def command(message: Message, event_update: Update, bot: Bot) -> None:
         if diagnostics:
             trace_message_route(message, event_update.update_id, bot.id, username)
-        if not message.from_user or message.from_user.is_bot or not message.text:
+        if not message.from_user or message.from_user.is_bot:
             return
-        if not message.text.strip() and message.reply_to_message is None:
+        article = (
+            message.rich_message.model_dump(exclude_none=True) if message.rich_message else None
+        )
+        text = message.text or ""
+        if article is not None:
+            try:
+                text = article_heading(article)
+            except AppError:
+                text = ""
+        if not text.strip() and article is None and message.reply_to_message is None:
             return
-        parts = message.text.split(maxsplit=1)
+        parts = text.split(maxsplit=1)
         head = parts[0] if parts else ""
+        if (
+            article is not None
+            and head.startswith("/")
+            and head[1:].split("@", 1)[0].lower() not in IMPORT_COMMANDS
+        ):
+            return
         if (
             head.startswith("/")
             and "@" in head
@@ -750,7 +846,7 @@ def make_router(processor: Processor, username: str, *, diagnostics: bool = Fals
             reply.message_id if reply and reply.from_user and reply.from_user.id == bot.id else None
         )
         private = message.chat.type == "private"
-        if not message.text.lstrip().startswith("/") and reply_id is None and not private:
+        if not text.lstrip().startswith("/") and reply_id is None and not private:
             return
         if message.chat.type not in ("private", "group", "supergroup"):
             return
@@ -763,7 +859,7 @@ def make_router(processor: Processor, username: str, *, diagnostics: bool = Fals
                 event_update.update_id,
                 message.from_user.id,
                 message.chat.id,
-                message.text,
+                text,
                 private=private,
                 chat_admin=chat_admin,
                 display_name=message.from_user.full_name,
@@ -771,6 +867,7 @@ def make_router(processor: Processor, username: str, *, diagnostics: bool = Fals
                 reply_message_id=reply_id,
                 message_id=message.message_id,
                 is_callback=False,
+                article=article,
             )
             if response:
                 if response.delete_input:
@@ -810,12 +907,22 @@ def make_router(processor: Processor, username: str, *, diagnostics: bool = Fals
                 chat_admin=chat_admin,
                 message_id=query.message.message_id,
             )
-            if response:
+            try:
                 await query.answer(
-                    text=response.callback_notice or None, show_alert=bool(response.callback_notice)
+                    text=response.callback_notice or None if response else None,
+                    show_alert=bool(response and response.callback_notice),
                 )
-            else:
-                await query.answer()
+            except TelegramBadRequest as exc:
+                # RU: Нажатие могло ждать перезапуска. Данные уже обработаны;
+                # отсутствие всплывающего подтверждения не должно блокировать карточку.
+                # EN: Expired acknowledgement must not suppress an already prepared response.
+                reason = exc.message.lower()
+                if not any(
+                    value in reason
+                    for value in ("query is too old", "query id is invalid", "query_id_invalid")
+                ):
+                    raise
+                logger.info("Callback acknowledgement expired; completing response")
             if response:
                 previously_deleted = set(response.delete_message_ids)
                 sent = await send_response(bot, query.message.chat.id, response)
@@ -835,7 +942,12 @@ def make_router(processor: Processor, username: str, *, diagnostics: bool = Fals
             processor.monitor.set("telegram", "error", error=type(event.exception).__name__)
         # SQL exceptions may contain private payloads. Log only type and update ID.
         logger.error(
-            "Update %s failed (%s)", event.update.update_id, type(event.exception).__name__
+            "Update %s failed (%s; method=%s)",
+            event.update.update_id,
+            type(event.exception).__name__,
+            type(event.exception.method).__name__
+            if isinstance(event.exception, TelegramBadRequest)
+            else "unknown",
         )
         message = event.update.message
         if message is None and event.update.callback_query:

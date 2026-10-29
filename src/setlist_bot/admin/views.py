@@ -13,7 +13,7 @@ NAV = [
     ("overview", "Обзор", "/"),
     ("users", "Пользователи", "/users"),
     ("groups", "Коллективы", "/groups"),
-    ("concerts", "Мероприятия", "/concerts"),
+    ("concerts", "Выступления", "/concerts"),
     ("support", "Поддержка", "/support"),
     ("queue", "Очередь отправки", "/queue"),
     ("runtime", "Мониторинг", "/runtime"),

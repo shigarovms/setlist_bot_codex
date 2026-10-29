@@ -86,7 +86,7 @@ async def test_concert_delete_confirmation_hides_all_variants_and_restores_priva
     assert "администратора" in (await send("/delete_concert", actor=2)).text
     assert "Подтверждение" in (await send(button(preview, "confirm "), actor=2)).text
     deleted = await send(button(preview, "confirm "))
-    assert "перемещён в корзину" in deleted.text
+    assert "перемещено в корзину" in deleted.text
     assert "Новый год" not in (await send("/concerts")).text
     assert "удалён" in (await send(f"/use_concert {world.concert.id}", actor=2)).text
     assert not (await send("/trash", actor=2)).buttons

@@ -2,7 +2,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from setlist_bot.application.backup import Backup
@@ -15,7 +15,7 @@ from setlist_bot.application.command_inputs import (
     CommandInputs,
 )
 from setlist_bot.application.concert_details import FIELDS as CONCERT_INPUTS
-from setlist_bot.application.concert_details import ConcertDetails
+from setlist_bot.application.concert_details import PRESET_TYPES, ConcertDetails
 from setlist_bot.application.exports import Exports
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.importing import Importer
@@ -48,12 +48,19 @@ from setlist_bot.domain.entities import (
     now,
 )
 from setlist_bot.domain.export_settings import FONTS, settings
-from setlist_bot.domain.importing import FIELDS, SPACED_SEPARATOR, TIME_CELL, read_table
+from setlist_bot.domain.importing import (
+    FIELDS,
+    SPACED_SEPARATOR,
+    TIME_CELL,
+    parse_import,
+    read_table,
+)
 from setlist_bot.domain.rules import (
     AppError,
     SongListError,
     clock,
     duration,
+    editable_content,
     is_pause,
     normalize,
     parse_pause,
@@ -62,6 +69,7 @@ from setlist_bot.domain.rules import (
     validate_song,
 )
 from setlist_bot.infrastructure.pdf import PdfDocuments
+from setlist_bot.transport.articles import ArticlePage, catalog_articles
 from setlist_bot.transport.i18n import tr
 from setlist_bot.transport.render import concert_label, render_setlist, song_card
 
@@ -103,6 +111,8 @@ class Response:
     markup_only: bool = False
     callback_notice: str = ""
     deliveries: list[tuple[int, "Response"]] = field(default_factory=list)
+    articles: list[ArticlePage] = field(default_factory=list)
+    navigation_slot: Literal["main", "catalog", "song"] = "main"
 
 
 class Controller:
@@ -220,7 +230,7 @@ class Controller:
             "encore_pick",
         ):
             return Response(self.t("flat_list_only"))
-        if command in ("concert_settings", "concert_field"):
+        if command in ("concert_settings", "concert_field", "concert_options"):
             values = args.split()
             metadata_concert = await self.store.get(Concert, UUID(values[0]))
             await self.groups.access(metadata_concert.group_id, admin=True)
@@ -238,8 +248,37 @@ class Controller:
             context.group_id, context.concert_id = metadata_concert.group_id, metadata_concert.id
             if command == "concert_field":
                 require(len(values) == 2 and values[1] in CONCERT_INPUTS, "input")
+                if values[1] == "concert_type":
+                    return await self._concert_type_menu(context)
                 return await self._request_input(values[1], context)
+            if command == "concert_options":
+                shown = await self._show(context)
+                assert shown.menu_card_id is not None
+                settings_card, settings_data = await self.menus.load(shown.menu_card_id)
+                shown.buttons = await self._menu_buttons(settings_card, settings_data, "options")
+                return shown
             return self._concert_settings(metadata_concert)
+        if command == "concert_type_pick":
+            identifier, choice = args.split()
+            rows = await self.store.find(
+                Confirmation, id=UUID(identifier), user_id=self.user.id, chat_id=self.chat_id
+            )
+            require(bool(rows), "input_expired")
+            row = rows[0]
+            data = await self.inputs.restore(row)
+            require(data["command"] == "concert_type", "input_expired")
+            context = await self.groups.context(self.chat_id, self.private)
+            if choice == "custom":
+                return await self._request_input("concert_type", context)
+            require(choice in PRESET_TYPES or choice == "clear", "input")
+            concert = await ConcertDetails(self.store, self.user).update(
+                UUID(data["group_id"]),
+                UUID(data["concert_id"]),
+                "concert_type",
+                PRESET_TYPES.get(choice, "-"),
+            )
+            await self.store.delete(row)
+            return self._concert_settings(concert)
         if command == "import_cancel":
             import_rows = await self.store.find(
                 CatalogImport, id=UUID(args), owner_id=self.user.id, chat_id=self.chat_id
@@ -343,13 +382,16 @@ class Controller:
             await self.store.delete(rows[0])
             return Response(self.t("ok"))
         if command == "support":
+            help_link = "\n\n" + self.t("support_help")
             if not self.private:
                 require(bool(self.bot_username), "private_only")
                 return Response(
-                    self.t("support_private") + f" https://t.me/{self.bot_username}?start=support"
+                    self.t("support_private")
+                    + f" https://t.me/{self.bot_username}?start=support"
+                    + help_link
                 )
             if not await self.store.find(SupportSettings, key="main"):
-                return Response(self.t("support_unavailable"))
+                return Response(self.t("support_unavailable") + help_link)
             for row in await self.store.find(
                 Confirmation, user_id=self.user.id, chat_id=self.chat_id
             ):
@@ -363,7 +405,7 @@ class Controller:
             )
             self.store.add(session)
             return Response(
-                self.t("support_prompt"),
+                self.t("support_prompt") + help_link,
                 force_reply=True,
                 support_prompt_id=session.id,
                 cancel_action=f"support_cancel {session.id.hex}",
@@ -515,7 +557,10 @@ class Controller:
                 Confirmation, user_id=self.user.id, chat_id=self.chat_id
             ):
                 pending = json.loads(item.command)
-                if pending.get("kind") in (CARD, REQUEST):
+                if pending.get("kind") in (CARD, REQUEST) or (
+                    pending.get("kind") == "navigation_panel"
+                    and pending.get("slot") in ("catalog", "song")
+                ):
                     continue
                 if (
                     self.private
@@ -671,9 +716,25 @@ class Controller:
         table_input = "\t" in raw_args or (
             bool(raw_args) and (body_on_new_line or "\n" in raw_args)
         )
-        if command == "import" or (command == "song" and table_input):
+        if command == "import" or (command in ("song", "add_new_songs") and table_input):
             job = await self.importer.create(group_id, raw_args)
             return await self._import_preview(context, job)
+        if command == "add_new_songs":
+            # RU: Одна песня и таблица имеют один порядок полей и один валидатор.
+            # EN: Reuse the import parser; retain the existing single-song approval workflow.
+            parsed = parse_import(raw_args)
+            require(not parsed.error, parsed.error or "song_input")
+            require(len(parsed.rows) == 1, "song_input")
+            new_song_row = parsed.rows[0]
+            require(not new_song_row.error, new_song_row.error or "song_input")
+            require(new_song_row.data is not None, "song_input")
+            assert new_song_row.data is not None
+            return await self.confirm(
+                context,
+                "save_song "
+                + json.dumps({"data": new_song_row.data, "song_id": None, "expected": None}),
+                self._song_card(new_song_row.data),
+            )
         if command == "commit_import":
             require(confirmed, "confirmation")
             identifier, fingerprint = args.split()
@@ -683,13 +744,7 @@ class Controller:
             values = args.split()
             job = await self.importer.job(group_id, UUID(values[0]))
             if command == "map_start":
-                return Response(
-                    self.t("import_header_prompt"),
-                    [
-                        (self.t("import_with_header"), f"map_header {job.id.hex} 1"),
-                        (self.t("import_without_header"), f"map_header {job.id.hex} 0"),
-                    ],
-                )
+                return self._mapping_start(job)
             if command == "map_header":
                 require(len(values) == 2 and values[1] in ("0", "1"), "input")
                 job.has_header, job.mapping = values[1] == "1", {}
@@ -778,12 +833,15 @@ class Controller:
                 if args and command == "catalog"
                 else await self.catalog.list_songs(group_id, archived=command == "archived")
             )
-            return Response(
+            response = Response(
                 group.name
                 + "\n\n"
                 + ("\n\n".join(self._song_card(s) for s in songs) or self.t("empty")),
                 [(self.t("song_open", name=s.title), f"show_song {s.id}") for s in songs],
             )
+            response.articles = catalog_articles(group.name, songs, response.buttons, self.language)
+            response.navigation_slot = "catalog"
+            return response
         if command in (
             "show_song",
             "edit_hint",
@@ -822,6 +880,7 @@ class Controller:
                         (self.t("song_edit_title_duration"), f"edit_full_hint {selected.id}"),
                         (self.t("menu_back"), f"show_song {selected.id}"),
                     ],
+                    navigation_slot="song",
                 )
             if command != "show_song":
                 return await self._request_input(command.removesuffix("_hint"), context)
@@ -838,7 +897,7 @@ class Controller:
                         f"{action} {selected.id}",
                     )
                 )
-            return Response(self._song_card(selected), buttons)
+            return Response(self._song_card(selected), buttons, navigation_slot="song")
         if command in ("edit_bpm", "edit_lights", "edit_comment"):
             require(context.selected_song_id is not None, "song_input")
             assert context.selected_song_id is not None
@@ -1558,6 +1617,7 @@ class Controller:
         text = concert_label(concert, self.language) + "\n\n" + self.t("concert_details_intro")
         buttons = []
         for command, value, label in (
+            ("concert_title", concert.title, "concert_title_label"),
             (
                 "concert_duration",
                 compact_duration(concert.performance_duration_seconds, self.language)
@@ -1565,6 +1625,7 @@ class Controller:
                 else "",
                 "concert_duration_label",
             ),
+            ("concert_type", concert.performance_type, "concert_type_label"),
             ("concert_city", concert.city, "concert_city_label"),
             ("concert_info", concert.extra_info, "concert_info_label"),
         ):
@@ -1572,12 +1633,32 @@ class Controller:
                 text += "\n" + self.t(label) + ": " + value
             buttons.append(
                 (
-                    self.t("change_field" if value else "set_field", field=self.t(label)),
+                    self.t(
+                        "change_field"
+                        if value or command in ("concert_title", "concert_type")
+                        else "set_field",
+                        field=self.t(label),
+                    ),
                     f"concert_field {concert.id.hex} {command}",
                 )
             )
-        buttons.append((self.t("open_setlist"), f"use_concert {concert.id}"))
+        buttons.extend(
+            [
+                (self.t("open_setlist"), f"use_concert {concert.id}"),
+                (self.t("delete_concert_button"), f"delete_concert {concert.id}"),
+                (self.t("menu_back"), f"concert_options {concert.id}"),
+            ]
+        )
         return Response((self.t("concert_created") + "\n\n" if created else "") + text, buttons)
+
+    async def _concert_type_menu(self, context: Context) -> Response:
+        row = await self.inputs.create("concert_type", context, self.t("input_concert_type"))
+        buttons = [
+            (self.t("concert_type_" + key), f"concert_type_pick {row.id.hex} {key}")
+            for key in (*PRESET_TYPES, "custom", "clear")
+        ]
+        buttons.append((self.t("cancel_button"), f"input_cancel {row.id.hex}"))
+        return Response(self.t("input_concert_type"), buttons)
 
     async def _request_input(self, command: str, context: Context | None = None) -> Response:
         version = None
@@ -1619,10 +1700,14 @@ class Controller:
             prefix += self._song_card(editing_song) + "\n"
         if command in CONCERT_INPUTS:
             assert context is not None and context.concert_id is not None
-            prefix += (
-                concert_label(await self.store.get(Concert, context.concert_id), self.language)
-                + "\n"
-            )
+            editing_concert = await self.store.get(Concert, context.concert_id)
+            prefix += concert_label(editing_concert, self.language) + "\n"
+            current = {
+                "concert_title": editing_concert.title,
+                "concert_type": editing_concert.performance_type,
+            }.get(command)
+            if current:
+                detail = self.t("current_value", value=current) + "\n" + detail
         prompt = (
             prefix
             + (
@@ -1654,7 +1739,11 @@ class Controller:
         if value.lstrip().startswith("/"):
             response = await self.execute(value)
         else:
-            join = "\n" if data["command"] in ("song", "import", "add") and "\n" in value else " "
+            join = (
+                "\n"
+                if data["command"] in ("song", "add_new_songs", "import", "add") and "\n" in value
+                else " "
+            )
             response = await self.execute(f"/{data['command']}" + join + value.strip())
         if data["command"] == "add" and any(
             action.startswith("offer_add ") for _, action in response.buttons
@@ -1717,11 +1806,17 @@ class Controller:
         comment = self.t("suggestion_prompt")
         if self.private:
             comment += "\n" + self.t("suggestion_private")
+        else:
+            comment += "\n\n" + self.t("suggestion_keyboard_hint")
         titles = list(template.titles)
+        source_date = None
+        source_duration = None
         if not titles:
             concert = await self.store.get(Concert, context.concert_id)
             suggestion = await suggested_titles(self.store, self.user, concert)
             titles = suggestion.titles
+            source_date = suggestion.source_date
+            source_duration = suggestion.duration_seconds
             for label, names in (
                 ("suggested_new", suggestion.new),
                 ("suggested_popular", suggestion.popular),
@@ -1747,7 +1842,15 @@ class Controller:
             }
         )[2]
         body = "\n".join(titles)
-        heading = self.t("suggested_duration", time=clock(duration))
+        heading = (
+            self.t(
+                "suggested_from_performance",
+                date=date_label(source_date, self.language),
+                time=clock(source_duration or duration),
+            )
+            if source_date
+            else self.t("suggested_duration", time=clock(duration))
+        )
         copied = Response(
             heading + "\n\n" + (body or self.t("selection_no_songs")),
             monospace=bool(body),
@@ -2111,6 +2214,13 @@ class Controller:
 
     async def _import_preview(self, context: Context, job: CatalogImport) -> Response:
         plan = await self.importer.preview(job.group_id, job.id)
+        if plan.parsed.error == "import_columns" or (
+            plan.parsed.rows and len(plan.errors) == len(plan.parsed.rows)
+        ):
+            # RU: Не перечисляем сотни одинаковых ошибок при неверном порядке столбцов.
+            # EN: Start the existing mapping dialog when no row could be interpreted.
+            # A manual retry returns here too; nothing is saved until a valid preview is confirmed.
+            return self._mapping_start(job, explain=True)
         group = await self.store.get(Group, job.group_id)
         lines = [
             group.name,
@@ -2146,6 +2256,17 @@ class Controller:
         response.buttons.insert(-1, (self.t("import_map"), f"map_start {job.id.hex}"))
         response.input_rejected = bool(plan.errors or plan.parsed.error)
         return response
+
+    def _mapping_start(self, job: CatalogImport, *, explain: bool = False) -> Response:
+        return Response(
+            (self.t("import_clarify_columns") + "\n\n" if explain else "")
+            + self.t("import_header_prompt"),
+            [
+                (self.t("import_with_header"), f"map_header {job.id.hex} 1"),
+                (self.t("import_without_header"), f"map_header {job.id.hex} 0"),
+                (self.t("cancel_button"), f"import_cancel {job.id.hex}"),
+            ],
+        )
 
     def _mapping_step(self, job: CatalogImport) -> Response:
         assert job.mapping is not None
@@ -2194,7 +2315,14 @@ class Controller:
                 (self.t("copy_variant"), proposal),
                 (self.t("menu_options"), f"slmenu {key} options"),
             ]
-            if not data["private_chat"]:
+            if not data["private_chat"] and (
+                data["approved"]
+                or any(
+                    not is_pause(item)
+                    for block in data["snapshot"]["blocks"]
+                    for item in block["items"]
+                )
+            ):
                 buttons.append(
                     (
                         self.t("menu_edit" if data["approved"] else "menu_approve"),
@@ -2209,11 +2337,14 @@ class Controller:
                 ]
                 buttons = exports + buttons[1:]
             if data["personal"]:
-                buttons = [
-                    (self.t("draft_publish"), f"sldraft {key} publish"),
-                    (self.t("draft_edit"), proposal),
-                    (self.t("menu_options"), f"slmenu {key} options"),
-                ]
+                shared_snapshot, _, _ = await self.setlists.read(
+                    UUID(data["group_id"]), UUID(data["concert_id"])
+                )
+                buttons = [(self.t("draft_edit"), proposal)]
+                if editable_content(data["snapshot"]) != editable_content(shared_snapshot):
+                    buttons.append((self.t("draft_publish"), f"sldraft {key} publish"))
+                buttons.append((self.t("menu_options"), f"slmenu {key} options"))
+            buttons.append((self.t("back_concerts"), f"slmenu {key} concerts"))
             return buttons
         variants = (
             []
@@ -2242,9 +2373,6 @@ class Controller:
                 )
             if variants:
                 buttons.append((self.t("menu_variants"), f"slmenu {key} variants"))
-            for index, (label, action) in enumerate(await self._card_options(data)):
-                if action.startswith("delete_concert "):
-                    buttons.append((label, f"slopt {key} {index}"))
             if self.private or member.role == "admin":
                 buttons.append((self.t("cleanup_button"), "cleanup_chat"))
             buttons.extend(
@@ -2277,7 +2405,7 @@ class Controller:
         return response
 
     async def refresh_shared_card(self, row: Confirmation) -> Response:
-        """RU: Фоновое обновление не переключает выбранный пользователем концерт.
+        """RU: Фоновое обновление не переключает выбранное пользователем выступление.
 
         EN: Reuse normal rendering with a transient context; never read private drafts.
         """
@@ -2412,6 +2540,13 @@ class Controller:
             require(data["personal"] and self.private and values[1] == "publish", "private_only")
             await self.menus.validate(data, fresh=True)
             await self._card_context(data)
+            shared_snapshot, _, _ = await self.setlists.read(
+                UUID(data["group_id"]), UUID(data["concert_id"])
+            )
+            require(
+                editable_content(data["snapshot"]) != editable_content(shared_snapshot),
+                "draft_unchanged",
+            )
             # RU: Двойной клик не должен дважды рассылать один личный вариант.
             # EN: Consume this card's publish action once; other card actions stay usable.
             require(not data.get("published"), "already_done")
@@ -2419,6 +2554,9 @@ class Controller:
             self.menus.write(row, {**data, "published": True})
             return response
         if command == "slmenu":
+            if values[1] == "concerts":
+                await self._card_context(data)
+                return await self.execute("concerts")
             return Response(
                 "",
                 await self._menu_buttons(
@@ -2590,6 +2728,7 @@ class Controller:
         )
         text = (
             group.name
+            + (f" ({concert.performance_type})" if concert.performance_type else "")
             + "\n"
             + render_setlist(
                 snapshot, concert, self.language, version, private=personal, approved=approved
