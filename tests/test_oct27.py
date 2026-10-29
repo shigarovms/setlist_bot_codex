@@ -41,7 +41,7 @@ async def test_owner_multiple_admins_and_names(engine, world):
         assert await service.name(world.other.id) != "Илья"
 
 
-@pytest.mark.parametrize("songs,pause_label", [(9, "x"), (10, "xx")])
+@pytest.mark.parametrize("songs,pause_label", [(9, " "), (10, "  ")])
 def test_pause_numbering_and_compact_header(songs, pause_label):
     from uuid import uuid4
 
@@ -58,7 +58,7 @@ def test_pause_numbering_and_compact_header(songs, pause_label):
         {"default_pause_seconds": 5, "blocks": [{"items": items}]}, concert, "ru", 5
     )
     assert "Пауза: 5сек · Выступаем: 100мин" in rendered
-    assert f"{pause_label}. пауза" in rendered
+    assert f"{pause_label}  пауза" in rendered
     assert short_duration(123) == "2мин3сек"
 
 
@@ -149,10 +149,11 @@ def test_daily_offsets_and_command_order():
     due = reminders.due_at(UUID(int=3599), at)
     assert due.hour == 14 and due.minute == 59 and due.second == 59
     for menu in ("private", "group", "admin", "default"):
-        assert [c.command for c in menu_commands(menu, "ru")][:5] == [
+        assert [c.command for c in menu_commands(menu, "ru")][:6] == [
             "support",
-            "start",
+            "groups",
             "concerts",
+            "start",
             "add_new_songs",
             "help",
         ]
@@ -278,6 +279,7 @@ async def test_concert_flags_and_exact_options_order(engine, world):
     )
     assert [label for label, _ in options.buttons] == [
         "Параметры экспорта",
+        "⚙️ Параметры сет-листа",
         "Параметры выступления",
         "Прибраться в чате",
         "Связаться с поддержкой",

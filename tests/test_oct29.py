@@ -206,7 +206,7 @@ def test_narrow_render_wraps_title_not_number_or_duration():
     start = next(i for i, line in enumerate(rows) if line.startswith("01."))
     assert "04:00" in rows[start] and rows[start + 1].startswith("    ")
     assert all(len(line) <= 27 for line in rows[start:])
-    assert "10." in rendered and "xx. пауза" in rendered
+    assert "10." in rendered and "xx" not in rendered and "    пауза" in rendered
     assert rows[start].index("04:00") == rows[-1].index("42:45")
     assert "песни" in rendered
     assert editable_content(snapshot) == editable_content({**snapshot, "approved_by": "Admin"})

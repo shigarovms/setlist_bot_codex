@@ -51,6 +51,8 @@ plugins = ["pydantic.mypy"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/setlist_bot/transport/i18n.py" = ["E501"]
+"src/setlist_bot/transport/music_texts.py" = ["E501"]
+"src/setlist_bot/transport/workflow_texts.py" = ["E501"]
 # Server-rendered HTML literals are easier to review without artificial line breaks.
 "src/setlist_bot/admin/views.py" = ["E501"]
 "src/setlist_bot/admin/app.py" = ["E501"]

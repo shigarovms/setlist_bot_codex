@@ -3,8 +3,9 @@
 from dataclasses import dataclass
 from typing import Any
 
+from setlist_bot.domain.display import entry_labels, pause_title
 from setlist_bot.domain.entities import Song
-from setlist_bot.domain.rules import clock
+from setlist_bot.domain.rules import clock, flat_content, is_pause, totals
 from setlist_bot.transport.i18n import tr
 from setlist_bot.transport.render import song_card
 
@@ -14,6 +15,57 @@ class ArticlePage:
     blocks: list[dict[str, Any]]
     text: str
     buttons: list[tuple[str, str]]
+
+
+def setlist_articles(heading: str, snapshot: dict[str, Any], language: str) -> list[ArticlePage]:
+    """RU: Три столбца, без кнопок в ячейках. EN: Never interpret song titles as markup."""
+    items = flat_content(snapshot)["blocks"][0]["items"]
+    labels = entry_labels(items)
+    _, _, total = totals(snapshot)
+    rows = [
+        ["№", tr(language, "catalog_title"), tr(language, "catalog_time")],
+        *[
+            [
+                "" if is_pause(item) else label,
+                pause_title(language) if is_pause(item) else item["title"],
+                clock(item["duration_seconds"]),
+            ]
+            for label, item in zip(labels, items, strict=True)
+        ],
+        ["", tr(language, "timing_total", time="").rstrip(), clock(total)],
+    ]
+    pages = []
+    for start in range(1, max(2, len(rows)), 40):
+        part = [rows[0], *rows[start : start + 40]]
+        cells = [
+            [
+                {
+                    "text": value,
+                    "align": "right" if column != 1 else "left",
+                    "valign": "top",
+                    "is_header": number == 0,
+                }
+                for column, value in enumerate(row)
+            ]
+            for number, row in enumerate(part)
+        ]
+        pages.append(
+            ArticlePage(
+                [
+                    {"type": "paragraph", "text": heading},
+                    {
+                        "type": "table",
+                        "cells": cells,
+                        "is_bordered": True,
+                        "is_striped": True,
+                        "is_compact": True,
+                    },
+                ],
+                heading + "\n\n" + "\n".join("  ".join(row) for row in part[1:]),
+                [],
+            )
+        )
+    return pages
 
 
 def catalog_articles(

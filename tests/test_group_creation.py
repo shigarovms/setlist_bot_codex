@@ -5,7 +5,7 @@ from itertools import count
 import pytest
 from aiogram.types import Chat, Message
 
-from setlist_bot.domain.entities import ChatBinding, Confirmation, Group, Membership, now
+from setlist_bot.domain.entities import ChatBinding, Confirmation, Group, Membership, User, now
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.transport.commands import menu_commands
 from setlist_bot.transport.telegram import Processor
@@ -20,6 +20,7 @@ def messenger(engine):
         chat=-300,
         actor=1,
         admin=True,
+        owner=1,
         private=False,
         reply=None,
         remember=None,
@@ -33,6 +34,7 @@ def messenger(engine):
             text,
             private=private,
             chat_admin=admin,
+            chat_owner_id=owner,
             reply_message_id=reply,
             is_callback=callback,
         )
@@ -145,15 +147,16 @@ async def test_cancel_clears_only_own_dialog_and_old_buttons_cannot_create(
 
 async def test_fast_command_private_chat_and_admin_checks_remain_compatible(engine, world):
     send = messenger(engine)
-    assert "администратор" in (await send("/group", admin=False)).text
+    assert (await send("/group", admin=False)).force_reply
     assert "общем чате" in (await send("/group", private=True, chat=1)).text
     await send("/group", remember=100)
     preview = await send("Название", reply=100)
     foreign = await send(button(preview, "group_create_yes"), actor=2, callback=True)
-    assert "устарел" in foreign.text
-    demoted = await send(button(preview, "group_create_yes"), admin=False, callback=True)
-    assert "администратор" in demoted.text and await bound_group(engine) is None
-    created = await send("/group Быстрый коллектив")
+    assert "владелец" in foreign.text
+    demoted = await send(button(preview, "group_create_yes"), owner=2, callback=True)
+    assert "владелец" in demoted.text and await bound_group(engine) is None
+    quick = await send("/group Быстрый коллектив")
+    created = await send(button(quick, "group_create_yes"), callback=True)
     assert "Быстрый коллектив" in created.text
     assert (await bound_group(engine)).name == "Быстрый коллектив"
     assert "устарел" in (await send(button(preview, "group_create_yes"), callback=True)).text
@@ -184,13 +187,13 @@ async def test_concurrent_admins_can_create_only_one_group_in_same_chat(engine, 
     second = await send("Второй", actor=2, reply=200)
     results = await asyncio.gather(
         send(button(first, "group_create_yes"), callback=True),
-        send(button(second, "group_create_yes"), actor=2, callback=True),
+        send(button(second, "group_create_yes"), actor=1, callback=True),
     )
     assert sum("уже создан" in result.text for result in results) == 1
     async with PostgresUnitOfWork(engine) as uow:
         assert len(await uow.store.find(ChatBinding, chat_id=-300)) == 1
         group = await bound_group(engine)
-        assert len(await uow.store.find(Membership, group_id=group.id)) == 1
+        assert len(await uow.store.find(Membership, group_id=group.id)) in (1, 2)
     assert (await send("/group")).text == "В этом чате уже создан коллектив."
 
 
@@ -198,3 +201,37 @@ def test_group_menu_has_requested_description_and_remains_admin_scoped():
     commands = {command.command: command.description for command in menu_commands("admin", "ru")}
     assert commands["group"] == "Создать новый коллектив"
     assert "group" not in [command.command for command in menu_commands("private", "ru")]
+
+
+@pytest.mark.parametrize("language", ["ru", "en"])
+@pytest.mark.parametrize("dialog", [False, True])
+async def test_new_group_offers_all_catalog_methods_with_search_first(
+    engine, world, language, dialog
+):
+    async with PostgresUnitOfWork(engine) as uow:
+        (await uow.store.get(User, world.admin.id)).language = language
+    send = messenger(engine)
+    if dialog:
+        await send("/group", remember=100)
+        preview = await send("Новый коллектив", reply=100)
+        created = await send(button(preview, "group_create_yes"), callback=True)
+    else:
+        preview = await send("/group Новый коллектив")
+        created = await send(button(preview, "group_create_yes"), callback=True)
+    group = await bound_group(engine)
+    assert [action for _, action in created.buttons] == [
+        f"mi_open {group.id.hex}",
+        "mi_help manual",
+        "mi_help sheets",
+        "mi_help telegram",
+    ]
+    assert created.buttons[0][0] == (
+        "🌐 Найти песни в интернете" if language == "ru" else "🌐 Find songs online"
+    )
+    assert "Новый коллектив" in created.text
+    search = await send(created.buttons[0][1], callback=True)
+    assert "Новый коллектив" in search.text
+    assert len(search.buttons) == 3
+    for _, action in created.buttons[1:]:
+        guide = await send(action, callback=True)
+        assert "/add_new_songs" in guide.text

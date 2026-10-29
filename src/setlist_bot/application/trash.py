@@ -151,6 +151,10 @@ class TrashCleanup:
             await self.store.delete(export)
         for confirmation in await self.store.expired(e.Confirmation, "expires_at", at):
             await self.store.delete(confirmation)
+        for expired_search in await self.store.expired(e.MusicSearch, "expires_at", at):
+            await self.store.delete(expired_search)
+        for expired_cache in await self.store.expired(e.MusicCache, "expires_at", at):
+            await self.store.delete(expired_cache)
 
     async def _delete(self, kind: type[e.Entity], **filters: object) -> None:
         for row in await self.store.find(kind, **filters):

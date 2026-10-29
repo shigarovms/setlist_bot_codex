@@ -1,6 +1,7 @@
 import re
 from copy import deepcopy
 from typing import Any
+from uuid import UUID
 
 from unidecode import unidecode
 
@@ -9,6 +10,12 @@ class AppError(Exception):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
+
+
+class SuggestionRestricted(AppError):
+    def __init__(self, group_id: UUID) -> None:
+        self.group_id = group_id
+        super().__init__("admin_suggestions_only")
 
 
 class SongListError(AppError):

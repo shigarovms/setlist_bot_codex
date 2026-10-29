@@ -23,6 +23,53 @@ class AdminQueries:
         rows = await self.rows(sql, **params)
         return rows[0] if rows else {}
 
+    async def ux(self, days: int = 30) -> dict[str, Any]:
+        days = days if days in (7, 30, 90) else 30
+        summary = await self.rows(
+            """SELECT action, area, outcome, sum(events)::bigint AS events,
+            round(sum(elapsed_ms)::numeric / greatest(sum(events),1))::bigint AS mean_ms
+            FROM ux_daily
+            WHERE day >= (now() AT TIME ZONE 'Europe/Moscow')::date
+              - CAST(:days AS integer) + 1
+            GROUP BY action,area,outcome ORDER BY events DESC LIMIT 100""",
+            days=days,
+        )
+        # Funnels correlate pseudonymous group/performance keys; participants may differ.
+        funnels = await self.one(
+            """WITH stages AS (
+            SELECT group_key, resource_key,
+              min(created_at) FILTER (WHERE action='group_created') AS registered,
+              min(created_at) FILTER
+                (WHERE action IN ('catalog_imported','catalog_populated')) AS imported,
+              min(created_at) FILTER (WHERE action='setlist_created') AS performance,
+              min(created_at) FILTER (WHERE action='draft_saved') AS draft,
+              min(created_at) FILTER (WHERE action='variant_published') AS published,
+              min(created_at) FILTER (WHERE action='setlist_approved') AS approved,
+              min(created_at) FILTER (WHERE action='pdf_requested') AS pdf
+            FROM ux_events WHERE created_at >= now()-make_interval(days => :days)
+            GROUP BY group_key,resource_key)
+            SELECT count(*) FILTER (WHERE registered IS NOT NULL) AS registered,
+              count(*) FILTER (WHERE imported>=registered) AS imported,
+              count(*) FILTER (WHERE performance IS NOT NULL) AS performances,
+              count(*) FILTER (WHERE draft>=performance) AS drafts,
+              count(*) FILTER (WHERE published>=performance) AS published,
+              count(*) FILTER (WHERE approved>=performance) AS approved,
+              count(*) FILTER (WHERE pdf>=approved AND approved>=performance) AS exported,
+              percentile_cont(0.5) WITHIN GROUP
+                (ORDER BY extract(epoch FROM (approved-performance))/60)
+                FILTER (WHERE approved>=performance) AS approval_minutes
+            FROM stages""",
+            days=days,
+        )
+        people = await self.one(
+            """SELECT count(DISTINCT actor_key) AS people,
+            count(*) FILTER (WHERE outcome<>'ok') AS errors,
+            count(*) AS detailed FROM ux_events
+            WHERE created_at>=now()-make_interval(days => :days)""",
+            days=days,
+        )
+        return {"summary": summary, "funnels": funnels, "people": people, "days": days}
+
     async def overview(self) -> dict[str, Any]:
         return await self.one(
             """SELECT
@@ -66,13 +113,17 @@ class AdminQueries:
         # RU/EN: Только доверенные SQL-шаблоны / search, state and IDs are bound parameters.
         statements = {
             "users": """
-            SELECT u.id,u.telegram_id,u.display_name,u.language,u.last_seen_at,
+            SELECT u.id,u.telegram_id,u.display_name,u.username,u.username_seen_at,
+            u.language,u.last_seen_at,
             (SELECT count(*) FROM memberships m WHERE m.user_id=u.id AND
             m.status='active') AS groups
-            FROM users u WHERE (u.display_name ILIKE :q OR u.telegram_id::text ILIKE :q)
+            FROM users u WHERE (u.display_name ILIKE :q OR u.telegram_id::text ILIKE :q
+              OR u.username ILIKE :q OR ('@'||u.username) ILIKE :q)
             ORDER BY u.telegram_id LIMIT :limit OFFSET :offset""",
             "groups": """
-            SELECT g.id,g.name,g.deleted_at,g.reminders_enabled,u.display_name AS owner_name,
+            SELECT g.id,g.name,g.deleted_at,g.reminders_enabled,g.owner_id,
+            u.display_name AS owner_name,u.telegram_id AS owner_telegram_id,
+            u.username AS owner_username,
             (SELECT count(*) FROM memberships m WHERE m.group_id=g.id AND
             m.status='active') AS members,
             (SELECT count(*) FROM concerts c WHERE c.group_id=g.id AND c.deleted_at IS
@@ -93,8 +144,10 @@ class AdminQueries:
             ORDER BY c.date DESC,c.id LIMIT :limit OFFSET :offset""",
             "queue": """
             SELECT o.id,o.created_at,o.chat_id,o.support_kind,o.sent,o.attempts,o.last_error,
+            u.display_name AS recipient_name,u.username AS recipient_username,
             o.next_attempt_at,o.delivered_at,o.discarded_at,left(o.text,220) AS preview
-            FROM outbox o WHERE (o.text ILIKE :q OR o.chat_id::text ILIKE :q)
+            FROM outbox o LEFT JOIN users u ON u.telegram_id=o.chat_id
+            WHERE (o.text ILIKE :q OR o.chat_id::text ILIKE :q)
               AND (:state='all' OR (:state='processed' AND o.sent) OR (:state='failed'
             AND NOT o.sent AND o.last_error<>'') OR (:state IN ('','pending') AND NOT
             o.sent))
@@ -102,25 +155,27 @@ class AdminQueries:
             "support": """
             SELECT o.id,o.created_at,left(o.text,220) AS preview,
             coalesce(c.status,'open') AS status,
-            u.display_name,u.telegram_id FROM outbox o
+            u.display_name,u.telegram_id,u.username FROM outbox o
             LEFT JOIN support_cases c ON c.request_id=o.id
             JOIN users u ON u.telegram_id=(SELECT u2.telegram_id FROM support_messages m
                 JOIN users u2 ON u2.id=m.user_id WHERE m.outbox_id=o.id LIMIT 1)
             WHERE o.support_kind='request' AND (o.text ILIKE :q OR u.telegram_id::text
-            ILIKE :q)
+            ILIKE :q OR u.username ILIKE :q OR ('@'||u.username) ILIKE :q)
               AND (:state='all' OR coalesce(c.status,'open')=CASE WHEN :state='' THEN
             'open' ELSE :state END)
             ORDER BY o.created_at DESC NULLS LAST,o.id LIMIT :limit OFFSET :offset""",
             "audit": """
-            SELECT id,created_at,actor,source,action,target,details FROM admin_audit
-            WHERE (actor ILIKE :q OR action ILIKE :q OR target ILIKE :q)
-            ORDER BY created_at DESC,id LIMIT :limit OFFSET :offset""",
+            SELECT a.id,a.created_at,a.actor,a.source,a.action,a.target,a.details,
+            u.display_name AS actor_name,u.username AS actor_username FROM admin_audit a
+            LEFT JOIN users u ON a.actor = 'telegram:'||u.telegram_id::text
+            WHERE (a.actor ILIKE :q OR a.action ILIKE :q OR a.target ILIKE :q)
+            ORDER BY a.created_at DESC,a.id LIMIT :limit OFFSET :offset""",
             "catalog": """
             SELECT id,title,duration_seconds,bpm,lights,comment,archived FROM songs
             WHERE group_id=:group_id AND title ILIKE :q
             ORDER BY title,id LIMIT :limit OFFSET :offset""",
         }
-        return await self.rows(
+        result = await self.rows(
             statements[section],
             q="%" + query[:200].replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%",
             offset=page * PAGE_SIZE,
@@ -129,9 +184,34 @@ class AdminQueries:
             group_id=group_id,
         )
 
+        if section == "audit":
+            keys = {"old_owner", "new_owner", "user_id", "owner_id", "requester_id"}
+            identifiers = sorted(
+                {
+                    str(value)
+                    for row in result
+                    for key, value in row["details"].items()
+                    if key in keys
+                }
+            )
+            users = (
+                await self.rows(
+                    "SELECT id,telegram_id,display_name,username FROM users "
+                    "WHERE id::text=ANY(:ids)",
+                    ids=identifiers,
+                )
+                if identifiers
+                else []
+            )
+            lookup = {str(user["id"]): user for user in users}
+            for row in result:
+                row["user_refs"] = lookup
+        return result
+
     async def user(self, identifier: UUID) -> dict[str, Any]:
         return await self.one(
-            "SELECT id,telegram_id,display_name,language,last_seen_at FROM users WHERE id=:id",
+            "SELECT id,telegram_id,display_name,username,username_seen_at,language,last_seen_at "
+            "FROM users WHERE id=:id",
             id=identifier,
         )
 
@@ -140,12 +220,13 @@ class AdminQueries:
     ) -> list[dict[str, Any]]:
         return await self.rows(
             """SELECT m.id,m.role,m.status,m.musical_role AS nickname,
-            u.display_name,u.telegram_id,u.id AS user_id,g.name,g.id AS group_id,g.owner_id
+            u.display_name,u.telegram_id,u.username,u.id AS user_id,
+            g.name,g.id AS group_id,g.owner_id
             FROM memberships m JOIN users u ON u.id=m.user_id JOIN groups g ON g.id=m.group_id
             WHERE (CAST(:group AS uuid) IS NULL OR m.group_id=:group)
               AND (CAST(:user AS uuid) IS NULL OR m.user_id=:user)
             AND (m.musical_role ILIKE :q OR u.display_name ILIKE :q OR
-            u.telegram_id::text ILIKE :q)
+            u.telegram_id::text ILIKE :q OR u.username ILIKE :q OR ('@'||u.username) ILIKE :q)
             ORDER BY g.name,u.display_name,m.id LIMIT :limit OFFSET :offset""",
             group=group,
             user=user,
@@ -157,6 +238,7 @@ class AdminQueries:
     async def group(self, identifier: UUID) -> dict[str, Any]:
         return await self.one(
             """SELECT g.*,u.display_name AS owner_name,u.telegram_id AS owner_telegram_id,
+            u.username AS owner_username,
             b.chat_id FROM groups g LEFT JOIN users u ON u.id=g.owner_id
             LEFT JOIN chat_bindings b ON b.group_id=g.id WHERE g.id=:id""",
             id=identifier,
@@ -204,17 +286,22 @@ class AdminQueries:
         return await self.one(
             """SELECT o.id,o.created_at,o.text,coalesce(c.status,'open') AS status,
             coalesce(c.version,0) AS version,coalesce(c.last_reply_by,'') AS last_reply_by,
-            coalesce(c.last_reply_source,'') AS last_reply_source
+            coalesce(c.last_reply_source,'') AS last_reply_source,
+            u.telegram_id,u.display_name,u.username
             FROM outbox o LEFT JOIN support_cases c ON c.request_id=o.id
+            LEFT JOIN users u ON u.id=(SELECT user_id FROM support_messages
+                WHERE outbox_id=o.id LIMIT 1)
             WHERE o.id=:id AND o.support_kind='request'""",
             id=identifier,
         )
 
     async def replies(self, identifier: UUID) -> list[dict[str, Any]]:
         return await self.rows(
-            """SELECT id,text,created_at,delivered_at,discarded_at,last_error,sent,actor,source
-            FROM outbox
-            WHERE support_request_id=:id ORDER BY created_at,id LIMIT 100""",
+            """SELECT o.id,o.text,o.created_at,o.delivered_at,o.discarded_at,
+            o.last_error,o.sent,o.actor,o.source,
+            u.display_name AS actor_name,u.username AS actor_username
+            FROM outbox o LEFT JOIN users u ON o.actor='telegram:'||u.telegram_id::text
+            WHERE o.support_request_id=:id ORDER BY o.created_at,o.id LIMIT 100""",
             id=identifier,
         )
 

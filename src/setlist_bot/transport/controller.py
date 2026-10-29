@@ -112,7 +112,14 @@ class Response:
     callback_notice: str = ""
     deliveries: list[tuple[int, "Response"]] = field(default_factory=list)
     articles: list[ArticlePage] = field(default_factory=list)
-    navigation_slot: Literal["main", "catalog", "song"] = "main"
+    articles_keyboard: bool = False
+    article_source_text: str = ""
+    deferred: bool = False
+    workflow_id: UUID | None = None
+    music_search_id: UUID | None = None
+    music_search_version: int | None = None
+    music_panel_private: bool = True
+    navigation_slot: Literal["main", "catalog", "song", "music"] = "main"
 
 
 class Controller:
@@ -127,6 +134,7 @@ class Controller:
         bot_username: str = "",
     ) -> None:
         self.store, self.user, self.chat_id = store, user, chat_id
+        self.chat_owner_id: int | None = None
         self.sender_username = ""
         self.bot_username = bot_username
         self.private, self.chat_admin = private, chat_admin
@@ -214,6 +222,24 @@ class Controller:
         args = raw_args.strip()
         command = head.lstrip("/").split("@")[0].lower()
         args = args.strip()
+        if command.startswith(("ct_", "cr_")) or command in (
+            "chat_transfer",
+            "group_manage",
+            "group_concerts",
+            "on_added",
+        ):
+            from setlist_bot.transport.collectives import handle_collective
+
+            return await handle_collective(self, command, args)
+        if (
+            command.startswith("mi_")
+            or command in ("music_query", "music_duration")
+            or (command == "start" and args.startswith(("music_", "musicjob_")))
+        ):
+            # RU/EN: Lazy transport import avoids a Response/Controller import cycle.
+            from setlist_bot.transport.music_search import handle_music
+
+            return await handle_music(self, command, args)
         if not self.private:
             bindings = await self.store.find(ChatBinding, chat_id=self.chat_id)
             if bindings:
@@ -343,26 +369,37 @@ class Controller:
             "slreturn",
             "sldraft",
             "slformat",
+            "slsettings",
         ):
             return await self._menu_action(command, args)
         if command in ("pick_start", "pick_text", "pick_confirm", "pick_cancel"):
             require(self.private, "private_only")
             return await self._selection_action(command, UUID(args))
         if command in ("group_create_yes", "group_create_edit", "group_create_cancel"):
+            from setlist_bot.application.collectives import Collectives
+
             require(not self.private, "group_only")
-            session = await self.groups.creation_session(self.chat_id, UUID(args))
+            rows = await self.store.find(Confirmation, id=UUID(args), chat_id=self.chat_id)
+            require(bool(rows) and rows[0].expires_at > now(), "group_creation_expired")
+            session = rows[0]
             data = json.loads(session.command)
+            require(data.get("kind") == "create_group", "group_creation_expired")
             if command == "group_create_cancel":
+                require(
+                    session.user_id == self.user.id or self.chat_owner_id == self.user.telegram_id,
+                    "chat_owner_only",
+                )
                 await self.store.delete(session)
                 return Response(self.t("group_creation_cancelled"))
             await self.groups.check_creation_chat(self.chat_id)
-            require(self.chat_admin, "chat_admin")
             require(data["stage"] == "review", "group_creation_expired")
             if command == "group_create_edit":
+                require(session.user_id == self.user.id, "group_creation_expired")
                 return self._group_name_prompt(await self.groups.begin_creation(self.chat_id))
-            group = await self.groups.create(data["name"], self.chat_id)
-            await self.groups.clear_creation(self.chat_id)
-            return Response(self.t("created_group", name=group.name))
+            group = await Collectives(self.store, self.user, self.chat_id).create(
+                session, self.chat_owner_id
+            )
+            return self._created_group(group)
         if reply_template_id is not None and (
             not message.startswith("/") or command == "suggestion"
         ):
@@ -481,6 +518,8 @@ class Controller:
             )
             return await self._show(context)
         if command in ("start", "help"):
+            if command == "start" and args == "groups":
+                return await self.execute("groups")
             return Response(self.t("welcome" if command == "start" else "help"))
         if command == "language":
             if not args:
@@ -552,6 +591,52 @@ class Controller:
                 self.t("concert_restored", name=concert_label(restored_concert, self.language))
             )
         if command == "cancel":
+            from setlist_bot.application.music_search import ACTIVE, MusicSearches
+            from setlist_bot.domain.entities import MusicSearch
+            from setlist_bot.transport.music_search import music_view
+
+            other_dialog = False
+            for prompt in await self.store.find(
+                Confirmation, user_id=self.user.id, chat_id=self.chat_id
+            ):
+                prompt_data = json.loads(prompt.command)
+                if prompt_data.get("kind") in (
+                    "command_input",
+                    "support",
+                    "song_selection",
+                    "create_group",
+                ) and prompt_data.get("command") not in ("music_query", "music_duration"):
+                    other_dialog = True
+                if (
+                    prompt_data.get("kind") == "command_input"
+                    and prompt_data.get("command") == "music_duration"
+                ):
+                    music_identifier = UUID(prompt_data["prefix"].split()[0])
+                    searches = await self.store.find(
+                        MusicSearch, id=music_identifier, owner_id=self.user.id
+                    )
+                    if (
+                        searches
+                        and searches[0].status == "choosing"
+                        and searches[0].expires_at > now()
+                    ):
+                        duration_job = await MusicSearches(
+                            self.store, self.user, self.chat_id
+                        ).load(music_identifier)
+                        await self.inputs.clear()
+                        return await music_view(self, duration_job)
+
+            protected_music_imports = set()
+            for music_job in await self.store.find(MusicSearch, owner_id=self.user.id):
+                if (
+                    music_job.chat_id != self.chat_id
+                    and music_job.data.get("origin_chat_id") != self.chat_id
+                ):
+                    continue
+                if other_dialog and music_job.status == "preview":
+                    protected_music_imports.add(music_job.data.get("import_id"))
+                if music_job.status in ACTIVE and not other_dialog:
+                    music_job.status = "cancelled"
             cleanup = []
             for item in await self.store.find(
                 Confirmation, user_id=self.user.id, chat_id=self.chat_id
@@ -572,19 +657,22 @@ class Controller:
             for job in await self.store.find(
                 CatalogImport, owner_id=self.user.id, chat_id=self.chat_id, status="pending"
             ):
-                job.status = "cancelled"
+                if str(job.id) not in protected_music_imports:
+                    job.status = "cancelled"
             return Response(self.t("ok"), delete_message_ids=cleanup)
         if command == "group":
             require(not self.private, "group_only")
             await self.groups.check_creation_chat(self.chat_id)
-            require(self.chat_admin, "chat_admin")
             if not args:
                 return self._group_name_prompt(await self.groups.begin_creation(self.chat_id))
-            group = await self.groups.create(args, self.chat_id)
-            await self.groups.clear_creation(self.chat_id)
-            return Response(self.t("created_group", name=group.name))
+            session = await self.groups.begin_creation(self.chat_id)
+            return await self.group_name_input(session, args)
         if command == "groups":
-            require(self.private, "private_only")
+            if not self.private:
+                return Response(
+                    self.t("choose_group"),
+                    [(self.t("choose_group"), f"https://t.me/{self.bot_username}?start=groups")],
+                )
             memberships = await self.store.find(Membership, user_id=self.user.id, status="active")
             groups = [await self.store.get(Group, m.group_id) for m in memberships]
             groups = [g for g in groups if g.deleted_at is None]
@@ -598,7 +686,12 @@ class Controller:
             group = await self.groups.access(UUID(args))
             context.group_id, context.concert_id, context.observed_version = group.id, None, None
             context.selected_song_id = None
-            return Response(self.t("selected", name=group.name))
+            return Response(
+                self.t("selected", name=group.name),
+                [(self.t("transfer_button"), f"ct_begin {group.id.hex}")]
+                if group.owner_id == self.user.id
+                else [],
+            )
         require(context.group_id is not None, "select_group")
         group_id = context.group_id
         assert group_id is not None
@@ -611,6 +704,18 @@ class Controller:
                 self.t("nickname_saved" if membership.status == "active" else "registered")
             )
         group = await self.groups.access(group_id)
+        if command in (
+            "suggestion",
+            "add",
+            "move",
+            "remove",
+            "pause",
+            "publish",
+            "publish_draft",
+            "offer_add",
+            "edit_list",
+        ):
+            await self.groups.can_suggest(group_id)
         if command in GROUP_INPUTS and not args:
             if command in (
                 "concert",
@@ -840,6 +945,22 @@ class Controller:
                 [(self.t("song_open", name=s.title), f"show_song {s.id}") for s in songs],
             )
             response.articles = catalog_articles(group.name, songs, response.buttons, self.language)
+            memberships = await self.store.find(Membership, group_id=group_id, user_id=self.user.id)
+            if command == "catalog" and memberships and memberships[0].role == "admin":
+                action = f"mi_open {group_id.hex}"
+                label = self.t("music_entry")
+                response.buttons.append((label, action))
+                if response.articles:
+                    first = response.articles[0]
+                    first.blocks[0]["text"] = [
+                        first.blocks[0]["text"],
+                        "\n",
+                        {
+                            "type": "button",
+                            "button": {"text": label, "style": "link", "callback_data": action},
+                        },
+                    ]
+                    first.buttons.append((label, action))
             response.navigation_slot = "catalog"
             return response
         if command in (
@@ -1142,7 +1263,7 @@ class Controller:
             require(submission.group_id == group_id, "not_found")
             context.concert_id = submission.concert_id
             await self._show(context)
-            return Response(
+            response = Response(
                 render_setlist(
                     submission.snapshot,
                     await self.store.get(Concert, submission.concert_id),
@@ -1155,6 +1276,12 @@ class Controller:
                     else []
                 ),
                 monospace=True,
+            )
+            return await self._style_setlist(
+                response,
+                submission.snapshot,
+                await self.store.get(Concert, submission.concert_id),
+                0,
             )
         require(context.concert_id is not None, "select_concert")
         concert_id = context.concert_id
@@ -1454,7 +1581,7 @@ class Controller:
             require(
                 revision.group_id == group_id and revision.setlist_id == setlist.id, "not_found"
             )
-            return Response(
+            response = Response(
                 render_setlist(
                     revision.snapshot,
                     await self.store.get(Concert, concert_id),
@@ -1476,6 +1603,13 @@ class Controller:
                     back=f"revision {revision.id}",
                 ),
                 monospace=True,
+            )
+            return await self._style_setlist(
+                response,
+                revision.snapshot,
+                await self.store.get(Concert, concert_id),
+                revision.number,
+                approved=revision.action == "approved",
             )
         if command in ("publish", "publish_draft"):
             require(self.private, "private_only")
@@ -1512,6 +1646,7 @@ class Controller:
                     concert_id=concert_id,
                     monospace=True,
                     monospace_offset=len(public_prefix),
+                    payload={"setlist_snapshot": snapshot, "setlist_version": version},
                     buttons=[
                         [
                             tr(group.language, "submission_apply"),
@@ -1744,7 +1879,8 @@ class Controller:
                 if data["command"] in ("song", "add_new_songs", "import", "add") and "\n" in value
                 else " "
             )
-            response = await self.execute(f"/{data['command']}" + join + value.strip())
+            prefix = (data.get("prefix", "") + " ") if data.get("prefix") else ""
+            response = await self.execute(f"/{data['command']}" + join + prefix + value.strip())
         if data["command"] == "add" and any(
             action.startswith("offer_add ") for _, action in response.buttons
         ):
@@ -1898,6 +2034,14 @@ class Controller:
         response.deliveries.append((self.chat_id, copied))
         return response
 
+    def _created_group(self, group: Group) -> Response:
+        from setlist_bot.transport.music_search import methods
+
+        return Response(
+            self.t("created_group", name=group.name) + "\n\n" + self.t("music_onboarding"),
+            methods(self, group_id=group.id),
+        )
+
     def _group_name_prompt(self, session: Confirmation, *, invalid: bool = False) -> Response:
         return Response(
             (self.t("group_name") + "\n\n" if invalid else "") + self.t("group_creation_prompt"),
@@ -1916,8 +2060,13 @@ class Controller:
                 await self.groups.begin_creation(self.chat_id), invalid=True
             )
         session = await self.groups.begin_creation(self.chat_id, value)
+        session.expires_at = now() + timedelta(days=1)
         return Response(
-            self.t("group_creation_review", name=value.strip()),
+            self.t(
+                "group_creation_review",
+                name=value.strip(),
+                initiator=self.user.display_name or str(self.user.telegram_id),
+            ),
             [
                 (self.t("group_creation_yes"), f"group_create_yes {session.id.hex}"),
                 (self.t("group_creation_edit"), f"group_create_edit {session.id.hex}"),
@@ -1946,7 +2095,10 @@ class Controller:
         body = "\n".join(
             titles
             if reviewing
-            else [f"{number}. {title}" for number, title in zip(numbers, live_titles, strict=True)]
+            else [
+                number + (". " if number.strip() else "  ") + title
+                for number, title in zip(numbers, live_titles, strict=True)
+            ]
         )
         entries = [
             {"kind": "pause", "duration_seconds": entry["pause_seconds"], "pause_before": 0}
@@ -2092,6 +2244,17 @@ class Controller:
         if session is None:
             return None
         session, data = await self.selection.load(session.id)
+        from setlist_bot.application.ux import current as ux_trace
+
+        trace = ux_trace.get()
+        if trace is not None:
+            trace.action = (
+                "selection.text" if data["stage"] in ("method", "text") else "selection.song"
+            )
+            for key in ("cancel", "pause", "finish", "remove_last", "prev", "next"):
+                if value == self.t("selection_" + key):
+                    trace.action = "selection." + key
+                    break
         if data["stage"] in ("method", "text"):
             return await self.execute(
                 "/suggestion\n" + value, reply_template_id=UUID(data["template_id"])
@@ -2358,7 +2521,10 @@ class Controller:
             ]
         )
         if level == "options":
-            buttons = [(self.t("export_settings"), f"slformat {key} main")]
+            buttons = [
+                (self.t("export_settings"), f"slformat {key} main"),
+                (self.t("setlist_settings"), f"slsettings {key} main"),
+            ]
             member = (
                 await self.store.find(
                     Membership,
@@ -2487,6 +2653,10 @@ class Controller:
             )
             return response
         row, data = await self.menus.load(identifier, self.source_message_id)
+        if command == "slsettings":
+            from setlist_bot.transport.setlist_settings import settings_menu
+
+            return await settings_menu(self, row, data, values[1])
         if command == "slformat":
             config = settings(self.user.export_settings)
             if values[1] in ("font", "size", "align"):
@@ -2759,7 +2929,7 @@ class Controller:
                     "menu_card_id": str(card.id),
                     "back": f"slmenu {card.id.hex} options",
                 }
-        return Response(
+        response = Response(
             text,
             await self._menu_buttons(card, self.menus.data(card), "main"),
             monospace=True,
@@ -2767,6 +2937,47 @@ class Controller:
             suggestion_template_id=template_id,
             menu_card_id=card.id,
         )
+
+        return await self._style_setlist(
+            response, snapshot, concert, version, private=personal, approved=approved
+        )
+
+    async def _style_setlist(
+        self,
+        response: Response,
+        snapshot: dict[str, Any],
+        concert: Concert,
+        version: int,
+        *,
+        private: bool = False,
+        approved: bool = False,
+        prefix: str = "",
+    ) -> Response:
+        group = await self.store.get(Group, concert.group_id)
+        if group.setlist_style == "article":
+            from setlist_bot.transport.articles import setlist_articles
+
+            heading = (
+                prefix
+                + group.name
+                + (f" ({concert.performance_type})" if concert.performance_type else "")
+                + "\n"
+                + render_setlist(
+                    snapshot,
+                    concert,
+                    self.language,
+                    version,
+                    private=private,
+                    approved=approved,
+                    header_only=True,
+                )
+            )
+            response.article_source_text = response.text
+            response.articles = setlist_articles(heading, snapshot, self.language)
+            response.articles_keyboard = True
+            response.monospace = False
+            response.monospace_body = None
+        return response
 
     def _position_buttons(
         self, row: Confirmation, data: dict[str, Any], items: list[dict[str, Any]]
@@ -2776,7 +2987,9 @@ class Controller:
             self.t("choose_position"),
             [
                 (
-                    f"{labels[index]}. {item['title']} · {clock(item['duration_seconds'])}",
+                    labels[index]
+                    + ("  " if is_pause(item) else ". ")
+                    + f"{item['title']} · {clock(item['duration_seconds'])}",
                     f"position {row.id.hex} {index}",
                 )
                 for index, item in enumerate(items)

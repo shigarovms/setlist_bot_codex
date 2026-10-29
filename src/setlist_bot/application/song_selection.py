@@ -52,6 +52,7 @@ class SongSelection:
     async def create(
         self, group_id: UUID, concert_id: UUID, version: int, template_id: UUID
     ) -> Confirmation:
+        await Groups(self.store, self.user).can_suggest(group_id)
         group = await Groups(self.store, self.user).access(group_id)
         concert = await self.store.get(Concert, concert_id)
         await self.clear()
@@ -92,6 +93,7 @@ class SongSelection:
             "selection_expired",
         )
         group_id, concert_id = UUID(data["group_id"]), UUID(data["concert_id"])
+        await Groups(self.store, self.user).can_suggest(group_id)
         group = await Groups(self.store, self.user).access(group_id)
         concert = await self.store.get(Concert, concert_id)
         require(

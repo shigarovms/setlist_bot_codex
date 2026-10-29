@@ -24,6 +24,7 @@ from setlist_bot.domain.export_settings import settings
 from setlist_bot.domain.rules import flat_content, is_pause, require
 
 Audience = Literal["musicians", "lights"]
+LAYOUT_VERSION = 5
 
 
 class PdfRenderer(Protocol):
@@ -95,7 +96,7 @@ class Exports:
                 "extra_info": concert.extra_info,
                 "performance_duration_seconds": concert.performance_duration_seconds,
                 "settings": settings(self.user.export_settings),
-                "layout_version": 3,
+                "layout_version": LAYOUT_VERSION,
                 "bot_username": self.bot_username,
                 "concert_title": concert.title,
                 "version": version,
@@ -122,7 +123,7 @@ class Exports:
         lighting = await self._lighting_snapshot(source.group_id, source.payload["snapshot"])
         if (
             source.payload.get("settings") == config
-            and source.payload.get("layout_version") == 3
+            and source.payload.get("layout_version") == LAYOUT_VERSION
             and source.payload.get("bot_username") == self.bot_username
             and source.payload.get("lighting_snapshot") == lighting
         ):
@@ -134,7 +135,7 @@ class Exports:
         payload = {
             **deepcopy(source.payload),
             "settings": config,
-            "layout_version": 3,
+            "layout_version": LAYOUT_VERSION,
             "bot_username": self.bot_username,
             "lighting_snapshot": lighting,
         }
@@ -191,6 +192,9 @@ class Exports:
     ) -> list[tuple[str, bytes]]:
         require(audience in ("musicians", "lights", "all") and language in ("ru", "en"), "input")
         export = await self.configured(await self.load(export_id))
+        from setlist_bot.application.ux import milestone
+
+        milestone("pdf_requested", export.concert_id, {"group_id": str(export.group_id)})
         result = []
         targets: tuple[Audience, ...] = (
             ("musicians", "lights")

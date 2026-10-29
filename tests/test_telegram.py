@@ -128,7 +128,15 @@ async def test_aiogram_end_to_end_with_fake_telegram_and_real_postgres(engine, t
             await dispatcher.feed_update(bot, update)
             return session.sent[-1]
 
-        assert "Создан" in (await send("/group Репетиционная группа")).text
+        registration = await send("/group Репетиционная группа")
+        assert (
+            "Создан"
+            in (
+                await send(
+                    registration.reply_markup.inline_keyboard[0][0].callback_data, callback=True
+                )
+            ).text
+        )
         assert "ожидает" in (await send("/register гитарист", actor=2)).text
         pending = await send("/members")
         assert "гитарист" in pending.text
@@ -368,7 +376,8 @@ async def test_pdf_export_submenu_sends_both_a4_documents_through_aiogram(engine
         assert event.document.filename.endswith(".pdf")
         pdf = PdfReader(BytesIO(event.document.data))
         assert "Комета" in pdf.pages[0].extract_text()
-        assert "Одобрен:" in pdf.pages[0].extract_text()
+        assert "Одобрен:" not in pdf.pages[0].extract_text()
+        assert "Создано с помощью" in pdf.pages[0].extract_text()
 
 
 async def test_group_creation_force_reply_binding_and_fresh_admin_checks_through_router(engine):
@@ -430,7 +439,7 @@ async def test_group_creation_force_reply_binding_and_fresh_admin_checks_through
         edit = markup[1][0].callback_data
         session.admin_ids = []
         rejected = await send(create, callback=preview)
-        assert "администратор" in rejected.text
+        assert "определить владельца" in rejected.text
         assert session.admin_requests == 2
         session.admin_ids = [1]
         renamed_prompt = await send(edit, callback=preview)

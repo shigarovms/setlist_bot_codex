@@ -37,6 +37,7 @@ def render_setlist(
     *,
     private: bool = False,
     approved: bool = False,
+    header_only: bool = False,
 ) -> str:
     status = "draft" if private else "approved_title" if approved else "working"
     snapshot = flat_content(snapshot)
@@ -60,13 +61,16 @@ def render_setlist(
     )
     if concert.extra_info:
         lines.append(concert.extra_info)
+    if header_only:
+        return "\n".join(lines)
     _, _, total = totals(snapshot)
     items = snapshot["blocks"][0]["items"]
     numbers = entry_labels(items)
     labels = []
     for pos, item in enumerate(items, 1):
         title = pause_title(language) if is_pause(item) else item["title"]
-        labels.append(f"{numbers[pos - 1]}. {' '.join(title.split())}")
+        prefix = numbers[pos - 1] + ("  " if is_pause(item) else ". ")
+        labels.append(prefix + " ".join(title.split()))
     total_label = tr(language, "timing_total", time="").rstrip()
     time_width = max([len(clock(total)), *[len(clock(item["duration_seconds"])) for item in items]])
     # RU: Telegram не сообщает ширину экрана. Узкая таблица оставляет место аватару;
@@ -83,7 +87,7 @@ def render_setlist(
         indent = " " * (len(number) + 2)
         title = pause_title(language) if is_pause(item) else item["title"]
         title_lines = wrap(" ".join(title.split()), width=max(1, width - len(indent))) or [""]
-        label = f"{number}. {title_lines[0]}"
+        label = number + ("  " if is_pause(item) else ". ") + title_lines[0]
         lines.append(f"{label:<{width}}  {clock(item['duration_seconds']):>{time_width}}")
         lines.extend(indent + part for part in title_lines[1:])
     lines += [separator, f"{total_label:<{width}}  {clock(total):>{time_width}}"]

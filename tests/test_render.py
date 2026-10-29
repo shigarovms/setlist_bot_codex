@@ -22,7 +22,12 @@ def test_flat_render_number_padding_status_city_and_total_column(language):
     first = next(line for line in lines if line.startswith("01."))
     last = lines[-1]
     assert first.rindex("01:00") == last.rindex("13:15")
-    assert "Чистое" not in result and "10." in result and "xx. " in result
+    assert (
+        "Чистое" not in result
+        and "10." in result
+        and "xx" not in result
+        and ("    pause" if language == "en" else "    пауза") in result
+    )
 
 
 def test_legacy_blocks_become_pause_rows_without_mutating_source():

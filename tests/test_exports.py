@@ -98,3 +98,24 @@ async def test_repeated_export_reuses_existing_bytes(engine, world):
         first = await exports.files(source.id, "lights", "ru", False, renderer)
         second = await exports.files(source.id, "lights", "ru", False, renderer)
         assert first == second and len(renderer.payloads) == 1
+
+
+async def test_new_layout_regenerates_export_without_overwriting_old_pdf(engine, world):
+    async with PostgresUnitOfWork(engine) as uow:
+        exports, source = await approved_export(uow, world)
+        source.payload = {**source.payload, "layout_version": 4}
+        await uow.store.flush()
+        original = ExportFile(
+            export_id=source.id,
+            audience="musicians",
+            language="ru",
+            transliterate=False,
+            filename="old.pdf",
+            content=b"%PDF-old",
+        )
+        uow.store.add(original)
+        renderer = Renderer()
+        files = await exports.files(source.id, "musicians", "ru", False, renderer)
+        assert files[0][1] != original.content
+        assert renderer.payloads[0]["layout_version"] == 5
+        assert source.payload["layout_version"] == 4 and original.content == b"%PDF-old"

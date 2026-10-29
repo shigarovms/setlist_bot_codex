@@ -12,6 +12,7 @@ from setlist_bot.domain.entities import (
     AdminAudit,
     Concert,
     Group,
+    Membership,
     Outbox,
     SupportMessage,
     User,
@@ -89,7 +90,7 @@ class Administration:
             else:
                 await service.restore_group(group.id, epoch)
             await queue_card_refreshes(self.store, group.id, concert.id if concert else None)
-        elif action in ("group_reminders", "group_owner"):
+        elif action in ("group_reminders", "group_owner", "group_administrator"):
             group = await self.store.get(Group, identifier, lock=True)
             require(group.deleted_at is None, "in_trash")
             require(group.owner_id is not None, "not_found")
@@ -100,7 +101,31 @@ class Administration:
                 require(values.get("enabled") in ("yes", "no"), "input")
                 await service_groups.set_reminders(group.id, values["enabled"] == "yes")
                 audit.details = {"enabled": group.reminders_enabled}
+            elif action == "group_administrator":
+                from setlist_bot.application.user_lookup import checked_target
+
+                require(values.get("confirmed") == "yes", "confirmation")
+                require(values.get("operation") in ("grant", "revoke"), "input")
+                member = await self.store.get(Membership, UUID(values["member_id"]), lock=True)
+                require(member.group_id == group.id and member.status == "active", "forbidden")
+                require(
+                    values.get("expected_owner") == str(group.owner_id)
+                    and values.get("expected_role") == member.role,
+                    "conflict",
+                )
+                if values.get("reference"):
+                    await checked_target(self.store, member.user_id, values["reference"])
+                await service_groups.administrator(
+                    group.id, member.id, values["operation"] == "grant"
+                )
+                audit.details = {"user_id": str(member.user_id), "operation": values["operation"]}
             else:
+                if values.get("reference"):
+                    from setlist_bot.application.user_lookup import checked_target
+
+                    member = await self.store.get(Membership, UUID(values["member_id"]))
+                    require(member.group_id == group.id and member.status == "active", "forbidden")
+                    await checked_target(self.store, member.user_id, values["reference"])
                 previous = group.owner_id
                 await service_groups.transfer_ownership(
                     group.id,

@@ -1,5 +1,8 @@
 from typing import Any
 
+from setlist_bot.transport.music_texts import TEXTS as MUSIC_TEXTS
+from setlist_bot.transport.workflow_texts import TEXTS as WORKFLOW_TEXTS
+
 MESSAGES = {
     "ru": {
         "support_help": "Справка по командам и работе бота: /help.",
@@ -98,10 +101,11 @@ MESSAGES = {
         "draft_edit": "Изменить",
         "welcome": "Бот для репертуара и сет-листов. /help — команды.\nАдминистратор создаёт коллектив командой /group Название в общем чате. Участники: /register Ваша роль.",
         "help": (
-            "Начало работы\nПоддержка: /support.\nАдминистратор Telegram-чата создаёт коллектив: /group Название. Он становится владельцем и назначает администраторов через /members.\nВступление: /register Имя в коллективе. После подтверждения заявки доступны сет-листы; участникам команда меняет имя.\nВ личном чате: /groups — выбрать коллектив. Можно участвовать в нескольких коллективах.\nЯзык интерфейса: /language ru; язык коллектива: /group_language ru.\n\nОсновная команда — /concerts. Предстоящие и прошедшие выступления; ✅ означает, что сет-лист утверждён. Выберите выступление, чтобы открыть список, предложить вариант или перейти к настройкам. Кнопка «Новое выступление» создаёт выступление.\nНапоминания накануне: /reminders.\n\n"
+            "Начало работы\nПоддержка: /support.\nСоздание коллектива: /group Название. Начать может любой участник; владелец Telegram-чата подтверждает создание, становится владельцем коллектива, а инициатор — администратором. Управление правами — /members.\nВступление: /register Имя в коллективе. После подтверждения заявки доступны сет-листы; участникам команда меняет имя.\nВ личном чате: /groups — выбрать коллектив. Можно участвовать в нескольких коллективах.\nЯзык интерфейса: /language ru; язык коллектива: /group_language ru.\n\nОсновная команда — /concerts. Предстоящие и прошедшие выступления; ✅ означает, что сет-лист утверждён. Выберите выступление, чтобы открыть список, предложить вариант или перейти к настройкам. Кнопка «Новое выступление» создаёт выступление.\nНапоминания накануне: /reminders.\n\n"
             "Добавить новые песни: /add_new_songs Название  03:38  свет  110  комментарий.\n"
             "Последние три поля необязательны. Между полями — два и более пробела; - — пустое поле. Можно вставить таблицу текстом или как Article ответом на запрос команды.\n"
             "Каталог: /catalog [поиск]; архив песен: /archived.\n"
+            "Загрузка песен из интернета — кнопка «🌐 Найти песни в интернете» в /catalog (для администратора).\n"
             "Изменить песню: /edit Название  Новое название  03:38  110  свет  комментарий.\n"
             "Скопировать: /copy Название  Новое название  05:00.\n"
             "Алиас: /alias Название  Альтернативное название.\n"
@@ -484,10 +488,11 @@ MESSAGES = {
         "draft_edit": "Edit",
         "welcome": "Repertoire and setlist bot. /help — commands.\nA Telegram chat administrator creates the group with /group Name in the group chat. Members: /register Your role.",
         "help": (
-            "Getting started\nSupport: /support.\nA Telegram chat administrator creates a group: /group Name, becomes its owner and manages administrators through /members.\nJoin: /register Group display name. Existing members use it to change their name.\nPrivate chat: /groups — choose a group; you can belong to several.\nLanguage: /language en; group language: /group_language en.\n\nYour main tool is /concerts: upcoming and past performances; ✅ means the setlist is approved. Select an event to open its setlist, propose a variant or change settings. New concert creates an event.\nDay-before reminders: /reminders.\n\n"
+            "Getting started\nSupport: /support.\nAny member can start registration with /group Name. The Telegram chat owner confirms and owns the group; the initiator becomes an administrator. Manage roles with /members.\nJoin: /register Group display name. Existing members use it to change their name.\nPrivate chat: /groups — choose a group; you can belong to several.\nLanguage: /language en; group language: /group_language en.\n\nYour main tool is /concerts: upcoming and past performances; ✅ means the setlist is approved. Select an event to open its setlist, propose a variant or change settings. New concert creates an event.\nDay-before reminders: /reminders.\n\n"
             "Add new songs: /add_new_songs Title  03:38  lights  110  comment.\n"
             "The last three fields are optional. Separate fields with two or more spaces; - means empty. Paste a text table or reply to the command prompt with an Article table.\n"
             "Catalog: /catalog [search]; archived songs: /archived.\n"
+            "Online import: use ‘🌐 Find songs online’ in /catalog (group administrators).\n"
             "Edit: /edit Title  New title  03:38  110  lights  comment.\n"
             "Copy: /copy Title  New title  05:00.\n"
             "Alias: /alias Title  Alternative title.\n"
@@ -774,6 +779,18 @@ MESSAGES = {
         "proposal_applied": "proposal applied",
     },
 }
+
+
+MESSAGES["ru"]["help"] += (
+    "\n\nПараметры сет-листа в Опциях действуют для всего коллектива: моноширинный вывод или Article и предложения только от администраторов. Перенос в новый чат: /groups в личке → выберите коллектив → Перенести в другой чат (владелец). Для проверки переноса следуйте одноразовой команде бота; /chat_transfer не нужно вводить без кода.\nДля улучшения интерфейса собираем обезличенную статистику действий без содержания переписки; подробные события храним 90 дней."
+)
+MESSAGES["en"]["help"] += (
+    "\n\nSetlist settings in Options apply to the whole group: monospaced or Article display and administrator-only suggestions. To move to a new chat: /groups in private → select group → Move to another chat (owner only). Follow the generated single-use /chat_transfer command.\nWe collect pseudonymous usage statistics without message content; detailed events are retained for 90 days."
+)
+
+for _catalog in (MUSIC_TEXTS, WORKFLOW_TEXTS):
+    for _language, _texts in _catalog.items():
+        MESSAGES[_language].update(_texts)
 
 
 def tr(language: str, key: str, **values: Any) -> str:

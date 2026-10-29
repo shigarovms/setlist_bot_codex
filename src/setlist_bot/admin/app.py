@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from uuid import UUID
 
 from aiohttp import web
@@ -440,7 +440,7 @@ async def listing(request: web.Request) -> web.Response:
             output.append(
                 [
                     v.link("/users/" + identifier, row["display_name"] or "Без имени"),
-                    v.h(row["telegram_id"]),
+                    v.person(row["telegram_id"], username=row["username"]),
                     v.h(row["language"]),
                     v.h(row["groups"]),
                     v.stamp(row["last_seen_at"]) if row["last_seen_at"] else "Нет данных",
@@ -450,7 +450,7 @@ async def listing(request: web.Request) -> web.Response:
             output.append(
                 [
                     v.link("/groups/" + identifier, row["name"]),
-                    v.h(row["owner_name"]),
+                    v.person(row["owner_telegram_id"], row["owner_name"], row["owner_username"]),
                     v.h(row["members"]),
                     v.h(row["concerts"]),
                     v.badge(
@@ -488,7 +488,9 @@ async def listing(request: web.Request) -> web.Response:
             output.append(
                 [
                     v.stamp(row["created_at"]),
-                    v.h(row["chat_id"]),
+                    v.person(
+                        row["chat_id"], row["recipient_name"] or "", row["recipient_username"] or ""
+                    ),
                     v.badge(status, severity),
                     v.h(row["attempts"]) + "<small>" + v.h(row["last_error"]) + "</small>",
                     v.h(row["preview"]),
@@ -500,7 +502,7 @@ async def listing(request: web.Request) -> web.Response:
             output.append(
                 [
                     v.link("/support/" + identifier, row["display_name"] or row["telegram_id"]),
-                    v.h(row["telegram_id"]),
+                    v.person(row["telegram_id"], username=row["username"]),
                     v.stamp(row["created_at"]),
                     v.badge(
                         "Открыто" if row["status"] == "open" else "Закрыто",
@@ -513,11 +515,13 @@ async def listing(request: web.Request) -> web.Response:
             output.append(
                 [
                     v.stamp(row["created_at"]),
-                    v.h(row["actor"]),
+                    v.actor_link(
+                        row["actor"], row["actor_name"] or "", row["actor_username"] or ""
+                    ),
                     v.h(row["source"]),
                     v.h(row["action"]),
                     v.h(row["target"]),
-                    v.h(json.dumps(row["details"], ensure_ascii=False)),
+                    v.audit_details(row["details"], row["user_refs"]),
                 ]
             )
     headers = {
@@ -563,7 +567,7 @@ async def user_detail(request: web.Request) -> web.Response:
     rows = await queries.memberships(user=identifier, page=page_number)
     content = (
         '<section class="panel"><dl class="meta"><dt>Telegram ID</dt><dd>'
-        + v.h(user["telegram_id"])
+        + v.person(user["telegram_id"], user["display_name"], user["username"])
         + "</dd><dt>Язык</dt><dd>"
         + v.h(user["language"])
         + '</dd></dl><p class="hint">Личная переписка и содержимое черновиков недоступны в этом разделе.</p></section>'
@@ -600,7 +604,7 @@ async def group_detail(request: web.Request) -> web.Response:
     members = await queries.memberships(group=identifier, query=query, page=page_number)
     body = (
         '<section class="panel"><dl class="meta"><dt>Владелец</dt><dd>'
-        + v.h(group["owner_name"])
+        + v.person(group["owner_telegram_id"], group["owner_name"], group["owner_username"])
         + "</dd><dt>Telegram-чат</dt><dd>"
         + v.h(group["chat_id"])
         + "</dd><dt>Напоминания</dt><dd>"
@@ -634,19 +638,29 @@ async def group_detail(request: web.Request) -> web.Response:
         + "</div></section><h2>Участники</h2>"
         + v.search(query, "", [])
     )
+    if not group["deleted_at"] and not request.app[STATE].settings.read_only:
+        body += f'<section class="panel"><h2>Управление правами по @нику или Telegram ID</h2><form method="get" action="/groups/{identifier}/permissions"><label>Пользователь<input name="user" maxlength="64" placeholder="@shigarovms или Telegram ID" required></label><button type="submit">Найти и проверить</button></form><p class="hint">Назначение доступно подтверждённым участникам коллектива. Ник появится после следующего сообщения или нажатия кнопки в боте. Перед действием проверьте человека и его ID.</p></section>'
     body += v.table(
         ["Участник", "Имя в коллективе", "Права", "Статус", "Управление"],
         [
             [
-                v.link("/users/" + str(row["user_id"]), row["display_name"] or row["telegram_id"]),
+                v.person(row["telegram_id"], row["display_name"], row["username"])
+                + "<small>"
+                + v.link("/users/" + str(row["user_id"]), "Данные пользователя")
+                + "</small>",
                 v.h(row["nickname"]),
                 v.h("владелец" if row["user_id"] == group["owner_id"] else row["role"]),
                 v.h(row["status"]),
-                v.link(f"/groups/{identifier}/owner?member={row['id']}", "Передать владение")
-                if row["status"] == "active"
-                and row["user_id"] != group["owner_id"]
-                and not group["deleted_at"]
-                else "—",
+                (
+                    v.link(
+                        f"/groups/{identifier}/permissions?user={row['telegram_id']}",
+                        "Управление правами",
+                    )
+                    if row["status"] == "active"
+                    and row["user_id"] != group["owner_id"]
+                    and not group["deleted_at"]
+                    else "—"
+                ),
             ]
             for row in members[:PAGE_SIZE]
         ],
@@ -657,12 +671,86 @@ async def group_detail(request: web.Request) -> web.Response:
     return render(request, group["name"], body, "groups")
 
 
+async def permission_form(request: web.Request) -> web.Response:
+    from setlist_bot.application.user_lookup import known_user
+
+    state = request.app[STATE]
+    identifier = UUID(request.match_info["identifier"])
+    group = await state.queries.group(identifier)
+    if not group or group["deleted_at"]:
+        raise web.HTTPNotFound()
+    reference = request.query.get("user", "").strip()
+    async with PostgresUnitOfWork(state.engine) as uow:
+        try:
+            user = await known_user(uow.store, reference)
+        except AppError as exc:
+            return render(
+                request,
+                "Поиск участника",
+                '<p class="notice">'
+                + v.h(tr("ru", exc.code))
+                + "</p>"
+                + v.link(f"/groups/{identifier}", "Вернуться к коллективу"),
+                "groups",
+            )
+    members = await state.queries.memberships(group=identifier, user=user.id)
+    body = (
+        '<section class="panel"><h2>'
+        + v.person(user.telegram_id, user.display_name, user.username)
+        + "</h2><p>Telegram ID: "
+        + v.person(user.telegram_id)
+        + "</p><p>Коллектив: "
+        + v.h(group["name"])
+        + "</p>"
+    )
+    if user.username:
+        body += (
+            '<p class="hint">Ник получен от Telegram: '
+            + v.stamp(user.username_seen_at)
+            + ". Ники могут меняться. Действие будет закреплено за указанным ID, а не ником.</p>"
+        )
+    if not members or members[0]["status"] != "active":
+        body += '<p class="notice">Этот пользователь ещё не подтверждённый участник коллектива. Сначала он должен подать /register в чате, а администратор — подтвердить заявку.</p>'
+    elif user.id == group["owner_id"]:
+        body += "<p>Это текущий владелец. Для смены владельца выберите другого участника.</p>"
+    else:
+        member = members[0]
+        operation = "revoke" if member["role"] == "admin" else "grant"
+        fields = (
+            f'<input type="hidden" name="member_id" value="{member["id"]}">'
+            f'<input type="hidden" name="expected_owner" value="{v.h(group["owner_id"])}">'
+            f'<input type="hidden" name="expected_role" value="{v.h(member["role"])}">'
+            f'<input type="hidden" name="operation" value="{operation}">'
+            f'<input type="hidden" name="reference" value="{v.h(reference)}">'
+            '<label><input type="checkbox" name="confirmed" value="yes" required>Подтверждаю выбранного человека и изменение его прав в этом коллективе</label>'
+        )
+        body += action_form(
+            request,
+            "group_administrator",
+            identifier,
+            fields,
+            "Снять права администратора" if operation == "revoke" else "Назначить администратором",
+            operation == "revoke",
+        )
+        body += (
+            "<p>"
+            + v.link(
+                f"/groups/{identifier}/owner?member={member['id']}&reference="
+                + quote(reference, safe=""),
+                "Передать владение коллективом →",
+            )
+            + "</p>"
+        )
+    body += "</section>" + v.link(f"/groups/{identifier}", "Назад к коллективу")
+    return render(request, "Права участника", body, "groups")
+
+
 async def owner_form(request: web.Request) -> web.Response:
     queries = request.app[STATE].queries
     identifier = UUID(request.match_info["identifier"])
     group = await queries.group(identifier)
     member = await queries.one(
-        "SELECT m.id,m.musical_role,u.display_name,u.telegram_id FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.id=:id AND m.group_id=:group AND m.status='active'",
+        "SELECT m.id,m.musical_role,u.display_name,u.telegram_id,u.username FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.id=:id AND m.group_id=:group AND m.status='active'",
         id=UUID(request.query["member"]),
         group=identifier,
     )
@@ -676,15 +764,18 @@ async def owner_form(request: web.Request) -> web.Response:
         + v.h(group["chat_id"])
         + "</p>"
         + "<p>Прежний владелец: "
-        + v.h(group["owner_name"])
+        + v.person(group["owner_telegram_id"], group["owner_name"], group["owner_username"])
         + "</p>"
         + "<p>Новый владелец (Telegram ID "
-        + v.h(member["telegram_id"])
+        + v.person(member["telegram_id"], username=member["username"])
         + "): <strong>"
         + v.h(member["musical_role"] or member["display_name"])
         + '</strong></p><p class="hint">Применяйте только после проверки обращения. Новый владелец сможет управлять администраторами. Прежний остаётся администратором.</p>'
     )
     fields = f'<input type="hidden" name="member_id" value="{v.h(member["id"])}"><input type="hidden" name="expected_owner" value="{v.h(group["owner_id"])}"><label>Введите точное название коллектива: {v.h(group["name"])}<input name="confirmation" maxlength="200" required autocomplete="off"></label>'
+    fields += (
+        f'<input type="hidden" name="reference" value="{v.h(request.query.get("reference", ""))}">'
+    )
     body += (
         action_form(request, "group_owner", identifier, fields, "Подтвердить передачу", True)
         + "</section>"
@@ -794,6 +885,8 @@ async def support_detail(request: web.Request) -> web.Response:
     body = (
         '<div class="grid"><section class="panel"><h2>Обращение</h2><p class="hint">'
         + v.stamp(case["created_at"])
+        + " · "
+        + v.person(case["telegram_id"], case["display_name"] or "", case["username"] or "")
         + '</p><div class="pre">'
         + v.h(case["text"])
         + '</div></section><section class="panel"><h2>Ответить через бота</h2><p class="hint">Ответ будет отправлен в личный чат пользователя. Это не массовая рассылка.</p>'
@@ -824,7 +917,7 @@ async def support_detail(request: web.Request) -> web.Response:
             + " <small>"
             + v.stamp(row["created_at"])
             + " · "
-            + v.h(row["actor"] or "Автор до обновления неизвестен")
+            + v.actor_link(row["actor"], row["actor_name"] or "", row["actor_username"] or "")
             + " · "
             + v.h(row["source"])
             + '</small><div class="pre">'
@@ -837,6 +930,55 @@ async def support_detail(request: web.Request) -> web.Response:
         else ""
     ) + "</section>"
     return render(request, "Обращение в поддержку", body, "support")
+
+
+async def ux_analytics(request: web.Request) -> web.Response:
+    state = request.app[STATE]
+    try:
+        days = int(request.query.get("days", "30"))
+    except ValueError:
+        days = 30
+    data = await state.queries.ux(days)
+    rows = data["summary"]
+    f = data["funnels"]
+    body = (
+        '<div class="inline-actions">'
+        + " · ".join(v.link("/analytics?days=" + str(n), str(n) + " дней") for n in (7, 30, 90))
+        + "</div>"
+    )
+    body += "<p>Обезличенные действия без текстов сообщений и Telegram ID. Подробности — 90 дней, дневные итоги сохраняются. Статистика начинается с обновления; буфер может потерять последние события при аварии.</p>"
+    body += (
+        "<p>Активных пользователей: "
+        + v.h(data["people"]["people"])
+        + ". Ошибок: "
+        + v.h(data["people"]["errors"])
+        + ".</p>"
+    )
+    body += "<h2>Переходы по сценариям</h2>"
+    body += v.table(
+        ["Сценарий", "Этап", "Достигли"],
+        [
+            ["Наполнение каталога", "Создан коллектив", v.h(f["registered"])],
+            ["Наполнение каталога", "После создания добавлены песни", v.h(f["imported"])],
+            ["Подготовка выступления", "Создано выступление", v.h(f["performances"])],
+            ["Подготовка выступления", "Сохранён личный черновик", v.h(f["drafts"])],
+            ["Подготовка выступления", "Вариант предложен группе", v.h(f["published"])],
+            ["Подготовка выступления", "Сет-лист утверждён", v.h(f["approved"])],
+            ["Подготовка выступления", "После утверждения запрошен PDF", v.h(f["exported"])],
+        ],
+    )
+    body += (
+        "<p>Медианное время от создания выступления до утверждения: "
+        + v.h(
+            round(f["approval_minutes"], 1) if f["approval_minutes"] is not None else "нет данных"
+        )
+        + " мин. Этапы считаются по одному коллективу/выступлению в выбранном периоде; это не независимые проценты конверсии. Запрос PDF не доказывает печать или доставку файла.</p>"
+    )
+    body += "<h2>Действия, отмены, ошибки и возвраты</h2>" + v.table(
+        ["Действие", "Где", "Результат", "Количество", "Средняя обработка, мс"],
+        [[v.h(r[k]) for k in ("action", "area", "outcome", "events", "mean_ms")] for r in rows],
+    )
+    return render(request, "Удобство интерфейса", body, "analytics")
 
 
 async def runtime(request: web.Request) -> web.Response:
@@ -983,6 +1125,7 @@ async def action(request: web.Request) -> web.Response:
         "queue_discard",
         "group_reminders",
         "group_owner",
+        "group_administrator",
         "logout",
         "revoke_sessions",
         "restore_group",
@@ -1084,7 +1227,9 @@ def create_app(settings: AdminSettings, engine: AsyncEngine | None = None) -> we
     app.router.add_get("/", overview)
     app.router.add_get("/api/overview", api_overview)
     app.router.add_get("/runtime", runtime)
+    app.router.add_get("/analytics", ux_analytics)
     app.router.add_get("/groups/{identifier}/owner", owner_form)
+    app.router.add_get("/groups/{identifier}/permissions", permission_form)
     app.router.add_get("/groups/{identifier}/catalog", catalog)
     app.router.add_get("/users/{identifier}", user_detail)
     app.router.add_get("/groups/{identifier}", group_detail)

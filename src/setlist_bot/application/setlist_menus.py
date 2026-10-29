@@ -164,6 +164,14 @@ class SetlistMenus:
         require(
             bool(
                 await self.store.find(
+                    ChatBinding, group_id=UUID(data["group_id"]), chat_id=data["source_chat_id"]
+                )
+            ),
+            "menu_expired",
+        )
+        require(
+            bool(
+                await self.store.find(
                     Membership,
                     group_id=UUID(data["group_id"]),
                     user_id=UUID(data["requester_id"]),

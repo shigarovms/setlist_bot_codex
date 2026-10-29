@@ -31,6 +31,9 @@ def record_activity(
 ) -> None:
     # RU: Текст сообщений и секреты сюда не передаются; источник хранится отдельно.
     # EN: Store structural metadata only, never private message bodies or credentials.
+    from setlist_bot.application.ux import milestone
+
+    milestone(action, target, details)
     if _web_action.get():
         return
     store.add(

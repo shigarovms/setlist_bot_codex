@@ -38,6 +38,8 @@ GROUP_INPUTS = frozenset(
         "group_pause",
         "archive",
         "unarchive",
+        "music_query",
+        "music_duration",
     }
 )
 VERSION_INPUTS = frozenset(
@@ -82,6 +84,7 @@ class CommandInputs:
         *,
         version: int | None = None,
         monospace_body: str | None = None,
+        prefix: str = "",
     ) -> Confirmation:
         require(command in COMMANDS, "input")
         await self.clear()
@@ -107,6 +110,7 @@ class CommandInputs:
             row,
             {
                 "kind": KIND,
+                "prefix": prefix,
                 "command": command,
                 "prompt": prompt,
                 "monospace_body": monospace_body,

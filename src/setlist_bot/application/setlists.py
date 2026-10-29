@@ -172,6 +172,7 @@ class Setlists:
         *,
         private: bool = False,
     ) -> None:
+        await self.groups.can_suggest(group_id)
         setlist = await self.load(group_id, concert_id)
         draft = await self._draft(setlist) if private else None
         require((draft.version if draft else setlist.version) == expected, "conflict")
@@ -210,6 +211,9 @@ class Setlists:
         if draft:
             draft.content = flat_content(content)
             draft.version += 1
+            from setlist_bot.application.ux import milestone
+
+            milestone("draft_saved", concert_id, {"group_id": str(group_id)})
         else:
             await self._persist(setlist, content)
             await self._record(setlist, operation, content)
@@ -278,6 +282,7 @@ class Setlists:
         ordered: list[UUID | int] | None = None,
     ) -> None:
         """Resolve every input before writing a single atomic setlist revision."""
+        await self.groups.can_suggest(group_id)
         setlist = await self.load(group_id, concert_id)
         draft = await self._draft(setlist) if private else None
         require((draft.version if draft else setlist.version) == expected, "conflict")
@@ -330,6 +335,9 @@ class Setlists:
         if draft:
             draft.content = flat_content(content)
             draft.version += 1
+            from setlist_bot.application.ux import milestone
+
+            milestone("draft_saved", concert_id, {"group_id": str(group_id)})
         else:
             await self._persist(setlist, content)
             await self._record(setlist, "suggestion" if replace else "add_list", content)
@@ -393,7 +401,8 @@ class Setlists:
         for block in revision.snapshot["blocks"]:
             for label, item in zip(entry_labels(block["items"]), block["items"], strict=True):
                 seconds = item["duration_seconds"]
-                lines.append(f"{label}. {item['title']}  {seconds // 60:02d}:{seconds % 60:02d}")
+                prefix = label + ("  " if is_pause(item) else ". ")
+                lines.append(f"{prefix}{item['title']}  {seconds // 60:02d}:{seconds % 60:02d}")
         await support.notify(
             f"Утверждён сет-лист · Версия {revision.number}\n"
             f"{group.name} · {concert.date:%d.%m.%Y} {concert.title}\n"
@@ -419,6 +428,7 @@ class Setlists:
     async def restore(
         self, group_id: UUID, concert_id: UUID, revision_id: UUID, expected: int
     ) -> None:
+        await self.groups.can_suggest(group_id)
         setlist = await self.load(group_id, concert_id)
         require(not setlist.approved, "approved")
         require(setlist.version == expected, "conflict")
@@ -428,6 +438,7 @@ class Setlists:
         await self._record(setlist, "restored", revision.snapshot)
 
     async def publish(self, group_id: UUID, concert_id: UUID) -> Submission:
+        await self.groups.can_suggest(group_id)
         setlist = await self.load(group_id, concert_id)
         draft = await self._draft(setlist)
         submission = Submission(
@@ -437,11 +448,15 @@ class Setlists:
             snapshot=await self._snapshot(group_id, draft.content),
         )
         self.store.add(submission)
+        from setlist_bot.application.ux import milestone
+
+        milestone("variant_published", concert_id, {"group_id": str(group_id)})
         return submission
 
     async def apply(
         self, group_id: UUID, concert_id: UUID, submission_id: UUID, expected: int
     ) -> None:
+        await self.groups.can_suggest(group_id)
         setlist = await self.load(group_id, concert_id)
         require(not setlist.approved, "approved")
         require(setlist.version == expected, "conflict")

@@ -23,7 +23,7 @@ PRODUCTION = Path("/opt/setlist_bot_codex")
 SANDBOX = Path("/opt/setlist_bot_sandbox")
 ROLE = "setlist_web_admin"
 CONTAINER = "setlist_bot_codex-db-1"
-SCHEMA = "d89c3e17a024"
+SCHEMA = "a82cd901be45"
 READ_TABLES = (
     "users",
     "groups",
@@ -46,6 +46,8 @@ READ_TABLES = (
     "alembic_version",
     "processed_updates",
     "confirmations",
+    "ux_events",
+    "ux_daily",
 )
 AUTH_TABLES = {
     "admin_sessions": "INSERT,DELETE",

@@ -136,7 +136,7 @@ async def test_telegram_reply_invalidates_stale_web_reply_and_shows_actor(client
     assert (await client.post(path, data=stale)).status == 409
     page = await client.get(f"/support/{ticket}")
     body = await page.text()
-    assert "telegram:1" in body and "Ответ из Telegram" in body
+    assert "tg://user?id=1" in body and "Ответ из Telegram" in body
     fresh = extract(body, path)
     fresh["message"] = "Уточнение через веб"
     fresh["close"] = "yes"

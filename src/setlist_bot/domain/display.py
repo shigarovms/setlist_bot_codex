@@ -88,7 +88,7 @@ def entry_labels(items: list[dict[str, Any]]) -> list[str]:
     result = []
     for item in items:
         if is_pause(item):
-            result.append("xx" if count >= 10 else "x")
+            result.append("  " if count >= 10 else " ")
         else:
             number += 1
             result.append(position_label(number, count))

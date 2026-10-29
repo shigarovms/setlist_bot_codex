@@ -15,6 +15,8 @@ class Entity:
 
 @dataclass(kw_only=True)
 class User(Entity):
+    username: str = ""
+    username_seen_at: datetime | None = None
     last_seen_at: datetime | None = None
     telegram_id: int
     language: str = "ru"
@@ -24,6 +26,8 @@ class User(Entity):
 
 @dataclass(kw_only=True)
 class Group(Entity):
+    setlist_style: str = "mono"
+    admins_only_suggestions: bool = False
     owner_id: UUID | None = None
     reminders_enabled: bool = True
     name: str
@@ -239,6 +243,35 @@ class CatalogImport(Entity):
     mapping: dict[str, int] | None = None
     has_header: bool | None = None
     status: str = "pending"
+
+
+@dataclass(kw_only=True)
+class MusicSearch(Entity):
+    """RU: Долгий поиск и личный отбор; EN: Durable, owner-bound discovery session."""
+
+    group_id: UUID
+    owner_id: UUID
+    chat_id: int
+    group_epoch: int
+    query: str
+    expires_at: datetime
+    status: str = "searching"
+    data: dict[str, Any] = field(default_factory=dict)
+    version: int = 1
+    next_attempt_at: datetime = field(default_factory=now)
+    lease_until: datetime | None = None
+    lease_token: str = ""
+    failures: int = 0
+    created_at: datetime = field(default_factory=now)
+
+
+@dataclass(kw_only=True)
+class MusicCache(Entity):
+    """RU/EN: Public source metadata only; never cache a user's exclusions or edits."""
+
+    key: str
+    payload: dict[str, Any]
+    expires_at: datetime
 
 
 @dataclass(kw_only=True)

@@ -1,5 +1,6 @@
 """Small server-rendered UI: all user content is escaped, no external fonts or scripts."""
 
+import json
 import secrets
 from datetime import datetime
 from html import escape
@@ -8,6 +9,7 @@ from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 from setlist_bot.admin.security import AdminSettings, form_proof
+from setlist_bot.domain.telegram_identity import USERNAME
 
 NAV = [
     ("overview", "Обзор", "/"),
@@ -17,6 +19,7 @@ NAV = [
     ("support", "Поддержка", "/support"),
     ("queue", "Очередь отправки", "/queue"),
     ("runtime", "Мониторинг", "/runtime"),
+    ("analytics", "Удобство интерфейса", "/analytics"),
     ("audit", "Журнал действий", "/audit"),
 ]
 
@@ -39,6 +42,46 @@ def bytes_label(value: int) -> str:
 
 def link(path: str, label: Any) -> str:
     return f'<a href="{h(path)}">{h(label)}</a>'
+
+
+def person(telegram_id: Any, display_name: str = "", username: str = "") -> str:
+    """RU: ID — стабильная ссылка. EN: Never build a profile URL from arbitrary text."""
+    try:
+        identifier = int(telegram_id)
+    except (ValueError, TypeError):
+        return h(display_name or telegram_id)
+    if identifier <= 0:
+        return h(display_name or telegram_id)
+    label = display_name or ("@" + username if username else str(identifier))
+    profile = (
+        f'<a href="tg://user?id={identifier}" title="Открыть профиль Telegram">{h(label)} ↗</a>'
+    )
+    if username and USERNAME.fullmatch(username):
+        profile += f' <small><a href="https://t.me/{h(username)}" target="_blank" rel="noopener noreferrer">@{h(username)}</a></small>'
+    return profile
+
+
+def actor_link(actor: str, display_name: str = "", username: str = "") -> str:
+    if actor.startswith("telegram:") and actor[9:].isdigit():
+        return person(actor[9:], display_name, username)
+    return h(actor or "Автор до обновления неизвестен")
+
+
+def audit_details(details: dict[str, Any], users: dict[str, dict[str, Any]]) -> str:
+    fields = []
+    for key, value in details.items():
+        user = (
+            users.get(str(value))
+            if key in {"old_owner", "new_owner", "user_id", "owner_id", "requester_id"}
+            else None
+        )
+        text = (
+            person(user["telegram_id"], user["display_name"], user["username"])
+            if user
+            else h(json.dumps(value, ensure_ascii=False))
+        )
+        fields.append(h(key) + ": " + text)
+    return "<br>".join(fields) or "—"
 
 
 def badge(label: str, state: str = "") -> str:

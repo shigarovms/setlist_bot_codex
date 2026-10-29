@@ -101,8 +101,9 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
 }
 COMMON = (
     "support",
-    "start",
+    "groups",
     "concerts",
+    "start",
     "add_new_songs",
     "help",
     "catalog",
@@ -137,9 +138,9 @@ ADMIN = (
     "trash",
 )
 MENUS: dict[Menu, tuple[str, ...]] = {
-    "default": COMMON[:5],
-    "private": COMMON + ("groups", "publish", "language") + ADMIN,
-    "group": COMMON + ("register",),
+    "default": COMMON[:6],
+    "private": COMMON + ("publish", "language") + ADMIN,
+    "group": COMMON + ("register", "group"),
     "admin": COMMON + ("register", "group", "approve", "reopen") + ADMIN,
 }
 GLOBAL_SCOPES: tuple[tuple[BotCommandScopeUnion, Menu], ...] = (

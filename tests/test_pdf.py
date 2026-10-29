@@ -43,7 +43,7 @@ def text(pdf):
 
 
 @pytest.mark.parametrize("audience", ["musicians", "lights"])
-def test_a4_cyrillic_fonts_draft_status_on_every_page_and_unchanged_payload(audience):
+def test_a4_cyrillic_fonts_clean_header_on_every_page_and_unchanged_payload(audience):
     payload = sample_payload()
     before = deepcopy(payload)
     pdf = reader(PdfDocuments().render(payload, audience, "ru", False))
@@ -51,7 +51,7 @@ def test_a4_cyrillic_fonts_draft_status_on_every_page_and_unchanged_payload(audi
         width, height = float(page.mediabox.width), float(page.mediabox.height)
         assert sorted((width, height)) == pytest.approx(sorted(A4), abs=0.01)
         assert (height > width) == (audience == "musicians")
-        assert "ЧЕРНОВИК" in page.extract_text()
+        assert "ЧЕРНОВИК" not in page.extract_text()
         assert "Страница" in page.extract_text()
         font_dict = page["/Resources"]["/Font"].get_object()
         noto = [
@@ -122,8 +122,21 @@ def test_approved_english_export_and_optional_transliteration_do_not_change_lati
     pdf = reader(PdfDocuments().render(payload, "musicians", "en", True))
     value = " ".join(text(pdf).split())
     assert "Slavik" in value and "VIBY" in value and "Славик" not in value
-    assert "DRAFT" not in value and all("APPROVED" in page.extract_text() for page in pdf.pages)
+    assert "DRAFT" not in value and "APPROVED" not in value
     assert payload == original
+
+
+@pytest.mark.parametrize("audience", ["musicians", "lights"])
+@pytest.mark.parametrize("language", ["ru", "en"])
+def test_pdf_omits_approval_status_and_person_but_keeps_bot_credit(audience, language):
+    payload = sample_payload()
+    payload["approved"] = True
+    payload["bot_username"] = "botToPract696_bot"
+    payload["snapshot"]["approved_by"] = "Илья UniqueApprover"
+    value = text(reader(PdfDocuments().render(payload, audience, language, False)))
+    for forbidden in ("Илья", "UniqueApprover", "Одобрен", "Утвержд", "APPROVED", "Approved by"):
+        assert forbidden not in value
+    assert "@botToPract696_bot" in value and payload["group_name"] in value
 
 
 def test_long_titles_and_large_setlists_add_pages_without_shrinking_or_losing_titles():

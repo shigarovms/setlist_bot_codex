@@ -48,6 +48,7 @@ class Templates:
         require(template.chat_id == self.chat_id, "not_found")
         require(template.owner_id is None or template.owner_id == self.user.id, "not_found")
         require(template.expires_at > now(), "template_expired")
+        await Groups(self.store, self.user).can_suggest(template.group_id)
         group = await Groups(self.store, self.user).access(template.group_id)
         await Setlists(self.store, self.user).load(template.group_id, template.concert_id)
         concert = await self.store.get(Concert, template.concert_id)

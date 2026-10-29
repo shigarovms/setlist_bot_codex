@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from setlist_bot.application.ports import Store
-from setlist_bot.domain.entities import Confirmation, SetlistMessage
+from setlist_bot.domain.entities import Confirmation, MusicSearch, SetlistMessage
 
 
 def message_ids(data: dict[str, Any]) -> set[int]:
@@ -36,4 +36,7 @@ async def collect(store: Store, chat_id: int) -> list[int]:
             row.command = json.dumps({**data, "closed": True})
     for reference in await store.find(SetlistMessage, chat_id=chat_id):
         identifiers.add(reference.message_id)
+    for search in await store.find(MusicSearch, chat_id=chat_id):
+        identifiers.update(message_ids(search.data))
+        search.data = {**search.data, "panel_ids": []}
     return sorted(identifiers)

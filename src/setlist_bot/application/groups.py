@@ -15,12 +15,20 @@ from setlist_bot.domain.entities import (
     User,
     now,
 )
-from setlist_bot.domain.rules import pause_seconds, require
+from setlist_bot.domain.rules import SuggestionRestricted, pause_seconds, require
 
 
 class Groups:
     def __init__(self, store: Store, user: User) -> None:
         self.store, self.user = store, user
+
+    async def can_suggest(self, group_id: UUID) -> None:
+        """RU: Проверка и для команд, и для старых кнопок. EN: Enforce below the UI."""
+        group = await self.access(group_id)
+        if group.admins_only_suggestions:
+            member = (await self.store.find(Membership, group_id=group_id, user_id=self.user.id))[0]
+            if member.role != "admin":
+                raise SuggestionRestricted(group_id)
 
     async def access(self, group_id: UUID, *, admin: bool = False, deleted: bool = False) -> Group:
         memberships = await self.store.find(Membership, group_id=group_id, user_id=self.user.id)

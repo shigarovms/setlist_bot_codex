@@ -193,9 +193,12 @@ async def test_restore_order_records_new_revision(engine, world):
 async def test_processor_idempotency_and_group_admin_check(engine):
     processor = Processor(engine)
     denied = await processor.process(1, 123, -123, "/group Test", private=False)
-    assert "администратор" in denied.text
+    assert "Подтвердить может только владелец" in denied.text
     result = await processor.process(2, 123, -123, "/group Test", private=False, chat_admin=True)
-    assert "Создан" in result.text
+    created = await processor.process(
+        3, 123, -123, result.buttons[0][1], private=False, chat_owner_id=123
+    )
+    assert "Создан" in created.text
     assert (
         await processor.process(2, 123, -123, "/group Test", private=False, chat_admin=True) is None
     )

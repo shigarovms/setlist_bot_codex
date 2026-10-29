@@ -22,6 +22,7 @@ from setlist_bot.domain.entities import (
     Confirmation,
     Group,
     Membership,
+    MusicSearch,
     Outbox,
     Reminder,
     RuntimeStatus,
@@ -34,6 +35,7 @@ from setlist_bot.domain.entities import (
 )
 from setlist_bot.domain.rules import AppError
 from setlist_bot.infrastructure.database import PostgresUnitOfWork, metadata
+from setlist_bot.infrastructure.music_worker import search_worker
 from setlist_bot.infrastructure.runtime import BotInstance, check_schema, identity_details
 from setlist_bot.infrastructure.telemetry import Monitor, PollingStatusHandler
 from setlist_bot.transport.commands import collect_command_targets, synchronize_commands
@@ -134,6 +136,14 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
             event = await uow.store.get(Outbox, pending.id, lock=True)
             if event.sent:
                 return False
+            if event.support_kind == "music":
+                from setlist_bot.infrastructure.workflow_delivery import deliver_music
+
+                return await deliver_music(bot, uow, event)
+            if event.support_kind == "collective":
+                from setlist_bot.infrastructure.workflow_delivery import deliver_collective
+
+                return await deliver_collective(bot, uow, event)
             if event.support_kind == "refresh":
                 try:
                     await deliver_card_refresh(bot, uow, event)
@@ -226,18 +236,30 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
                     return False
             try:
                 event.attempts += 1
-                sent_messages = await send_response(
-                    bot,
-                    event.chat_id,
-                    Response(
-                        event.text,
-                        [(b[0], b[1]) for b in event.buttons],
-                        monospace=event.monospace,
-                        monospace_body=event.text[event.monospace_offset :]
-                        if event.monospace
-                        else None,
-                    ),
+                response = Response(
+                    event.text,
+                    [(b[0], b[1]) for b in event.buttons],
+                    monospace=event.monospace,
+                    monospace_body=event.text[event.monospace_offset :]
+                    if event.monospace
+                    else None,
                 )
+                if group is not None and event.concert_id and event.payload.get("setlist_snapshot"):
+                    # This payload exists only after explicit publication, never for private drafts.
+                    concert = await uow.store.get(Concert, event.concert_id)
+                    actor = await uow.store.get(User, group.owner_id) if group.owner_id else None
+                    if actor:
+                        controller = Controller(uow.store, actor, event.chat_id, private=False)
+                        controller.language = group.language
+                        response = await controller._style_setlist(
+                            response,
+                            event.payload["setlist_snapshot"],
+                            concert,
+                            event.payload["setlist_version"],
+                            private=True,
+                            prefix=event.text[: event.monospace_offset],
+                        )
+                sent_messages = await send_response(bot, event.chat_id, response)
                 event.delivered_at = now()
                 event.last_error = ""
                 event.next_attempt_at = None
@@ -363,6 +385,9 @@ async def cleanup_trash(engine: AsyncEngine, bot: Bot, monitor: Monitor | None =
                     if data.get("kind") not in ("setlist_menu", "submission_panel"):
                         for identifier in known_message_ids(data):
                             await delete_selection_message(bot, expired.chat_id, identifier)
+                for expired_music in await uow.store.expired(MusicSearch, "expires_at", now()):
+                    for identifier in expired_music.data.get("panel_ids", []):
+                        await delete_selection_message(bot, expired_music.chat_id, identifier)
                 await TrashCleanup(uow.store).run()
             if monitor:
                 monitor.set("cleanup", "waiting", next_run=now() + timedelta(seconds=60))
@@ -457,10 +482,18 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
                     return
                 monitor.set("bot", "polling")
                 monitor.set("telegram", "no_errors_recorded")
+                from setlist_bot.infrastructure.ux_analytics import UXBuffer
+
+                analytics = UXBuffer()
                 dispatcher = Dispatcher()
                 dispatcher.include_router(
                     make_router(
-                        Processor(engine, bot_username=me.username or "", monitor=monitor),
+                        Processor(
+                            engine,
+                            bot_username=me.username or "",
+                            monitor=monitor,
+                            analytics=analytics,
+                        ),
                         me.username or "",
                         diagnostics=settings.telegram_diagnostics,
                     )
@@ -470,9 +503,13 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
                     asyncio.create_task(cleanup_trash(engine, bot, monitor)),
                     asyncio.create_task(daily_reminders(engine, monitor)),
                     asyncio.create_task(monitor.persist(engine)),
+                    asyncio.create_task(search_worker(engine, monitor)),
+                    asyncio.create_task(analytics.run(engine, monitor)),
                 ]
                 polling = asyncio.create_task(
-                    dispatcher.start_polling(bot, allowed_updates=["message", "callback_query"])
+                    dispatcher.start_polling(
+                        bot, allowed_updates=["message", "callback_query", "my_chat_member"]
+                    )
                 )
                 watchdog = asyncio.create_task(instance.watch())
                 polling_status = PollingStatusHandler(monitor)
@@ -492,6 +529,8 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
                     for task in [polling, watchdog, *workers]:
                         task.cancel()
                     await asyncio.gather(polling, watchdog, *workers, return_exceptions=True)
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait_for(analytics.flush(engine), timeout=3)
                     monitor.set("bot", "stopped")
                     with contextlib.suppress(Exception):
                         await asyncio.wait_for(monitor.flush(engine), timeout=3)

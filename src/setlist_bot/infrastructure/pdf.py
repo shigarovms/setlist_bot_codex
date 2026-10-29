@@ -124,7 +124,7 @@ class PdfDocuments:
                 + date_label(date.fromisoformat(payload["concert_date"]), language)
                 + f" — v{payload['version']}"
             ),
-            author="Setlist Bot",
+            author="",
         )
         snapshot = flat_content(payload["snapshot"])
         story = (
@@ -136,15 +136,6 @@ class PdfDocuments:
         def decorate(canvas: Canvas, doc: SimpleDocTemplate) -> None:
             width, height = page_size
             canvas.saveState()
-            status = tr(language, "pdf_approved" if payload["approved"] else "pdf_draft")
-            if payload["approved"] and snapshot.get("approved_by"):
-                status = tr(
-                    language,
-                    "approved_by",
-                    name=snapshot["approved_by"],
-                    version=payload["version"],
-                )
-            status_width = pdfmetrics.stringWidth(status, BOLD, 10)
             info = " · ".join(
                 part
                 for part in (
@@ -156,11 +147,7 @@ class PdfDocuments:
                 if part
             )
             canvas.setFont(FONT, 10)
-            canvas.drawString(
-                28, height - 26, self._shorten(info, width - 76 - status_width, FONT, 10)
-            )
-            canvas.setFont(BOLD, 10)
-            canvas.drawRightString(width - 28, height - 26, status)
+            canvas.drawString(28, height - 26, self._shorten(info, width - 56, FONT, 10))
             username = str(payload.get("bot_username", "")).lstrip("@")
             credit = tr(
                 language, "pdf_created_with", bot="@" + username if username else "Telegram bot"
@@ -201,7 +188,11 @@ class PdfDocuments:
             story.append(
                 KeepTogether(
                     [
-                        paragraph(f"{number}. {title}", style()["size"], bold=True),
+                        paragraph(
+                            title if is_pause(item) else f"{number}. {title}",
+                            style()["size"],
+                            bold=True,
+                        ),
                         Spacer(1, 22),
                     ]
                 )

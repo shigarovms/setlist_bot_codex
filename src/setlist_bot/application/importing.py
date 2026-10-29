@@ -104,6 +104,9 @@ class Importer:
         catalog = Catalog(self.store, self.user, refresh_cards=False)
         for data in plan.new:
             await catalog.save(group_id, data)
+        from setlist_bot.application.ux import milestone
+
+        milestone("catalog_imported", group_id, {})
         job.status = "done"
         await queue_card_refreshes(self.store, group_id)
         return len(plan.new)

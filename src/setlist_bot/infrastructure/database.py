@@ -42,6 +42,34 @@ metadata = MetaData(
 )
 mapper_registry = registry(metadata=metadata)
 
+Table(
+    "ux_events",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, index=True),
+    Column("action", String(80), nullable=False),
+    Column("outcome", String(80), nullable=False),
+    Column("area", String(20), nullable=False),
+    Column("actor_key", String(64), nullable=False),
+    Column("group_key", String(64), nullable=False),
+    Column("resource_key", String(64), nullable=False),
+    Column("elapsed_ms", Integer, nullable=False),
+    Column("revision", String(80), nullable=False),
+    Index("ix_ux_events_resource", "resource_key", "created_at"),
+)
+Table(
+    "ux_daily",
+    metadata,
+    Column("id", Uuid, primary_key=True),
+    Column("day", Date, nullable=False, index=True),
+    Column("action", String(80), nullable=False),
+    Column("outcome", String(80), nullable=False),
+    Column("area", String(20), nullable=False),
+    Column("events", BigInteger, nullable=False),
+    Column("elapsed_ms", BigInteger, nullable=False),
+    UniqueConstraint("day", "action", "outcome", "area"),
+)
+
 
 def col(name: str, kind: Any, *args: Any, **kwargs: Any) -> Column[Any]:
     return Column(name, kind, *args, nullable=kwargs.pop("nullable", False), **kwargs)
@@ -66,6 +94,8 @@ def table(entity: type[e.Entity], name: str, *columns: Any) -> None:
 table(
     e.User,
     "users",
+    col("username", String(32), server_default="", index=True),
+    col("username_seen_at", DateTime(timezone=True), nullable=True),
     col("last_seen_at", DateTime(timezone=True), nullable=True, index=True),
     col("telegram_id", BigInteger, unique=True),
     col("language", String(2)),
@@ -75,6 +105,8 @@ table(
 table(
     e.Group,
     "groups",
+    col("setlist_style", String(10), server_default="mono"),
+    col("admins_only_suggestions", Boolean, server_default="false"),
     col("owner_id", Uuid, ForeignKey("users.id"), nullable=True),
     col("reminders_enabled", Boolean, server_default="true"),
     col("name", String(200)),
@@ -84,6 +116,7 @@ table(
     col("deleted_chat_id", BigInteger, nullable=True),
     col("lifecycle_version", Integer),
     CheckConstraint("default_pause_seconds BETWEEN 0 AND 86400", name="default_pause"),
+    CheckConstraint("setlist_style IN ('mono', 'article')", name="setlist_style"),
 )
 table(
     e.Membership,
@@ -357,6 +390,36 @@ table(
     "processed_updates",
     col("update_id", BigInteger, unique=True),
     col("created_at", DateTime(timezone=True), nullable=True, index=True),
+)
+table(
+    e.MusicSearch,
+    "music_searches",
+    col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), index=True),
+    col("owner_id", Uuid, ForeignKey("users.id")),
+    col("chat_id", BigInteger),
+    col("group_epoch", Integer),
+    col("query", String(300)),
+    col("expires_at", DateTime(timezone=True), index=True),
+    col("status", String(20)),
+    col("data", JSONB),
+    col("version", Integer),
+    col("next_attempt_at", DateTime(timezone=True)),
+    col("lease_until", DateTime(timezone=True), nullable=True),
+    col("lease_token", String(40)),
+    col("failures", Integer),
+    col("created_at", DateTime(timezone=True)),
+)
+Index(
+    "ix_music_searches_due",
+    metadata.tables["music_searches"].c.next_attempt_at,
+    postgresql_where=metadata.tables["music_searches"].c.status == "searching",
+)
+table(
+    e.MusicCache,
+    "music_cache",
+    col("key", String(120), unique=True),
+    col("payload", JSONB),
+    col("expires_at", DateTime(timezone=True), index=True),
 )
 table(
     e.Confirmation,
