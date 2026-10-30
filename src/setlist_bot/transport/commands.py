@@ -46,6 +46,10 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "catalog": ("Репертуар и поиск песен", "Repertoire and song search"),
     "archived": ("Архивные песни", "Archived songs"),
     "concerts": ("Выбрать выступление", "Select a concert"),
+    "all_my_concerts": (
+        "Все мои выступления во всех коллективах",
+        "My performances across all groups",
+    ),
     "setlist": ("Сет-лист выбранного выступления", "Setlist for the selected concert"),
     "shared": ("Показать общий сет-лист", "Show the shared setlist"),
     "export": ("PDF утверждённого сет-листа", "Approved setlist PDFs"),
@@ -139,7 +143,7 @@ ADMIN = (
 )
 MENUS: dict[Menu, tuple[str, ...]] = {
     "default": COMMON[:6],
-    "private": COMMON + ("publish", "language") + ADMIN,
+    "private": COMMON[:6] + ("all_my_concerts",) + COMMON[6:] + ("publish", "language") + ADMIN,
     "group": COMMON + ("register", "group"),
     "admin": COMMON + ("register", "group", "approve", "reopen") + ADMIN,
 }

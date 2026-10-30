@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from types import TracebackType
 from typing import Any
 from uuid import UUID
@@ -21,6 +21,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    case,
     select,
     text,
 )
@@ -556,6 +557,41 @@ class PostgresStore:
         for key, value in filters.items():
             query = query.where(getattr(kind, key) == value)
         return list((await self.session.scalars(query)).all())
+
+    async def concerts_for_user(
+        self, user_id: UUID, current: date, *, offset: int, limit: int
+    ) -> list[tuple[e.Concert, e.Group]]:
+        """RU: Одна страница одним запросом. EN: Never scan another user's groups.
+
+        Предстоящие идут по возрастанию даты, затем прошедшие от новых к старым.
+        Filter membership and trash in SQL before pagination, without tenant-row locks.
+        """
+        concerts, groups, members = (
+            metadata.tables[name] for name in ("concerts", "groups", "memberships")
+        )
+        upcoming = concerts.c.date >= current
+        query = (
+            select(e.Concert, e.Group)
+            .select_from(concerts)
+            .join(groups, concerts.c.group_id == groups.c.id)
+            .join(members, members.c.group_id == groups.c.id)
+            .where(
+                members.c.user_id == user_id,
+                members.c.status == "active",
+                groups.c.deleted_at.is_(None),
+                concerts.c.deleted_at.is_(None),
+            )
+            .order_by(
+                case((upcoming, 0), else_=1),
+                case((upcoming, concerts.c.date)).asc(),
+                case((~upcoming, concerts.c.date)).desc(),
+                groups.c.name,
+                concerts.c.id,
+            )
+            .offset(offset)
+            .limit(limit)
+        )
+        return [(row[0], row[1]) for row in (await self.session.execute(query)).all()]
 
     def add(self, entity: e.Entity) -> None:
         self.session.add(entity)

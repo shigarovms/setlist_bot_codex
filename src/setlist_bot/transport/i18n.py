@@ -101,7 +101,7 @@ MESSAGES = {
         "draft_edit": "Изменить",
         "welcome": "Бот для репертуара и сет-листов. /help — команды.\nАдминистратор создаёт коллектив командой /group Название в общем чате. Участники: /register Ваша роль.",
         "help": (
-            "Начало работы\nПоддержка: /support.\nСоздание коллектива: /group Название. Начать может любой участник; владелец Telegram-чата подтверждает создание, становится владельцем коллектива, а инициатор — администратором. Управление правами — /members.\nВступление: /register Имя в коллективе. После подтверждения заявки доступны сет-листы; участникам команда меняет имя.\nВ личном чате: /groups — выбрать коллектив. Можно участвовать в нескольких коллективах.\nЯзык интерфейса: /language ru; язык коллектива: /group_language ru.\n\nОсновная команда — /concerts. Предстоящие и прошедшие выступления; ✅ означает, что сет-лист утверждён. Выберите выступление, чтобы открыть список, предложить вариант или перейти к настройкам. Кнопка «Новое выступление» создаёт выступление.\nНапоминания накануне: /reminders.\n\n"
+            "Начало работы\nПоддержка: /support.\nСоздание коллектива: /group Название. Начать может любой участник; владелец Telegram-чата подтверждает создание, становится владельцем коллектива, а инициатор — администратором. Управление правами — /members.\nВступление: /register Имя в коллективе. После подтверждения заявки доступны сет-листы; участникам команда меняет имя.\nВ личном чате: /groups — выбрать коллектив. Можно участвовать в нескольких коллективах.\nЯзык интерфейса: /language ru; язык коллектива: /group_language ru.\n\nОсновная команда — /concerts. Предстоящие и прошедшие выступления; ✅ означает, что сет-лист утверждён. Выберите выступление, чтобы открыть список, предложить вариант или перейти к настройкам. Кнопка «Новое выступление» создаёт выступление.\nВ личке /all_my_concerts — все ваши выступления из всех коллективов.\nНапоминания накануне: /reminders.\n\n"
             "Добавить новые песни: /add_new_songs Название  03:38  свет  110  комментарий.\n"
             "Последние три поля необязательны. Между полями — два и более пробела; - — пустое поле. Можно вставить таблицу текстом или как Article ответом на запрос команды.\n"
             "Каталог: /catalog [поиск]; архив песен: /archived.\n"
@@ -138,6 +138,9 @@ MESSAGES = {
         "empty": "Пока пусто.",
         "choose_group": "Выберите коллектив:",
         "choose_concert": "Выберите выступление:",
+        "all_my_concerts_title": "Все ваши выступления:",
+        "all_my_concerts_button": "📅 Все мои выступления",
+        "all_my_concerts_private": "Общий список выступлений всех ваших коллективов доступен в личном чате с ботом.",
         "selected": "Выбрано: {name}",
         "created_group": "Создан коллектив «{name}». Вы — администратор.",
         "invited": "Одноразовый код на 24 часа: {token}\nУчастник отправляет боту в личном чате /join {token}",
@@ -488,7 +491,7 @@ MESSAGES = {
         "draft_edit": "Edit",
         "welcome": "Repertoire and setlist bot. /help — commands.\nA Telegram chat administrator creates the group with /group Name in the group chat. Members: /register Your role.",
         "help": (
-            "Getting started\nSupport: /support.\nAny member can start registration with /group Name. The Telegram chat owner confirms and owns the group; the initiator becomes an administrator. Manage roles with /members.\nJoin: /register Group display name. Existing members use it to change their name.\nPrivate chat: /groups — choose a group; you can belong to several.\nLanguage: /language en; group language: /group_language en.\n\nYour main tool is /concerts: upcoming and past performances; ✅ means the setlist is approved. Select an event to open its setlist, propose a variant or change settings. New concert creates an event.\nDay-before reminders: /reminders.\n\n"
+            "Getting started\nSupport: /support.\nAny member can start registration with /group Name. The Telegram chat owner confirms and owns the group; the initiator becomes an administrator. Manage roles with /members.\nJoin: /register Group display name. Existing members use it to change their name.\nPrivate chat: /groups — choose a group; you can belong to several.\nLanguage: /language en; group language: /group_language en.\n\nYour main tool is /concerts: upcoming and past performances; ✅ means the setlist is approved. Select an event to open its setlist, propose a variant or change settings. New concert creates an event.\nIn private, /all_my_concerts lists your performances across all groups.\nDay-before reminders: /reminders.\n\n"
             "Add new songs: /add_new_songs Title  03:38  lights  110  comment.\n"
             "The last three fields are optional. Separate fields with two or more spaces; - means empty. Paste a text table or reply to the command prompt with an Article table.\n"
             "Catalog: /catalog [search]; archived songs: /archived.\n"
@@ -525,6 +528,9 @@ MESSAGES = {
         "empty": "Nothing here yet.",
         "choose_group": "Select a group:",
         "choose_concert": "Select a concert:",
+        "all_my_concerts_title": "All your performances:",
+        "all_my_concerts_button": "📅 All my performances",
+        "all_my_concerts_private": "Your performances across all groups are available in the bot's private chat.",
         "selected": "Selected: {name}",
         "created_group": "Created group “{name}”. You are its administrator.",
         "invited": "Single-use code valid for 24 hours: {token}\nSend the bot /join {token} in a private chat.",

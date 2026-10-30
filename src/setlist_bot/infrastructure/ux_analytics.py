@@ -29,6 +29,8 @@ ACTIONS = frozenset(
         "support",
         "groups",
         "concerts",
+        "all_my_concerts",
+        "my_concert",
         "start",
         "help",
         "group",

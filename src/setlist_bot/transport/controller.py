@@ -19,6 +19,7 @@ from setlist_bot.application.concert_details import PRESET_TYPES, ConcertDetails
 from setlist_bot.application.exports import Exports
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.importing import Importer
+from setlist_bot.application.performances import PersonalPerformances
 from setlist_bot.application.ports import Store
 from setlist_bot.application.recommendations import suggested_titles
 from setlist_bot.application.setlist_menus import CARD, REQUEST, SetlistMenus
@@ -27,7 +28,13 @@ from setlist_bot.application.song_selection import PAGE_SIZE, SongSelection
 from setlist_bot.application.support import Support
 from setlist_bot.application.templates import Templates
 from setlist_bot.application.trash import RETENTION, Trash
-from setlist_bot.domain.concerts import compact_duration, date_label, parse_concert, today
+from setlist_bot.domain.concerts import (
+    button_date,
+    compact_duration,
+    date_label,
+    parse_concert,
+    today,
+)
 from setlist_bot.domain.display import entry_labels, short_duration
 from setlist_bot.domain.entities import (
     CatalogImport,
@@ -520,6 +527,8 @@ class Controller:
         if command in ("start", "help"):
             if command == "start" and args == "groups":
                 return await self.execute("groups")
+            if command == "start" and args == "all_my_concerts":
+                return await self.execute("all_my_concerts")
             return Response(self.t("welcome" if command == "start" else "help"))
         if command == "language":
             if not args:
@@ -680,6 +689,42 @@ class Controller:
                 self.t("choose_group") if groups else self.t("empty"),
                 [(g.name, f"use_group {g.id}") for g in groups],
             )
+        if command == "all_my_concerts":
+            if not self.private:
+                return Response(
+                    self.t("all_my_concerts_private"),
+                    [
+                        (
+                            self.t("all_my_concerts_button"),
+                            f"https://t.me/{self.bot_username}?start=all_my_concerts",
+                        )
+                    ],
+                )
+            page = int(args) if args else 0
+            performances, more = await PersonalPerformances(self.store, self.user).page(page)
+            buttons = [
+                (
+                    " ".join(part for part in (button_date(c.date), g.name, c.title) if part),
+                    f"my_concert {c.id.hex}",
+                )
+                for c, g in performances
+            ]
+            if page:
+                buttons.append((self.t("music_prev"), f"all_my_concerts {page - 1}"))
+            if more:
+                buttons.append((self.t("music_next"), f"all_my_concerts {page + 1}"))
+            return Response(
+                self.t("all_my_concerts_title") if performances else self.t("empty"), buttons
+            )
+        if command == "my_concert":
+            require(self.private, "private_only")
+            concert = await self.store.get(Concert, UUID(args))
+            # RU: Старая кнопка не обходит отзыв доступа. EN: Reuse normal access checks.
+            await self.setlists.load(concert.group_id, concert.id)
+            context = await self.groups.context(self.chat_id, True)
+            context.group_id, context.concert_id = concert.group_id, concert.id
+            context.observed_version, context.selected_song_id = None, None
+            return await self._show(context)
         context = await self.groups.context(self.chat_id, self.private)
         if command == "use_group":
             require(self.private, "private_only")

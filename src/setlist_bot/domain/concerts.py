@@ -49,6 +49,11 @@ def date_label(value: date, language: str = "ru") -> str:
     return label
 
 
+def button_date(value: date) -> str:
+    """RU: Год определяется по Москве. EN: Compact dates are only for buttons."""
+    return value.strftime("%d.%m" if value.year == today().year else "%d.%m.%Y")
+
+
 def compact_duration(seconds: int, language: str = "ru") -> str:
     hours, minutes = divmod((seconds + 59) // 60, 60)
     h, m = ("ч", "мин") if language == "ru" else ("h", "min")

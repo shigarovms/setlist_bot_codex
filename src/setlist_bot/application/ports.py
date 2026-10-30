@@ -1,9 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 from types import TracebackType
 from typing import Any, Protocol
 from uuid import UUID
 
-from setlist_bot.domain.entities import Entity
+from setlist_bot.domain.entities import Concert, Entity, Group
 
 
 class Store(Protocol):
@@ -20,6 +20,10 @@ class Store(Protocol):
     async def get_many[T: Entity](self, kind: type[T], identifiers: set[UUID]) -> list[T]: ...
 
     async def find[T: Entity](self, kind: type[T], **filters: Any) -> list[T]: ...
+
+    async def concerts_for_user(
+        self, user_id: UUID, current: date, *, offset: int, limit: int
+    ) -> list[tuple[Concert, Group]]: ...
 
     async def expired[T: Entity](self, kind: type[T], field: str, before: datetime) -> list[T]: ...
 
