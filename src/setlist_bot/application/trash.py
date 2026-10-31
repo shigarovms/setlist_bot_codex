@@ -79,6 +79,9 @@ class Trash:
         concert.deleted_at = e.now()
         concert.lifecycle_version += 1
         await self._cancel_outbox(group_id, concert_id=concert_id)
+        from setlist_bot.application.deleted_cards import retire_cards
+
+        await retire_cards(self.store, concert)
         await self._clear_contexts(group_id, concert_id)
         return concert
 

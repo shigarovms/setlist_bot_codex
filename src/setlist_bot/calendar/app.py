@@ -67,7 +67,7 @@ async def feed(request: web.Request) -> web.Response:
                 (
                     events,
                     subscription["language"],
-                    1,  # RU/EN: Calendar format version is part of semantic cache identity.
+                    2,  # RU/EN: Calendar format version is part of semantic cache identity.
                     settings.expected_bot_id,
                     settings.bot_username,
                 )
@@ -98,7 +98,7 @@ async def feed(request: web.Request) -> web.Response:
             "Cache-Control": "private, no-cache, must-revalidate",
             "X-Content-Type-Options": "nosniff",
             "Referrer-Policy": "no-referrer",
-            "Content-Disposition": 'inline; filename="performances.ics"',
+            "Content-Disposition": 'inline; filename="setListBot.ics"',
         }
         validators = request.headers.get("If-None-Match", "").split(",")
         if any(value.strip().removeprefix("W/") in (etag, "*") for value in validators):

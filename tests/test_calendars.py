@@ -5,6 +5,7 @@ from dataclasses import asdict
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
+from cryptography.fernet import Fernet
 
 from setlist_bot.application.calendars import Calendars, token_hash
 from setlist_bot.application.concert_details import ConcertDetails
@@ -20,10 +21,12 @@ from setlist_bot.domain.entities import (
 from setlist_bot.domain.rules import AppError
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 
+KEY = Fernet.generate_key().decode()
+
 
 async def issue(engine, user, group_id=None):
     async with PostgresUnitOfWork(engine) as uow:
-        row, token = await Calendars(uow.store, user).create(group_id)
+        row, token = await Calendars(uow.store, user, KEY).create(group_id)
         return row.id, token, row.version
 
 
@@ -109,21 +112,21 @@ async def test_rotation_disable_and_double_creation_do_not_store_or_return_old_t
         row = await uow.store.get(CalendarSubscription, identifier)
         assert row.token_hash == token_hash(token)
         assert token not in json.dumps(asdict(row), default=str)
-        again, repeated_token = await Calendars(uow.store, world.admin).create(None)
+        again, repeated_token = await Calendars(uow.store, world.admin, KEY).create(None)
         assert again.id == identifier and repeated_token is None
         with pytest.raises(AppError):
-            await Calendars(uow.store, world.stranger).change(identifier, version, "disable")
+            await Calendars(uow.store, world.stranger, KEY).change(identifier, version, "disable")
     async with client_for(engine) as client:
         async with PostgresUnitOfWork(engine) as uow:
-            _, replacement = await Calendars(uow.store, world.admin).change(
+            _, replacement = await Calendars(uow.store, world.admin, KEY).change(
                 identifier, version, "rotate"
             )
         assert (await client.get(f"/calendar/{token}.ics")).status == 404
         assert (await client.get(f"/calendar/{replacement}.ics")).status == 200
         async with PostgresUnitOfWork(engine) as uow:
             with pytest.raises(AppError):
-                await Calendars(uow.store, world.admin).change(identifier, version, "rotate")
-            await Calendars(uow.store, world.admin).change(identifier, version + 1, "disable")
+                await Calendars(uow.store, world.admin, KEY).change(identifier, version, "rotate")
+            await Calendars(uow.store, world.admin, KEY).change(identifier, version + 1, "disable")
         assert (await client.get(f"/calendar/{replacement}.ics")).status == 404
     async with PostgresUnitOfWork(engine) as uow:
         assert len(await uow.store.find(CalendarSubscription)) == 1
@@ -170,6 +173,10 @@ async def test_calendar_migration_refuses_silent_loss_of_active_links(engine, wo
     from test_migrations import alembic
 
     identifier, _, _ = await issue(engine, world.admin)
+    encrypted = alembic(database_url, "downgrade", "b93e2a6f104c", check=False)
+    assert encrypted.returncode != 0 and "stored calendar links" in encrypted.stderr
+    async with PostgresUnitOfWork(engine) as uow:
+        (await uow.store.get(CalendarSubscription, identifier)).token_ciphertext = ""
     refused = alembic(database_url, "downgrade", "a82cd901be45", check=False)
     assert refused.returncode != 0 and "active calendar subscriptions" in refused.stderr
     async with PostgresUnitOfWork(engine) as uow:

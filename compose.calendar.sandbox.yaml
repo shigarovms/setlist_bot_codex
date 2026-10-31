@@ -1,6 +1,7 @@
 # Optional public calendar. Never receives BOT_TOKEN or .env.admin.
 services:
   bot:
+    env_file: [.env.calendar-key]
     environment:
       CALENDAR_PUBLIC_BASE_URL: ${CALENDAR_PUBLIC_BASE_URL:-}
   calendar:

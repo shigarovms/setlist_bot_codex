@@ -59,6 +59,11 @@ async def test_public_service_works_with_real_read_only_role_without_private_tab
             async with app[ENGINE].connect() as connection:
                 with pytest.raises(DBAPIError):
                     await connection.execute(text("DELETE FROM calendar_subscriptions"))
+            async with app[ENGINE].connect() as connection:
+                with pytest.raises(DBAPIError):
+                    await connection.execute(
+                        text("SELECT token_ciphertext FROM calendar_subscriptions")
+                    )
     finally:
         async with engine.begin() as connection:
             await connection.execute(text(f"DROP OWNED BY {role}"))

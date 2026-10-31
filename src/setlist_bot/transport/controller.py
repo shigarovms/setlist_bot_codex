@@ -140,12 +140,14 @@ class Controller:
         chat_admin: bool = False,
         bot_username: str = "",
         calendar_public_base_url: str = "",
+        calendar_link_key: str = "",
     ) -> None:
         self.store, self.user, self.chat_id = store, user, chat_id
         self.chat_owner_id: int | None = None
         self.sender_username = ""
         self.bot_username = bot_username
         self.calendar_public_base_url = calendar_public_base_url
+        self.calendar_link_key = calendar_link_key
         self.private, self.chat_admin = private, chat_admin
         self.language = user.language
         self.groups = Groups(store, user)
@@ -745,9 +747,12 @@ class Controller:
             context.selected_song_id = None
             return Response(
                 self.t("selected", name=group.name),
-                [(self.t("transfer_button"), f"ct_begin {group.id.hex}")]
-                if group.owner_id == self.user.id
-                else [],
+                [(self.t("group_events", name=group.name), f"group_concerts {group.id.hex}")]
+                + (
+                    [(self.t("transfer_button"), f"ct_begin {group.id.hex}")]
+                    if group.owner_id == self.user.id
+                    else []
+                ),
             )
         require(context.group_id is not None, "select_group")
         group_id = context.group_id
@@ -1385,8 +1390,11 @@ class Controller:
             if command == "delete_concert_final":
                 require(confirmed and args == fingerprint, "delete_changed")
                 deleted_concert = await self.trash.delete_concert(group_id, concert_id, fingerprint)
+                from setlist_bot.transport.render import deleted_buttons
+
                 return Response(
-                    self.t("concert_deleted", name=concert_label(deleted_concert, self.language))
+                    self.t("concert_deleted", name=concert_label(deleted_concert, self.language)),
+                    deleted_buttons(group_id, self.language, self.private),
                 )
             target_concert = await self.store.get(Concert, concert_id)
             return await self.confirm(

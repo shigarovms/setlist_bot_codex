@@ -29,6 +29,7 @@ PY
 compose=(docker compose -f compose.sandbox.yaml -f compose.admin.sandbox.yaml)
 calendar_enabled=false
 if [[ -f .env.calendar ]]; then
+  python3 scripts/calendar_key.py
   compose+=(-f compose.calendar.sandbox.yaml)
   calendar_enabled=true
 fi

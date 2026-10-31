@@ -17,6 +17,19 @@ class Settings(BaseSettings):
     runtime_location: str = Field(default="local", min_length=1, max_length=100)
     telegram_diagnostics: bool = False
     calendar_public_base_url: str = ""
+    calendar_link_key: SecretStr | None = None
+
+    @field_validator("calendar_link_key")
+    @classmethod
+    def validate_calendar_key(cls, value: SecretStr | None) -> SecretStr | None:
+        if value:
+            from setlist_bot.domain.calendar_vault import CalendarVault
+
+            try:
+                CalendarVault(value.get_secret_value())
+            except (ValueError, UnicodeError):
+                raise ValueError("Invalid calendar encryption key") from None
+        return value
 
     @field_validator("calendar_public_base_url")
     @classmethod

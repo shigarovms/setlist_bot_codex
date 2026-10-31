@@ -1,11 +1,22 @@
 from textwrap import wrap
 from typing import Any
+from uuid import UUID
 
 from setlist_bot.domain.concerts import button_date, compact_duration, date_label
 from setlist_bot.domain.display import english_colors, entry_labels, pause_title, short_duration
 from setlist_bot.domain.entities import Concert, Song
 from setlist_bot.domain.rules import clock, flat_content, is_pause, totals
 from setlist_bot.transport.i18n import tr
+
+
+def deleted_buttons(group_id: UUID, language: str, private: bool) -> list[tuple[str, str]]:
+    return [
+        (tr(language, "support_button"), "support"),
+        (
+            tr(language, "back_concerts"),
+            f"group_concerts {group_id.hex}" if private else "concerts",
+        ),
+    ]
 
 
 def song_card(song: Song | dict[str, Any], language: str = "ru") -> str:

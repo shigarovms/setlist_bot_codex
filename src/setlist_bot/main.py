@@ -152,6 +152,14 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
                     event.attempts += 1
                     event.last_error = type(exc).__name__
                 return event.delivered_at is not None
+            if event.support_kind == "retire":
+                from setlist_bot.infrastructure.deleted_delivery import deliver_retired_card
+
+                try:
+                    await deliver_retired_card(bot, uow, event)
+                except TelegramForbiddenError:
+                    event.sent, event.discarded_at = True, now()
+                return event.delivered_at is not None
             if event.support_kind in ("event", "request"):
                 settings = await uow.store.find(SupportSettings, key="main")
                 if not settings:
@@ -494,6 +502,9 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
                             monitor=monitor,
                             analytics=analytics,
                             calendar_public_base_url=settings.calendar_public_base_url,
+                            calendar_link_key=settings.calendar_link_key.get_secret_value()
+                            if settings.calendar_link_key
+                            else "",
                         ),
                         me.username or "",
                         diagnostics=settings.telegram_diagnostics,

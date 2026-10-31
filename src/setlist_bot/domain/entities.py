@@ -55,6 +55,7 @@ class ChatBinding(Entity):
 
 @dataclass(kw_only=True)
 class CalendarSubscription(Entity):
+    token_ciphertext: str = ""
     owner_id: UUID
     group_id: UUID | None
     token_hash: str

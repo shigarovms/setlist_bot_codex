@@ -16,9 +16,8 @@ from urllib.request import urlopen
 
 ROOT = Path("/opt/setlist_bot_sandbox")
 ROLE = "setlist_calendar_reader"
-SCHEMA = "b93e2a6f104c"
+SCHEMA = "c04f7a92d531"
 TABLES = (
-    "calendar_subscriptions",
     "concerts",
     "deployment_identity",
     "alembic_version",
@@ -80,6 +79,8 @@ def grants():
         f"GRANT USAGE ON SCHEMA public TO {ROLE};\n"
         f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {ROLE};\n"
         f"GRANT SELECT ON {','.join(TABLES)} TO {ROLE};\n"
+        "GRANT SELECT(id,owner_id,group_id,token_hash,language,enabled,version,created_at) "
+        f"ON calendar_subscriptions TO {ROLE};\n"
         f"GRANT SELECT(id,name,deleted_at) ON groups TO {ROLE};\n"
         f"GRANT SELECT(group_id,user_id,status) ON memberships TO {ROLE};\n"
         f"ALTER ROLE {ROLE} SET default_transaction_read_only = on;\n"
@@ -172,6 +173,7 @@ def main():
         )
     )
     sql("BEGIN;\n" + creation + grants() + "COMMIT;\n")
+    run(["python3", "scripts/calendar_key.py"])
     replacements = {"CALENDAR_HOST": host, "CALENDAR_PUBLIC_BASE_URL": "https://" + host}
     lines = [
         line for line in contents.splitlines() if line.partition("=")[0].strip() not in replacements

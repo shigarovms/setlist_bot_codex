@@ -233,5 +233,6 @@ async def test_performance_type_migration_preserves_old_rows_and_guards_downgrad
 def test_ru_public_messages_use_performance_terminology():
     assert not any(
         "мероприяти" in value.lower() or "концерт" in value.lower()
-        for value in MESSAGES["ru"].values()
+        for key, value in MESSAGES["ru"].items()
+        if key != "group_events"  # Explicitly requested label after /groups.
     )

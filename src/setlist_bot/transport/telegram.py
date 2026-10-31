@@ -90,9 +90,11 @@ class Processor:
         monitor: Monitor | None = None,
         analytics: UXBuffer | None = None,
         calendar_public_base_url: str = "",
+        calendar_link_key: str = "",
     ) -> None:
         self.analytics = analytics
         self.calendar_public_base_url = calendar_public_base_url
+        self.calendar_link_key = calendar_link_key
         self.monitor = monitor
         self.engine = engine
         self.bot_username = bot_username
@@ -194,6 +196,7 @@ class Processor:
                 chat_admin=chat_admin,
                 bot_username=self.bot_username,
                 calendar_public_base_url=self.calendar_public_base_url,
+                calendar_link_key=self.calendar_link_key,
             )
             controller.chat_owner_id = chat_owner_id
             controller.sender_username = sender_username or ""
@@ -242,6 +245,14 @@ class Processor:
                                 Confirmation, user_id=user.id, chat_id=chat_id
                             ):
                                 data = json.loads(session.command)
+                                if data.get(
+                                    "kind"
+                                ) == "calendar_restore" and reply_message_id in data.get(
+                                    "message_ids", []
+                                ):
+                                    from setlist_bot.transport.calendars import restore_link_input
+
+                                    return await restore_link_input(controller, session, command)
                                 if (
                                     data.get("kind") == "support"
                                     and data.get("prompt_id") == reply_message_id

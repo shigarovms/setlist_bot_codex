@@ -151,6 +151,7 @@ table(
 table(
     e.CalendarSubscription,
     "calendar_subscriptions",
+    col("token_ciphertext", Text, server_default=""),
     col("owner_id", Uuid, ForeignKey("users.id", ondelete="CASCADE")),
     col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), nullable=True),
     col("token_hash", String(64), unique=True),
@@ -606,6 +607,22 @@ class PostgresStore:
             .limit(limit)
         )
         return [(row[0], row[1]) for row in (await self.session.execute(query)).all()]
+
+    async def concert_cards(self, group_id: UUID, concert_id: UUID) -> list[e.Confirmation]:
+        # RU: Фильтруем на стороне БД без приведения старого Text к JSON.
+        # EN: The caller still validates exact parsed IDs and recipient ownership.
+        command = metadata.tables["confirmations"].c.command
+        return list(
+            (
+                await self.session.scalars(
+                    select(e.Confirmation).where(
+                        command.contains(str(group_id)),
+                        command.contains(str(concert_id)),
+                        command.contains('"setlist_menu"'),
+                    )
+                )
+            ).all()
+        )
 
     def add(self, entity: e.Entity) -> None:
         self.session.add(entity)

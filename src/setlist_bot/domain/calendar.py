@@ -45,13 +45,14 @@ def render_calendar(
     bot_id: int,
     username: str,
 ) -> bytes:
-    name = "Выступления" if language == "ru" else "Performances"
+    name = "setListBot"
     lines = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
         "PRODID:-//Setlist Bot//Performances//EN",
         "CALSCALE:GREGORIAN",
         "METHOD:PUBLISH",
+        "NAME:" + name,
         "X-WR-CALNAME:" + name,
         "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
         "X-PUBLISHED-TTL:PT1H",

@@ -30,6 +30,7 @@ def event(**changes):
 
 def test_all_day_event_has_exclusive_end_and_stable_uid_without_timezone():
     body = render([event()]).decode()
+    assert "NAME:setListBot\r\n" in body and "X-WR-CALNAME:setListBot\r\n" in body
     assert "DTSTART;VALUE=DATE:20261231\r\nDTEND;VALUE=DATE:20270101" in body
     assert "TZID" not in body and "DTSTART:20261231T" not in body
     assert "DESCRIPTION:Начало: 20:00\\nКонец: 21:40" in body

@@ -1,12 +1,15 @@
-"""RU: Управление личными ссылками. EN: No Google/Apple credentials or raw tokens in DB."""
+"""RU: Личные ссылки в зашифрованном виде. EN: Public feed authentication uses only hashes."""
 
 import hashlib
+import hmac
+import re
 import secrets
 from uuid import UUID
 
 from setlist_bot.application.activity import record_activity
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
+from setlist_bot.domain.calendar_vault import CalendarVault
 from setlist_bot.domain.entities import CalendarSubscription, Group, Membership, User
 from setlist_bot.domain.rules import require
 
@@ -16,8 +19,42 @@ def token_hash(token: str) -> str:
 
 
 class Calendars:
-    def __init__(self, store: Store, user: User) -> None:
+    def __init__(self, store: Store, user: User, key: str = "") -> None:
         self.store, self.user = store, user
+        self.vault = CalendarVault(key) if key else None
+
+    def _cipher(self) -> CalendarVault:
+        require(self.vault is not None, "calendar_key_unavailable")
+        assert self.vault is not None
+        return self.vault
+
+    async def owned(self, identifier: UUID) -> CalendarSubscription:
+        row = await self.store.get(CalendarSubscription, identifier)
+        require(row.owner_id == self.user.id and row.enabled, "input_expired")
+        if row.group_id is not None:
+            await Groups(self.store, self.user).access(row.group_id)
+        return row
+
+    async def reveal(self, identifier: UUID) -> str | None:
+        row = await self.owned(identifier)
+        require(self.vault is not None, "calendar_key_unavailable")
+        if not row.token_ciphertext:
+            return None
+        return self._cipher().open(row.id, row.token_ciphertext, row.token_hash)
+
+    async def restore(self, identifier: UUID, version: int, token: str) -> None:
+        row = await self.owned(identifier)
+        row = await self.store.get(CalendarSubscription, row.id, lock=True)
+        require(row.version == version and row.enabled, "input_expired")
+        require(
+            bool(re.fullmatch(r"[A-Za-z0-9_-]{43}", token))
+            and hmac.compare_digest(row.token_hash, token_hash(token)),
+            "calendar_wrong_link",
+        )
+        require(self.vault is not None, "calendar_key_unavailable")
+        row.token_ciphertext = self._cipher().seal(row.id, token)
+        # RU/EN: Do not change hash, generation or UID; calendars stay connected.
+        record_activity(self.store, self.user, "calendar_link_saved", row.id)
 
     async def groups(self) -> list[Group]:
         memberships = await self.store.find(Membership, user_id=self.user.id, status="active")
@@ -39,6 +76,7 @@ class Calendars:
         row = await self.subscription(group_id)
         if row is not None and row.enabled:
             return row, None
+        require(self.vault is not None, "calendar_key_unavailable")
         token = secrets.token_urlsafe(32)
         if row is None:
             row = CalendarSubscription(
@@ -51,6 +89,7 @@ class Calendars:
         else:
             row.enabled, row.token_hash = True, token_hash(token)
             row.language, row.version = self.user.language, row.version + 1
+        row.token_ciphertext = self._cipher().seal(row.id, token)
         record_activity(self.store, self.user, "calendar_created", row.id)
         return row, token
 
@@ -65,7 +104,10 @@ class Calendars:
         require(row.version == version and row.enabled, "input_expired")
         require(action in ("rotate", "disable"), "input")
         token = secrets.token_urlsafe(32) if action == "rotate" else None
+        if token:
+            require(self.vault is not None, "calendar_key_unavailable")
         row.token_hash = token_hash(token or secrets.token_urlsafe(32))
+        row.token_ciphertext = self.vault.seal(row.id, token) if token and self.vault else ""
         row.enabled, row.version = action == "rotate", row.version + 1
         record_activity(self.store, self.user, "calendar_" + action, row.id)
         return row, token

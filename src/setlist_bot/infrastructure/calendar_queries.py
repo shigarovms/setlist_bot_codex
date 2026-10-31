@@ -23,7 +23,21 @@ class CalendarQueries:
             subscription = (
                 (
                     await connection.execute(
-                        select(subscriptions).where(
+                        select(
+                            *(
+                                subscriptions.c[name]
+                                for name in (
+                                    "id",
+                                    "owner_id",
+                                    "group_id",
+                                    "token_hash",
+                                    "language",
+                                    "enabled",
+                                    "version",
+                                    "created_at",
+                                )
+                            )
+                        ).where(
                             subscriptions.c.token_hash == digest, subscriptions.c.enabled.is_(True)
                         )
                     )

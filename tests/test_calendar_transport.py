@@ -1,4 +1,8 @@
+from datetime import UTC, datetime
 from itertools import count
+
+from aiogram.types import Chat, Message
+from test_calendars import KEY
 
 from setlist_bot.domain.entities import CalendarSubscription
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
@@ -6,13 +10,36 @@ from setlist_bot.transport.telegram import Processor
 
 
 def sender(engine, base="https://calendar.example.org"):
-    processor = Processor(engine, bot_username="botToPract696_bot", calendar_public_base_url=base)
+    processor = Processor(
+        engine,
+        bot_username="botToPract696_bot",
+        calendar_public_base_url=base,
+        calendar_link_key=KEY,
+    )
     updates = count(1)
 
-    async def send(command, *, actor=1, private=True):
-        return await processor.process(
-            next(updates), actor, actor if private else -100, command, private=private
+    async def send(command, *, actor=1, private=True, reply=None, remember=None):
+        response = await processor.process(
+            next(updates),
+            actor,
+            actor if private else -100,
+            command,
+            private=private,
+            reply_message_id=reply,
         )
+        if remember is not None:
+            await processor.remember_response(
+                actor,
+                response,
+                [
+                    Message(
+                        message_id=remember,
+                        date=datetime.now(UTC),
+                        chat=Chat(id=actor, type="private"),
+                    )
+                ],
+            )
+        return response
 
     return send
 
@@ -28,12 +55,13 @@ async def test_calendar_ui_issues_link_only_in_private_and_confirms_rotation_can
     assert created.monospace_body.startswith("https://calendar.example.org/calendar/")
     assert "Пароль" not in created.text
     repeated = await send("cal_create all")
-    assert repeated.monospace_body is None and "перевыпустите" in repeated.text
+    assert repeated.monospace_body == created.monospace_body
+    repeated = await send("cal_scope all")
     rotate_action = next(action for _, action in repeated.buttons if action.endswith("rotate"))
     confirmation = await send(rotate_action)
     cancel = next(action for _, action in confirmation.buttons if action.startswith("cal_cancel "))
     await send(cancel)
-    assert (await send("cal_create all")).monospace_body is None
+    assert (await send("cal_create all")).monospace_body == created.monospace_body
     confirmation = await send(rotate_action)
     yes = next(action for _, action in confirmation.buttons if action.startswith("cal_confirm "))
     assert (await send(yes, actor=2)).monospace_body is None

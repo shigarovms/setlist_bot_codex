@@ -21,6 +21,7 @@ def sandbox_release(tmp_path):
     (app / "scripts/backup-sandbox.sh").write_bytes(
         (ROOT / "scripts/backup-sandbox.sh").read_bytes()
     )
+    (app / "scripts/calendar_key.py").write_bytes((ROOT / "scripts/calendar_key.py").read_bytes())
     (app / ".env").write_text("SANDBOX_BOT_TOKEN=1110437563:SYNTHETIC\n")
     (app / ".env.admin").write_text("WEB_ADMIN_USERNAME=unchanged\n")
     binary = tmp_path / "bin"
@@ -42,6 +43,9 @@ elif 'pg_restore' in args:
     assert '--list' in args and sys.stdin.buffer.read().startswith(b'PGDMP')
 elif 'run' in args and 'migrate' in args and '--check' not in args:
     if os.environ.get('FAIL_STAGE')=='migration': raise SystemExit(1)
+elif 'psql' in args:
+    sys.stdin.read()
+    print('f')
 elif 'exec' in args and 'admin' in args:
     assert '/sandbox/healthz' in sys.stdin.read()
     if os.environ.get('FAIL_STAGE')=='health': raise SystemExit(1)

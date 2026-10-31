@@ -38,6 +38,8 @@ ACTIONS = frozenset(
         "cal_confirm",
         "cal_cancel",
         "cal_help",
+        "cal_show",
+        "cal_restore",
         "my_concert",
         "start",
         "help",
