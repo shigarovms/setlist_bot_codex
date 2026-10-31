@@ -505,6 +505,7 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
                             calendar_link_key=settings.calendar_link_key.get_secret_value()
                             if settings.calendar_link_key
                             else "",
+                            miniapp_public_base_url=settings.miniapp_public_base_url,
                         ),
                         me.username or "",
                         diagnostics=settings.telegram_diagnostics,

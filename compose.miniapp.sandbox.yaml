@@ -1,0 +1,25 @@
+# Optional private-draft editor. No Telegram token or admin credentials in this service.
+services:
+  bot:
+    environment:
+      MINIAPP_PUBLIC_BASE_URL: ${MINIAPP_PUBLIC_BASE_URL:-}
+  miniapp:
+    image: setlist-sandbox-app
+    build: .
+    command: [".venv/bin/python", "-m", "setlist_bot.miniapp"]
+    env_file: [.env.miniapp]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp:size=8m"]
+    mem_limit: 192m
+    cpus: 0.75
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", ".venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/healthz',timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      db:
+        condition: service_healthy

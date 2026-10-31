@@ -1,25 +1,30 @@
 {
-    admin off
-    log {
-        format filter {
-            wrap json
-            fields {
-                request delete
-                uri delete
-            }
-        }
-    }
+	admin off
+	log {
+		format filter {
+			wrap json
+			fields {
+				request delete
+				uri delete
+			}
+		}
+	}
 }
 
 {$CALENDAR_HOST} {
-    @feed {
-        path /calendar/*.ics
-        method GET HEAD
-    }
-    handle @feed {
-        reverse_proxy calendar:8090
-    }
-    handle {
-        respond "Not found" 404
-    }
+	@editor path /miniapp /miniapp/*
+	handle @editor {
+		redir /miniapp /miniapp/ 308
+		reverse_proxy miniapp:8091
+	}
+	@feed {
+		path /calendar/*.ics
+		method GET HEAD
+	}
+	handle @feed {
+		reverse_proxy calendar:8090
+	}
+	handle {
+		respond "Not found" 404
+	}
 }

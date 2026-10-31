@@ -1,5 +1,12 @@
 # Архитектура первого среза
 
+Экспериментальный `miniapp/` — отдельный aiohttp transport для личного черновика.
+`domain/miniapp_auth.py` проверяет подписанные Telegram initData,
+`application/miniapp.py` связывает сессию существующего Confirmation с неизменной
+целью и вызывает `Setlists.edit_songs(private=True)`. Статические HTML/CSS/JS не
+содержат секретов. SQL-роль не пишет общие сет-листы и каталог; нет новой схемы
+хранения черновиков. [Установка и откат](miniapp-editor.md).
+
 Календарные подписки: отдельный read-only aiohttp-сервис, не часть админки.
 `domain/calendar.py` формирует RFC 5545, `application/calendars.py` управляет личными
 хешами ссылок, `infrastructure/calendar_queries.py` фильтрует членство/корзину в SQL.

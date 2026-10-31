@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     telegram_diagnostics: bool = False
     calendar_public_base_url: str = ""
     calendar_link_key: SecretStr | None = None
+    miniapp_public_base_url: str = ""
+
+    @field_validator("miniapp_public_base_url")
+    @classmethod
+    def validate_miniapp_url(cls, value: str) -> str:
+        return public_base_url(value)
 
     @field_validator("calendar_link_key")
     @classmethod

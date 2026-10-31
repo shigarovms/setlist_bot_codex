@@ -128,6 +128,7 @@ class Response:
     music_search_version: int | None = None
     music_panel_private: bool = True
     navigation_slot: Literal["main", "catalog", "song", "music"] = "main"
+    web_apps: dict[str, str] = field(default_factory=dict)
 
 
 class Controller:
@@ -142,6 +143,7 @@ class Controller:
         bot_username: str = "",
         calendar_public_base_url: str = "",
         calendar_link_key: str = "",
+        miniapp_public_base_url: str = "",
     ) -> None:
         self.store, self.user, self.chat_id = store, user, chat_id
         self.chat_owner_id: int | None = None
@@ -149,6 +151,7 @@ class Controller:
         self.bot_username = bot_username
         self.calendar_public_base_url = calendar_public_base_url
         self.calendar_link_key = calendar_link_key
+        self.miniapp_public_base_url = miniapp_public_base_url
         self.private, self.chat_admin = private, chat_admin
         self.language = user.language
         self.groups = Groups(store, user)
@@ -2113,6 +2116,17 @@ class Controller:
                 keyboard_text=self.t("selection_keyboard_closed"),
                 previous_keyboard_id=previous_data.get("keyboard_message_id"),
             )
+            if self.miniapp_public_base_url:
+                from setlist_bot.application.miniapp import MiniDrafts
+
+                editor = await MiniDrafts(self.store, self.user).create(
+                    context.group_id, context.concert_id
+                )
+                action = f"miniapp {editor.id.hex}"
+                response.buttons.insert(2, (self.t("miniapp_open"), action))
+                response.web_apps[action] = (
+                    self.miniapp_public_base_url + "/miniapp/#session=" + editor.id.hex
+                )
         else:
             row = await self.inputs.create(
                 "suggestion",

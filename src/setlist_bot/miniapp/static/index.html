@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <title>setListBot — редактор</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="eyebrow">setListBot</div>
+        <h1 id="heading">Личный черновик</h1>
+        <p id="event"></p>
+        <div class="timing">
+          <strong id="total">00:00</strong><span id="planned"></span>
+        </div>
+      </header>
+      <p id="status" role="status" aria-live="polite">Загрузка…</p>
+      <nav id="history" aria-label="Прошлые выступления">
+        <button id="older" aria-label="Предыдущее выступление">←</button
+        ><span id="history-label"></span
+        ><button id="newer" aria-label="Следующее выступление" disabled>
+          →
+        </button>
+      </nav>
+      <button id="use-history" hidden>Взять за основу</button>
+      <div class="toolbar">
+        <button id="undo" disabled>↶ Отменить</button
+        ><button id="add-pause">＋ Пауза</button>
+      </div>
+      <div class="workspace">
+        <section aria-label="Ваш сет-лист">
+          <ol id="setlist"></ol>
+          <p id="empty" hidden></p>
+          <div id="remove-zone" data-remove="true">Убрать из сет-листа</div>
+        </section>
+        <section id="catalog">
+          <h2 id="catalog-heading">Репертуар</h2>
+          <label id="search-label" for="search">Поиск песни</label
+          ><input
+            id="search"
+            type="search"
+            autocomplete="off"
+            placeholder="Название песни"
+          />
+          <div id="catalog-list"></div>
+          <nav class="pages">
+            <button id="page-prev" aria-label="Предыдущая страница">◀</button
+            ><span id="page-label"></span
+            ><button id="page-next" aria-label="Следующая страница">▶</button>
+          </nav>
+        </section>
+      </div>
+      <footer>
+        <p id="private-note">Сохраняется только личный черновик.</p>
+        <button id="save" class="primary" disabled>Сохранить черновик</button
+        ><button id="back-bot">Вернуться к боту</button>
+      </footer>
+    </main>
+    <dialog id="pause-dialog">
+      <form id="pause-form">
+        <h2 id="pause-title">Длительность паузы</h2>
+        <label id="pause-label" for="pause-value">Без единиц — минуты</label
+        ><input
+          id="pause-value"
+          type="text"
+          maxlength="80"
+          placeholder="3 мин / 2:30 / 00:00:03"
+          required
+        />
+        <div class="toolbar">
+          <button id="pause-cancel" type="button">Отмена</button
+          ><button id="pause-submit" class="primary" type="submit">
+            Добавить
+          </button>
+        </div>
+        <p id="pause-error" role="alert"></p>
+      </form>
+    </dialog>
+    <dialog id="conflict-dialog">
+      <h2 id="conflict-title">Черновик изменён</h2>
+      <p id="conflict-note"></p>
+      <pre id="latest-list"></pre>
+      <button id="load-latest">Загрузить актуальный</button
+      ><button id="copy-own">Скопировать мой список</button
+      ><button id="conflict-close">Продолжить мой ввод</button>
+    </dialog>
+  </body>
+</html>

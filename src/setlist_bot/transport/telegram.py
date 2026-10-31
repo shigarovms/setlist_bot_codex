@@ -25,6 +25,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
     Update,
+    WebAppInfo,
 )
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -91,10 +92,12 @@ class Processor:
         analytics: UXBuffer | None = None,
         calendar_public_base_url: str = "",
         calendar_link_key: str = "",
+        miniapp_public_base_url: str = "",
     ) -> None:
         self.analytics = analytics
         self.calendar_public_base_url = calendar_public_base_url
         self.calendar_link_key = calendar_link_key
+        self.miniapp_public_base_url = miniapp_public_base_url
         self.monitor = monitor
         self.engine = engine
         self.bot_username = bot_username
@@ -197,6 +200,7 @@ class Processor:
                 bot_username=self.bot_username,
                 calendar_public_base_url=self.calendar_public_base_url,
                 calendar_link_key=self.calendar_link_key,
+                miniapp_public_base_url=self.miniapp_public_base_url,
             )
             controller.chat_owner_id = chat_owner_id
             controller.sender_username = sender_username or ""
@@ -689,14 +693,18 @@ async def remember_setlist_response(
 
 
 async def keyboards(
-    buttons: list[tuple[str, str]], columns: int = 1
+    buttons: list[tuple[str, str]], columns: int = 1, web_apps: dict[str, str] | None = None
 ) -> AsyncIterator[InlineKeyboardMarkup]:
     for start in range(0, len(buttons), 40):
         yield InlineKeyboardMarkup(
             inline_keyboard=[
                 [
                     (
-                        InlineKeyboardButton(text=label[:100], url=data)
+                        InlineKeyboardButton(
+                            text=label[:100], web_app=WebAppInfo(url=web_apps[data])
+                        )
+                        if web_apps and data in web_apps
+                        else InlineKeyboardButton(text=label[:100], url=data)
                         if data.startswith("https://t.me/")
                         else InlineKeyboardButton(text=label[:100], callback_data=data)
                     )
@@ -733,7 +741,12 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
     if response.articles:
         messages = []
         batches = (
-            [markup async for markup in keyboards(response.buttons, response.button_columns)]
+            [
+                markup
+                async for markup in keyboards(
+                    response.buttons, response.button_columns, response.web_apps
+                )
+            ]
             if response.articles_keyboard
             else []
         )
@@ -813,7 +826,12 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
             await delete_selection_message(bot, chat_id, identifier)
         return messages
     if response.markup_only:
-        batches = [markup async for markup in keyboards(response.buttons, response.button_columns)]
+        batches = [
+            markup
+            async for markup in keyboards(
+                response.buttons, response.button_columns, response.web_apps
+            )
+        ]
         if response.edit_message_ids:
             try:
                 await bot.edit_message_reply_markup(
@@ -845,7 +863,8 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
     body_end = body_start + len(body)
     pieces = chunks(output_text)
     markup_batches = [
-        markup async for markup in keyboards(response.buttons, response.button_columns)
+        markup
+        async for markup in keyboards(response.buttons, response.button_columns, response.web_apps)
     ]
     messages = []
     text_offset = 0

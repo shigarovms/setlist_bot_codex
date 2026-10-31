@@ -280,6 +280,7 @@ class Setlists:
         private: bool = False,
         song_ids: list[UUID] | None = None,
         ordered: list[UUID | int] | None = None,
+        pauses_before: list[int | None] | None = None,
     ) -> None:
         """Resolve every input before writing a single atomic setlist revision."""
         await self.groups.can_suggest(group_id)
@@ -289,6 +290,7 @@ class Setlists:
         require(private or not setlist.approved, "approved")
         content = flat_content(draft.content) if draft else await self._working(setlist)
         catalog = Catalog(self.store, self.user)
+        items: list[dict[str, Any]]
         if ordered is None and song_ids is None:
             require(1 <= len(titles) <= 200, "song_list_input")
             pauses = [parse_pause(title) for title in titles]
@@ -315,7 +317,7 @@ class Setlists:
             ]
         else:
             entries = ordered if ordered is not None else list(song_ids or [])
-            require(1 <= len(entries) <= 200, "song_list_input")
+            require((0 if private and replace else 1) <= len(entries) <= 200, "song_list_input")
             items = []
             for entry in entries:
                 if isinstance(entry, int):
@@ -324,6 +326,12 @@ class Setlists:
                     song = await catalog.song(group_id, entry)
                     require(not song.archived, "selection_catalog_changed")
                     items.append({"song_id": str(song.id), "pause_before": None})
+        if pauses_before is not None:
+            require(private and len(pauses_before) == len(items), "input")
+            for item, lead in zip(items, pauses_before, strict=True):
+                require(lead is None or type(lead) is int and 0 <= lead <= 86400, "pause_duration")
+                if not is_pause(item):
+                    item["pause_before"] = lead
         if replace:
             content["blocks"] = [{"title": "", "kind": "main", "break_seconds": 0, "items": items}]
         else:

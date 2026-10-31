@@ -148,6 +148,8 @@ def main():
         "-f",
         "compose.calendar.sandbox.yaml",
     ]
+    if (ROOT / ".env.miniapp").is_file():
+        compose += ["-f", "compose.miniapp.sandbox.yaml"]
     admin = values(ROOT / ".env.admin")
     if admin.get("WEB_ADMIN_ALLOW_PRODUCTION", "").lower() in ("true", "1", "yes", "on"):
         compose += ["-f", "compose.admin.production-access.yaml"]

@@ -33,6 +33,15 @@ if [[ -f .env.calendar ]]; then
   compose+=(-f compose.calendar.sandbox.yaml)
   calendar_enabled=true
 fi
+miniapp_enabled=false
+if [[ -f .env.miniapp ]]; then
+  if [[ "$calendar_enabled" != true ]]; then
+    echo "Mini App requires the existing calendar HTTPS configuration."
+    exit 1
+  fi
+  compose+=(-f compose.miniapp.sandbox.yaml)
+  miniapp_enabled=true
+fi
 production_access="$(python3 - <<'PY'
 from pathlib import Path
 values = {}
@@ -59,6 +68,9 @@ fi
 if [[ "$calendar_enabled" == true ]]; then
   "${compose[@]}" stop calendar
 fi
+if [[ "$miniapp_enabled" == true ]]; then
+  "${compose[@]}" stop miniapp
+fi
 SETLIST_SANDBOX_DIR="$PWD" bash scripts/backup-sandbox.sh
 "${compose[@]}" run --rm --no-deps migrate
 "${compose[@]}" run --rm --no-deps --entrypoint .venv/bin/setlist-bot migrate --check
@@ -80,7 +92,28 @@ else:
 PY
 if [[ "$calendar_enabled" == true ]]; then
   "${compose[@]}" up -d --no-build --no-deps calendar
-  "${compose[@]}" up -d --no-build calendar_proxy
+fi
+if [[ "$miniapp_enabled" == true ]]; then
+  "${compose[@]}" up -d --no-build --no-deps miniapp
+  "${compose[@]}" exec -T miniapp .venv/bin/python - <<'PY'
+import time
+from urllib.request import urlopen
+for attempt in range(15):
+    try:
+        with urlopen('http://127.0.0.1:8091/healthz', timeout=3) as response:
+            assert response.status == 200
+        print('Sandbox Mini App health OK.', flush=True)
+        break
+    except Exception:
+        time.sleep(2)
+else:
+    raise SystemExit('Mini App unhealthy; polling remains stopped. Inspect its logs.')
+PY
+fi
+if [[ "$calendar_enabled" == true ]]; then
+  # RU: У Caddy отключён admin API; recreate применяет новый файл маршрутов.
+  # EN: Preserve TLS volumes while reloading the read-only mounted routing file.
+  "${compose[@]}" up -d --no-build --force-recreate calendar_proxy
 fi
 if [[ "$mode" == server ]]; then
   "${compose[@]}" up -d --no-build --no-deps bot

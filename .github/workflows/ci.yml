@@ -32,4 +32,8 @@ jobs:
       - run: uv run ruff check src tests migrations scripts
       - run: uv run ruff format --check src tests migrations scripts
       - run: uv run mypy src
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node tests/miniapp-model.test.mjs
       - run: uv run pytest -q
