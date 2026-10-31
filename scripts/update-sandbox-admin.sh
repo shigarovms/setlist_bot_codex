@@ -27,6 +27,11 @@ if values.get('SANDBOX_BOT_TOKEN', '').split(':', 1)[0] != '1110437563':
     raise SystemExit('Unexpected sandbox bot token identity; stopping.')
 PY
 compose=(docker compose -f compose.sandbox.yaml -f compose.admin.sandbox.yaml)
+calendar_enabled=false
+if [[ -f .env.calendar ]]; then
+  compose+=(-f compose.calendar.sandbox.yaml)
+  calendar_enabled=true
+fi
 production_access="$(python3 - <<'PY'
 from pathlib import Path
 values = {}
@@ -50,6 +55,9 @@ fi
 # All three services use the same explicitly named image.
 "${compose[@]}" build --build-arg "APP_REVISION=$(git rev-parse HEAD)" bot
 "${compose[@]}" stop bot admin
+if [[ "$calendar_enabled" == true ]]; then
+  "${compose[@]}" stop calendar
+fi
 SETLIST_SANDBOX_DIR="$PWD" bash scripts/backup-sandbox.sh
 "${compose[@]}" run --rm --no-deps migrate
 "${compose[@]}" run --rm --no-deps --entrypoint .venv/bin/setlist-bot migrate --check
@@ -69,6 +77,10 @@ for attempt in range(15):
 else:
     raise SystemExit('Sandbox admin is not healthy; inspect logs before starting polling.')
 PY
+if [[ "$calendar_enabled" == true ]]; then
+  "${compose[@]}" up -d --no-build --no-deps calendar
+  "${compose[@]}" up -d --no-build calendar_proxy
+fi
 if [[ "$mode" == server ]]; then
   "${compose[@]}" up -d --no-build --no-deps bot
 else

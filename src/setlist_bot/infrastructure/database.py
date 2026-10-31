@@ -149,6 +149,20 @@ table(
     UniqueConstraint("user_id", "chat_id"),
 )
 table(
+    e.CalendarSubscription,
+    "calendar_subscriptions",
+    col("owner_id", Uuid, ForeignKey("users.id", ondelete="CASCADE")),
+    col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), nullable=True),
+    col("token_hash", String(64), unique=True),
+    col("language", String(2)),
+    col("enabled", Boolean),
+    col("version", Integer),
+    col("created_at", DateTime(timezone=True)),
+    UniqueConstraint("owner_id", "group_id", postgresql_nulls_not_distinct=True),
+    CheckConstraint("language IN ('ru', 'en')", name="language"),
+    CheckConstraint("version > 0", name="version"),
+)
+table(
     e.Song,
     "songs",
     tenant(),

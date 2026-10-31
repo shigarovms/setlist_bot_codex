@@ -54,6 +54,17 @@ class ChatBinding(Entity):
 
 
 @dataclass(kw_only=True)
+class CalendarSubscription(Entity):
+    owner_id: UUID
+    group_id: UUID | None
+    token_hash: str
+    language: str = "ru"
+    enabled: bool = True
+    version: int = 1
+    created_at: datetime = field(default_factory=now)
+
+
+@dataclass(kw_only=True)
 class Context(Entity):
     user_id: UUID
     chat_id: int

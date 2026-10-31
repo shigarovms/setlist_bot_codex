@@ -89,8 +89,10 @@ class Processor:
         bot_username: str = "",
         monitor: Monitor | None = None,
         analytics: UXBuffer | None = None,
+        calendar_public_base_url: str = "",
     ) -> None:
         self.analytics = analytics
+        self.calendar_public_base_url = calendar_public_base_url
         self.monitor = monitor
         self.engine = engine
         self.bot_username = bot_username
@@ -191,6 +193,7 @@ class Processor:
                 private=private,
                 chat_admin=chat_admin,
                 bot_username=self.bot_username,
+                calendar_public_base_url=self.calendar_public_base_url,
             )
             controller.chat_owner_id = chat_owner_id
             controller.sender_username = sender_username or ""

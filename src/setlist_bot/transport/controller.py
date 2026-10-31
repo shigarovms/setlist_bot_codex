@@ -139,11 +139,13 @@ class Controller:
         private: bool,
         chat_admin: bool = False,
         bot_username: str = "",
+        calendar_public_base_url: str = "",
     ) -> None:
         self.store, self.user, self.chat_id = store, user, chat_id
         self.chat_owner_id: int | None = None
         self.sender_username = ""
         self.bot_username = bot_username
+        self.calendar_public_base_url = calendar_public_base_url
         self.private, self.chat_admin = private, chat_admin
         self.language = user.language
         self.groups = Groups(store, user)
@@ -229,6 +231,14 @@ class Controller:
         args = raw_args.strip()
         command = head.lstrip("/").split("@")[0].lower()
         args = args.strip()
+        if command == "start" and args == "calendar":
+            return await self.execute("calendar")
+        if command == "start" and args.startswith("performance_"):
+            return await self.execute("my_concert " + args.removeprefix("performance_"))
+        if command == "calendar" or command.startswith("cal_"):
+            from setlist_bot.transport.calendars import handle_calendar
+
+            return await handle_calendar(self, command, args)
         if command.startswith(("ct_", "cr_")) or command in (
             "chat_transfer",
             "group_manage",
@@ -713,6 +723,8 @@ class Controller:
                 buttons.append((self.t("music_prev"), f"all_my_concerts {page - 1}"))
             if more:
                 buttons.append((self.t("music_next"), f"all_my_concerts {page + 1}"))
+            if self.calendar_public_base_url:
+                buttons.append((self.t("calendar_entry"), "calendar"))
             return Response(
                 self.t("all_my_concerts_title") if performances else self.t("empty"), buttons
             )

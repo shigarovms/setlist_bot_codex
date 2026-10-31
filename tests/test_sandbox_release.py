@@ -119,3 +119,19 @@ def test_sandbox_release_refuses_dirty_checkout_and_partial_admin_config(sandbox
     (app / ".env.admin").write_text("WEB_ADMIN_ALLOW_PRODUCTION=true\n")
     result, operations = invoke(sandbox_release)
     assert result.returncode != 0 and not operations
+
+
+def test_sandbox_release_stops_and_recreates_existing_calendar_without_touching_production(
+    sandbox_release,
+):
+    app, _, _ = sandbox_release
+    (app / ".env.calendar").write_text("CALENDAR_DATABASE_URL=PRIVATE_CALENDAR_CREDENTIAL\n")
+    result, operations = invoke(sandbox_release, "server")
+    assert result.returncode == 0
+    stops = [args for args in operations if "stop" in args]
+    assert any(args[-1] == "calendar" for args in stops)
+    starts = [args for args in operations if "up" in args]
+    assert any(args[-1] == "calendar" for args in starts)
+    assert any(args[-1] == "calendar_proxy" for args in starts)
+    assert all("compose.calendar.sandbox.yaml" in args for args in starts)
+    assert "PRIVATE_CALENDAR_CREDENTIAL" not in result.stdout + result.stderr

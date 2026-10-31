@@ -1,0 +1,41 @@
+# Optional public calendar. Never receives BOT_TOKEN or .env.admin.
+services:
+  bot:
+    environment:
+      CALENDAR_PUBLIC_BASE_URL: ${CALENDAR_PUBLIC_BASE_URL:-}
+  calendar:
+    image: setlist-sandbox-app
+    build: .
+    command: [".venv/bin/python", "-m", "setlist_bot.calendar"]
+    env_file: [.env.calendar]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp:size=8m"]
+    mem_limit: 192m
+    cpus: 0.5
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", ".venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz',timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  calendar_proxy:
+    image: caddy:2.10-alpine
+    environment:
+      CALENDAR_HOST: ${CALENDAR_HOST:?Configure calendar HTTPS hostname}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deploy/Caddyfile.calendar:/etc/caddy/Caddyfile:ro
+      - calendar_tls:/data
+      - calendar_caddy_config:/config
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.5
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      calendar:
+        condition: service_healthy
+volumes:
+  calendar_tls:
+  calendar_caddy_config:

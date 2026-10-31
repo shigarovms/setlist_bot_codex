@@ -1,0 +1,25 @@
+{
+    admin off
+    log {
+        format filter {
+            wrap json
+            fields {
+                request delete
+                uri delete
+            }
+        }
+    }
+}
+
+{$CALENDAR_HOST} {
+    @feed {
+        path /calendar/*.ics
+        method GET HEAD
+    }
+    handle @feed {
+        reverse_proxy calendar:8090
+    }
+    handle {
+        respond "Not found" 404
+    }
+}

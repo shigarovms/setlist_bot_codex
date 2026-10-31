@@ -493,6 +493,7 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
                             bot_username=me.username or "",
                             monitor=monitor,
                             analytics=analytics,
+                            calendar_public_base_url=settings.calendar_public_base_url,
                         ),
                         me.username or "",
                         diagnostics=settings.telegram_diagnostics,

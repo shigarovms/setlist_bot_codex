@@ -4,6 +4,8 @@ from aiogram.types import BotCommandScopeUnion
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from setlist_bot.calendar.settings import public_base_url
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -14,6 +16,13 @@ class Settings(BaseSettings):
     runtime_environment: Literal["development", "sandbox", "production"] = "development"
     runtime_location: str = Field(default="local", min_length=1, max_length=100)
     telegram_diagnostics: bool = False
+    calendar_public_base_url: str = ""
+
+    @field_validator("calendar_public_base_url")
+    @classmethod
+    def validate_calendar_url(cls, value: str) -> str:
+        return public_base_url(value)
+
     bot_command_legacy_languages: list[str] = Field(default_factory=list)
     bot_command_extra_scopes: list[BotCommandScopeUnion] = Field(default_factory=list)
 
