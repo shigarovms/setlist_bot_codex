@@ -187,7 +187,7 @@ async def test_recommendation_no_duration_latest_and_group_copy_heading(engine, 
     panel = await send(f"/use_concert {world.concert.id}")
     prompt = await send(action(panel, "Предложить свой вариант"))
     assert "в личном чате" in prompt.text.lower() and "кнопками" in prompt.text
-    copied = prompt.deliveries[0][1]
+    copied = await send(next(a for _, a in prompt.buttons if a.startswith("copy_text ")))
     assert copied.text.startswith("На выступлении ")
     assert "— 10:50" in copied.text and copied.monospace_body == title
     assert copied.text.endswith("\n\n" + title) and copied.force_reply

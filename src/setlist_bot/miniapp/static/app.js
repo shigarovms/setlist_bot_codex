@@ -1,4 +1,5 @@
 import { clone, clock, total, numbered, wire, move, asText } from "./model.js";
+import { DraftPersistence } from "./persistence.js";
 const tg = window.Telegram?.WebApp,
   $ = (id) => document.getElementById(id);
 const words = {
@@ -9,7 +10,13 @@ const words = {
     current: "Текущий черновик",
     catalog: "Репертуар",
     search: "Поиск песни",
-    private: "Сохраняется только личный черновик.",
+    private:
+      "Черновик сохраняется автоматически. Отправка группе — только по кнопке.",
+    publish: "📤 Предложить в группу и закрыть",
+    publishing: "Отправляем предложение в группу…",
+    queued: "Предложение в очереди. Нажмите ещё раз, чтобы проверить отправку.",
+    failed:
+      "Не удалось отправить предложение. Черновик сохранён. Можно повторить.",
     save: "Сохранить черновик",
     back: "Вернуться к боту",
     pause: "пауза",
@@ -28,7 +35,7 @@ const words = {
     ready: "Перетаскивайте за ручку ⋮⋮ или добавляйте кнопкой +",
     wait: "Сохранение…",
     missing: "Песня недоступна — удалите её или обновите каталог",
-    auth: "Откройте редактор кнопкой в личном чате Telegram-бота.",
+    auth: "Откройте редактор кнопкой под сет-листом в Telegram.",
     confirmClose:
       "Есть несохранённые изменения. Вернуться к боту без сохранения?",
     conflict:
@@ -50,7 +57,12 @@ const words = {
     current: "Current draft",
     catalog: "Repertoire",
     search: "Find a song",
-    private: "Saves only your private draft.",
+    private:
+      "Draft saved automatically. Only the publish button sends it to the group.",
+    publish: "📤 Propose to group and close",
+    publishing: "Sending your proposal…",
+    queued: "Proposal queued. Press again to check delivery.",
+    failed: "Delivery failed. Your draft is saved; you can retry.",
     save: "Save draft",
     back: "Back to bot",
     pause: "pause",
@@ -68,7 +80,7 @@ const words = {
     ready: "Drag using ⋮⋮ or add with +",
     wait: "Saving…",
     missing: "Song unavailable — remove it or refresh the catalog",
-    auth: "Open the editor from the Telegram bot's private chat.",
+    auth: "Open the editor using its button below a setlist in Telegram.",
     confirmClose: "You have unsaved changes. Return without saving?",
     conflict:
       "The draft changed on another device. Your input remains on screen. Current saved version:",
@@ -86,22 +98,22 @@ const words = {
 let lang = "ru",
   state = null,
   current = [],
-  baseline = "",
   undos = [],
   preview = null,
   historyIndex = -1,
   catalogPage = 0,
   busy = false,
   latest = null,
-  saveAttempt = null;
+  saver = null,
+  publishAttempt = null;
 const t = (key) => words[lang][key] ?? key;
-const session = new URLSearchParams(location.hash.slice(1)).get("session");
+let session = new URLSearchParams(location.hash.slice(1)).get("session");
 function status(text, error = false) {
   $("status").textContent = text;
   $("status").classList.toggle("error", error);
 }
 function dirty() {
-  return JSON.stringify(wire(current)) !== baseline;
+  return saver?.dirty() ?? false;
 }
 function theme() {
   // RU: Данные темы приходят из Telegram; список песен при смене темы не пересоздаём.
@@ -169,7 +181,7 @@ function withKeys(items) {
 function remember() {
   undos.push(clone(current));
   if (undos.length > 50) undos.shift();
-  saveAttempt = null;
+  publishAttempt = null;
 }
 function change(next) {
   if (busy) return;
@@ -179,6 +191,7 @@ function change(next) {
   }
   remember();
   current = next;
+  saver?.setEntries(current);
   render();
   status(t("dirty"));
 }
@@ -294,6 +307,8 @@ function render() {
   $("undo").disabled = !undos.length || !!preview || busy;
   $("add-pause").disabled = !!preview || busy;
   $("save").disabled = !!preview || !dirty() || busy;
+  $("publish").disabled =
+    !!preview || !current.length || busy || !!saver?.blocked;
   $("remove-zone").hidden = !!preview;
   dirty()
     ? tg?.enableClosingConfirmation?.()
@@ -486,7 +501,8 @@ $("use-history").addEventListener("click", () => {
 $("undo").addEventListener("click", () => {
   if (undos.length) {
     current = undos.pop();
-    saveAttempt = null;
+    publishAttempt = null;
+    saver?.setEntries(current);
     render();
     status(dirty() ? t("dirty") : t("ready"));
   }
@@ -530,39 +546,92 @@ $("pause-form").addEventListener("submit", async (event) => {
     $("pause-submit").disabled = false;
   }
 });
+function saveError(error) {
+  if (error.data?.latest) {
+    saver.blocked = true;
+    saver.lastError = error;
+    saver.pause();
+    latest = error.data.latest;
+    $("conflict-note").textContent = t("conflict");
+    $("latest-list").textContent = asText(latest.entries);
+    if (!$("conflict-dialog").open) $("conflict-dialog").showModal();
+  } else status(error.message, true);
+}
+function persistence() {
+  saver = new DraftPersistence(
+    state.version,
+    current,
+    (payload) => api("save", payload, "POST"),
+    (saved, unchanged) => {
+      state = { ...state, ...saved };
+      if (unchanged) current = withKeys(saved.entries);
+      if (!drag) render();
+      status(dirty() ? t("dirty") : t("saved"));
+    },
+    saveError,
+  );
+}
 $("save").addEventListener("click", async () => {
-  // RU: Тот же request_id при сетевом повторе исключает второе сохранение.
-  // EN: Keep the idempotency key on network failure; never retry with a newer version.
-  if (busy || preview) return;
+  if (busy || preview || !saver) return;
   busy = true;
+  saver.pause();
   render();
   status(t("wait"));
-  saveAttempt ??= crypto.randomUUID();
   try {
-    const saved = await api(
-      "save",
-      {
-        version: state.version,
-        entries: wire(current),
-        request_id: saveAttempt,
-      },
-      "POST",
-    );
-    state = { ...state, ...saved };
-    current = withKeys(saved.entries);
-    baseline = JSON.stringify(wire(current));
-    undos = [];
-    saveAttempt = null;
-    status(t("saved"));
-  } catch (error) {
-    if (error.data?.error === "conflict" && error.data.latest) {
-      latest = error.data.latest;
-      $("conflict-note").textContent = t("conflict");
-      $("latest-list").textContent = asText(latest.entries);
-      $("conflict-dialog").showModal();
-    } else status(error.message, true);
+    await saver.flush();
+  } catch {
+    /* saveError keeps the input visible */
   } finally {
     busy = false;
+    saver.resume();
+    render();
+  }
+});
+$("publish").addEventListener("click", async () => {
+  if (busy || preview || !saver || saver.blocked) return;
+  busy = true;
+  saver.pause();
+  render();
+  try {
+    await saver.flush();
+    publishAttempt ??= {
+      version: state.version,
+      entries: wire(current),
+      request_id: crypto.randomUUID(),
+    };
+    status(t("publishing"));
+    let result = await api("publish", publishAttempt, "POST");
+    if (result.version !== undefined) {
+      state.version = result.version;
+      saver.version = result.version;
+    }
+    // RU: Закрываем только после подтверждения доставки outbox, не после постановки в очередь.
+    // EN: No Bot API token in the web process; the existing worker confirms actual delivery.
+    for (
+      let attempt = 0;
+      result.status === "pending" && attempt < 30;
+      attempt++
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      result = await api("publication");
+    }
+    if (result.status === "delivered") {
+      tg?.disableClosingConfirmation?.();
+      status(
+        lang === "ru"
+          ? "Предложение отправлено в группу."
+          : "Proposal sent to the group.",
+      );
+      tg?.close?.();
+    } else if (result.status === "failed") {
+      publishAttempt = null;
+      status(t("failed"), true);
+    } else status(t("queued"));
+  } catch (error) {
+    saveError(error);
+  } finally {
+    busy = false;
+    saver.resume();
     render();
   }
 });
@@ -571,9 +640,10 @@ $("load-latest").addEventListener("click", () => {
   if (dirty() && !confirm(t("replace"))) return;
   state = { ...state, ...latest };
   current = withKeys(latest.entries);
-  baseline = JSON.stringify(wire(current));
+  saver?.pause();
+  persistence();
+  publishAttempt = null;
   undos = [];
-  saveAttempt = null;
   $("conflict-dialog").close();
   render();
   status(t("ready"));
@@ -589,9 +659,19 @@ $("copy-own").addEventListener("click", async () => {
 $("conflict-close").addEventListener("click", () =>
   $("conflict-dialog").close(),
 );
-$("back-bot").addEventListener("click", () => {
-  if (!state) return;
-  if (dirty() && !confirm(t("confirmClose"))) return;
+$("back-bot").addEventListener("click", async () => {
+  if (!state || busy || !saver) return;
+  busy = true;
+  saver.pause();
+  render();
+  try {
+    await saver.flush();
+  } catch {
+    busy = false;
+    saver.resume();
+    render();
+    return;
+  }
   if (tg?.openTelegramLink) tg.openTelegramLink(state.bot_url);
   else location.href = state.bot_url;
   tg?.close?.();
@@ -603,6 +683,7 @@ function labels() {
     "search-label": "search",
     "private-note": "private",
     save: "save",
+    publish: "publish",
     "back-bot": "back",
     "add-pause": "addPause",
     undo: "undo",
@@ -621,24 +702,29 @@ function labels() {
   document.documentElement.lang = lang;
 }
 async function boot() {
-  if (!session || !tg?.initData) {
+  if (!tg?.initData) {
     status(t("auth"), true);
     $("save").disabled = true;
     return;
   }
   try {
-    state = await api("state");
+    state = await api(session ? "state" : "launch");
+    session = state.session;
     lang = state.language === "en" ? "en" : "ru";
     labels();
     $("event").textContent = [state.group, state.date, state.title]
       .filter(Boolean)
       .join(" · ");
     current = withKeys(state.entries);
-    baseline = JSON.stringify(wire(current));
+    persistence();
     render();
     status(t("ready"));
   } catch (error) {
     status(error.message, true);
   }
 }
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && saver && dirty() && !saver.blocked)
+    saver.flush().catch(() => {});
+});
 boot();

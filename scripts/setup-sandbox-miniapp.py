@@ -35,6 +35,8 @@ READ_TABLES = (
     "confirmations",
     "alembic_version",
     "deployment_identity",
+    "chat_bindings",
+    "song_list_templates",
 )
 
 
@@ -49,7 +51,11 @@ def grants():
         f"GRANT SELECT ON {','.join(READ_TABLES)} TO {ROLE};\n"
         f"GRANT UPDATE(id) ON groups,memberships TO {ROLE};\n"
         f"GRANT INSERT,UPDATE(content,version) ON personal_drafts TO {ROLE};\n"
-        f"GRANT UPDATE(command,expires_at) ON confirmations TO {ROLE};\n"
+        f"GRANT INSERT,UPDATE(command,expires_at) ON confirmations TO {ROLE};\n"
+        f"GRANT INSERT,SELECT,UPDATE(snapshot) ON submissions TO {ROLE};\n"
+        f"GRANT INSERT ON outbox TO {ROLE};\n"
+        "GRANT SELECT(id,chat_id,group_id,concert_id,sent,delivered_at,discarded_at) "
+        f"ON outbox TO {ROLE};\n"
         f"GRANT INSERT ON admin_audit TO {ROLE};\n"
         f"ALTER ROLE {ROLE} SET statement_timeout='10s';\n"
         f"ALTER ROLE {ROLE} CONNECTION LIMIT 5;\n"

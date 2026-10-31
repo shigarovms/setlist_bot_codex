@@ -52,7 +52,7 @@ async def test_empty_concert_button_and_reply_create_first_variant_for_another_m
     send = messenger(engine)
     empty = await send(f"/use_concert {world.concert.id}", remember=100)
     prompt = await send(copy_button(empty), actor=2, remember=101)
-    assert "Длительность предлагаемого" in prompt.text
+    assert "Какой вариант" in prompt.text and not prompt.deliveries
     result = await send("Комета\nКомета", actor=2, reply=101)
     assert "гитарист · вариант 1" in dict((await variants(send, result, actor=2)).buttons)
     assert "1. Комета" in result.text and "2. Комета" in result.text
@@ -83,10 +83,14 @@ async def test_command_without_list_prompts_and_command_reply_keeps_anchor(engin
     send = messenger(engine)
     await send(f"/use_concert {world.concert.id}", remember=100)
     prompt = await send("/suggestion", remember=101)
-    assert prompt.force_reply and "Длительность" in prompt.text
+    assert not prompt.force_reply and prompt.buttons
+    text_prompt = await send(
+        next(a for _, a in prompt.buttons if a.startswith("copy_text ")), remember=103
+    )
+    assert text_prompt.force_reply and "Длительность" in text_prompt.text
     await send(f"/use_concert {world.concert2.id}")
     prompt2 = await send("/suggestion", reply=100, remember=102)
-    assert prompt2.force_reply
+    assert prompt2.suggestion_template_id
     result = await send("Комета", reply=102)
     assert "Новый год" in result.text
     assert "Не удалось" in (await send("/suggest")).text

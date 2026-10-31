@@ -9,7 +9,9 @@ from urllib.parse import parse_qsl
 from setlist_bot.domain.rules import require
 
 
-def verify_init_data(raw: str, key: bytes, at: int | None = None) -> int:
+def verify_init_data(
+    raw: str, key: bytes, at: int | None = None, *, allow_group: bool = False
+) -> int:
     require(0 < len(raw) <= 16384, "miniapp_auth")
     try:
         pairs = parse_qsl(raw, keep_blank_values=True, strict_parsing=True)
@@ -21,7 +23,12 @@ def verify_init_data(raw: str, key: bytes, at: int | None = None) -> int:
         require(hmac.compare_digest(signature, expected), "miniapp_auth")
         current = int(time.time()) if at is None else at
         require(-30 <= current - int(data["auth_date"]) <= 3600, "miniapp_auth")
-        require(data.get("chat_type", "") in ("", "private", "sender"), "private_only")
+        allowed = (
+            ("", "private", "sender", "group", "supergroup")
+            if allow_group
+            else ("", "private", "sender")
+        )
+        require(data.get("chat_type", "") in allowed, "private_only")
         actor = json.loads(data["user"])
         identifier = actor["id"]
         require(

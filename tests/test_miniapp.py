@@ -308,7 +308,28 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
             payload["request_id"] = str(uuid4())
             response = await client.post("/miniapp/api/save", json=payload, headers=headers)
             assert response.status == 409 and "latest" in await response.json()
+            payload["version"] = (await response.json())["latest"]["version"]
+            payload["request_id"] = str(uuid4())
+            published = await client.post("/miniapp/api/publish", json=payload, headers=headers)
+            assert published.status == 200, await published.text()
+            assert (await published.json())["status"] == "pending"
+            status = await client.get("/miniapp/api/publication", params=query, headers=headers)
+            assert status.status == 200 and (await status.json())["status"] == "pending"
+            from test_miniapp_group import template
+
+            launch_id = await template(engine, world)
+            launched = await client.get(
+                "/miniapp/api/launch",
+                headers={
+                    **headers,
+                    "Authorization": "tma "
+                    + signed(actor=2, chat_type="supergroup", start_param="sl_" + launch_id.hex),
+                },
+            )
+            assert launched.status == 200, await launched.text()
             for statement in (
+                "SELECT text FROM outbox",
+                "SELECT payload FROM outbox",
                 "SELECT * FROM support_messages",
                 "SELECT * FROM admin_sessions",
                 "SELECT token_ciphertext FROM calendar_subscriptions",

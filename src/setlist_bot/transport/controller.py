@@ -246,6 +246,28 @@ class Controller:
             return await self.execute("calendar")
         if command == "start" and args.startswith("performance_"):
             return await self.execute("my_concert " + args.removeprefix("performance_"))
+        if command == "start" and args.startswith("draft_"):
+            require(self.private, "private_only")
+            from setlist_bot.application.miniapp import MiniDrafts
+
+            source_template = await MiniDrafts(self.store, self.user).template_target(
+                UUID(args.removeprefix("draft_"))
+            )
+            private_snapshot, private_version, _ = await self.setlists.read(
+                source_template.group_id, source_template.concert_id, private=True
+            )
+            own_template = self.templates.create(
+                source_template.group_id,
+                source_template.concert_id,
+                private_snapshot,
+                private=True,
+                version=private_version,
+                group_epoch=source_template.group_epoch,
+                concert_epoch=source_template.concert_epoch,
+            )
+            return await self._suggestion_prompt(own_template.id)
+        if command == "copy_text":
+            return await self._text_suggestion(UUID(args))
         if command == "calendar" or command.startswith("cal_"):
             from setlist_bot.transport.calendars import handle_calendar
 
@@ -1758,44 +1780,9 @@ class Controller:
                 require(confirmed, "confirmation")
             snapshot, version, _ = await self.setlists.read(group_id, concert_id, private=True)
             require(version == (int(args) if command == "publish_draft" else expected), "conflict")
-            bindings = await self.store.find(ChatBinding, group_id=group_id)
-            require(bool(bindings), "no_chat")
-            require(any(block["items"] for block in snapshot["blocks"]), "empty_setlist")
-            submission = await self.setlists.publish(group_id, concert_id)
-            _, shared_version, _ = await self.setlists.read(group_id, concert_id)
-            submission.snapshot = {**submission.snapshot, "shared_version": shared_version}
-            public_body = (
-                group.name
-                + "\n"
-                + render_setlist(
-                    snapshot,
-                    await self.store.get(Concert, concert_id),
-                    group.language,
-                    version,
-                    private=True,
-                )
-            )
-            public_prefix = (
-                tr(group.language, "submission", name=await self.groups.name(group_id)) + "\n\n"
-            )
-            public_text = public_prefix + public_body
-            self.store.add(
-                Outbox(
-                    chat_id=bindings[0].chat_id,
-                    text=public_text,
-                    group_id=group_id,
-                    concert_id=concert_id,
-                    monospace=True,
-                    monospace_offset=len(public_prefix),
-                    payload={"setlist_snapshot": snapshot, "setlist_version": version},
-                    buttons=[
-                        [
-                            tr(group.language, "submission_apply"),
-                            f"apply_submission {submission.id}",
-                        ]
-                    ],
-                )
-            )
+            from setlist_bot.transport.publications import queue_publication
+
+            await queue_publication(self.store, self.user, group_id, concert_id, version)
             return Response(self.t("published"))
         require(False, "input")
         raise AssertionError("unreachable")
@@ -2156,6 +2143,7 @@ class Controller:
                     (self.t("cancel_button"), f"pick_cancel {session.id.hex}"),
                 ],
                 selection_id=session.id,
+                suggestion_template_id=template_id,
                 remove_keyboard=previous_data.get("stage") == "choosing",
                 keyboard_text=self.t("selection_keyboard_closed"),
                 previous_keyboard_id=previous_data.get("keyboard_message_id"),
@@ -2167,24 +2155,43 @@ class Controller:
                     context.group_id, context.concert_id
                 )
                 action = f"miniapp {editor.id.hex}"
-                response.buttons.insert(2, (self.t("miniapp_open"), action))
+                response.buttons.insert(0, (self.t("miniapp_open"), action))
                 response.web_apps[action] = (
                     self.miniapp_public_base_url + "/miniapp/#session=" + editor.id.hex
                 )
         else:
-            row = await self.inputs.create(
-                "suggestion",
-                context,
-                copied.text,
-                version=version,
-                monospace_body=copied.monospace_body,
-            )
-            copied.force_reply = True
-            copied.command_input_id = row.id
-            copied.cancel_action = f"input_cancel {row.id.hex}"
-            copied.cancel_label = self.t("cancel_button")
-            response = Response(comment)
-        response.deliveries.append((self.chat_id, copied))
+            buttons = [(self.t("selection_text_button"), f"copy_text {template_id.hex}")]
+            if self.bot_username:
+                if self.miniapp_public_base_url:
+                    buttons.insert(
+                        0,
+                        (
+                            self.t("miniapp_open"),
+                            f"https://t.me/{self.bot_username}?startapp=sl_{template_id.hex}",
+                        ),
+                    )
+                buttons.append(
+                    (
+                        self.t("suggestion_private_button"),
+                        f"https://t.me/{self.bot_username}?start=draft_{template_id.hex}",
+                    )
+                )
+            response = Response(comment, buttons, suggestion_template_id=template_id)
+        return response
+
+    async def _text_suggestion(self, template_id: UUID) -> Response:
+        _, response, context, version = await self._suggestion_parts(template_id)
+        row = await self.inputs.create(
+            "suggestion",
+            context,
+            response.text,
+            version=version,
+            monospace_body=response.monospace_body,
+        )
+        response.force_reply = True
+        response.command_input_id = row.id
+        response.cancel_action = f"input_cancel {row.id.hex}"
+        response.cancel_label = self.t("cancel_button")
         return response
 
     def _created_group(self, group: Group) -> Response:
@@ -2369,22 +2376,8 @@ class Controller:
             require(data["stage"] == "method", "selection_expired")
             data["stage"] = "text"
             self.selection.write(session, data)
-            comment, response, context, version = await self._suggestion_parts(
-                UUID(data["template_id"])
-            )
-            row = await self.inputs.create(
-                "suggestion",
-                context,
-                response.text,
-                version=version,
-                monospace_body=response.monospace_body,
-            )
-            response.force_reply = True
-            response.command_input_id = row.id
-            response.suggestion_template_id = UUID(data["template_id"])
+            response = await self._text_suggestion(UUID(data["template_id"]))
             response.selection_id = session.id
-            response.cancel_action = f"input_cancel {row.id.hex}"
-            response.cancel_label = self.t("cancel_button")
             return response
         await self.selection.save(identifier)
         context = await self.groups.context(self.chat_id, True)

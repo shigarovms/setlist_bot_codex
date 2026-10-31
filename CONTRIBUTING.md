@@ -73,6 +73,7 @@ git diff --check
 резервные копии, журналы и локальные кэши не публикуются.
 
 Для Mini App дополнительно: `node tests/miniapp-model.test.mjs` (Node 20+),
+`node tests/miniapp-persistence.test.mjs` (сериализация автосохранения и потерянные ответы),
 `pytest -q tests/test_miniapp.py tests/test_miniapp_setup.py tests/test_miniapp_browser.py`.
 Браузерный тест использует установленный Chromium и отдельную `_test`-базу;
 при отсутствии Chromium он пропускается. Telegram SDK подменяется только в тестовом

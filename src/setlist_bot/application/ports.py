@@ -23,6 +23,10 @@ class Store(Protocol):
 
     async def concert_cards(self, group_id: UUID, concert_id: UUID) -> list[Confirmation]: ...
 
+    async def publication_delivery(
+        self, identifier: UUID, group_id: UUID, concert_id: UUID, chat_id: int
+    ) -> str: ...
+
     async def concerts_for_user(
         self, user_id: UUID, current: date, *, offset: int, limit: int
     ) -> list[tuple[Concert, Group]]: ...

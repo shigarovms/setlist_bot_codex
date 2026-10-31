@@ -547,6 +547,32 @@ class PostgresStore:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def publication_delivery(
+        self, identifier: UUID, group_id: UUID, concert_id: UUID, chat_id: int
+    ) -> str:
+        # RU: Публичной SQL-роли не нужен текст других сообщений очереди.
+        # EN: Project delivery metadata only; do not grant SELECT on outbox bodies.
+        queue = metadata.tables["outbox"]
+        row = (
+            await self.session.execute(
+                select(queue.c.sent, queue.c.delivered_at, queue.c.discarded_at).where(
+                    queue.c.id == identifier,
+                    queue.c.group_id == group_id,
+                    queue.c.concert_id == concert_id,
+                    queue.c.chat_id == chat_id,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise AppError("not_found")
+        return (
+            "delivered"
+            if row.delivered_at
+            else "failed"
+            if row.sent or row.discarded_at
+            else "pending"
+        )
+
     async def get[T: e.Entity](self, kind: type[T], entity_id: UUID, *, lock: bool = False) -> T:
         identity: Any = kind.id
         query = select(kind).where(identity == entity_id)

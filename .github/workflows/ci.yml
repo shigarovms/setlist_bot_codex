@@ -36,4 +36,5 @@ jobs:
         with:
           node-version: "24"
       - run: node tests/miniapp-model.test.mjs
+      - run: node tests/miniapp-persistence.test.mjs
       - run: uv run pytest -q

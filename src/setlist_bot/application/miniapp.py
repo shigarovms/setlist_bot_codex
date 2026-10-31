@@ -12,7 +12,17 @@ from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.domain.concerts import button_date, today
-from setlist_bot.domain.entities import Concert, Confirmation, Revision, Setlist, Song, User, now
+from setlist_bot.domain.entities import (
+    ChatBinding,
+    Concert,
+    Confirmation,
+    Revision,
+    Setlist,
+    Song,
+    SongListTemplate,
+    User,
+    now,
+)
 from setlist_bot.domain.rules import flat_content, is_pause, normalize, parse_pause, require, totals
 
 
@@ -46,6 +56,7 @@ class MiniDrafts:
         group = await self.groups.access(group_id)
         concert = await self.store.get(Concert, concert_id)
         await self.lists.load(group_id, concert_id)
+        bindings = await self.store.find(ChatBinding, group_id=group_id)
         session = Confirmation(
             user_id=self.user.id,
             chat_id=self.user.telegram_id,
@@ -57,11 +68,55 @@ class MiniDrafts:
                     "concert_id": str(concert_id),
                     "group_epoch": group.lifecycle_version,
                     "concert_epoch": concert.lifecycle_version,
+                    "origin_chat_id": bindings[0].chat_id if bindings else None,
                 }
             ),
         )
         self.store.add(session)
         return session
+
+    async def template_target(self, identifier: UUID) -> SongListTemplate:
+        template = await self.store.get(SongListTemplate, identifier)
+        require(
+            template.expires_at > now() and template.owner_id in (None, self.user.id),
+            "template_expired",
+        )
+        await self.groups.can_suggest(template.group_id)
+        group = await self.groups.access(template.group_id)
+        await self.lists.load(group.id, template.concert_id)
+        concert = await self.store.get(Concert, template.concert_id)
+        require(
+            template.group_epoch == group.lifecycle_version
+            and template.concert_epoch == concert.lifecycle_version,
+            "template_expired",
+        )
+        if template.owner_id is None:
+            require(
+                bool(
+                    await self.store.find(ChatBinding, group_id=group.id, chat_id=template.chat_id)
+                ),
+                "template_expired",
+            )
+        return template
+
+    async def open_template(self, identifier: UUID) -> Confirmation:
+        template = await self.template_target(identifier)
+        # RU: Коллектив уже заблокирован; параллельные открытия не создадут две сессии.
+        # EN: Each authenticated participant gets their own owner-bound session.
+        for row in await self.store.find(
+            Confirmation, user_id=self.user.id, chat_id=self.user.telegram_id
+        ):
+            data = json.loads(row.command)
+            if (
+                data.get("kind") == "miniapp"
+                and data.get("launch_id") == str(identifier)
+                and row.expires_at > now()
+            ):
+                await self.load(row.id)
+                return row
+        row = await self.create(template.group_id, template.concert_id)
+        row.command = json.dumps({**json.loads(row.command), "launch_id": str(identifier)})
+        return row
 
     async def load(self, identifier: UUID) -> tuple[Confirmation, dict[str, Any], Concert]:
         row = await self.store.get(Confirmation, identifier)
@@ -89,18 +144,22 @@ class MiniDrafts:
         row = await self.store.get(Confirmation, identifier, lock=True)
         return row, json.loads(row.command), concert
 
-    async def state(self, identifier: UUID) -> dict[str, Any]:
+    async def state(self, identifier: UUID, *, catalog: bool = True) -> dict[str, Any]:
         _, data, concert = await self.load(identifier)
         group_id = UUID(data["group_id"])
         group = await self.groups.access(group_id)
         snapshot, version, _ = await self.lists.read(group_id, concert.id, private=True)
-        songs = await self.store.find(Song, group_id=group_id, archived=False)
+        songs = await self.store.find(Song, group_id=group_id, archived=False) if catalog else []
         require(len(songs) <= 5000, "miniapp_catalog_limit")
         counts: Counter[str] = Counter()
-        active = {c.id for c in await self.store.find(Concert, group_id=group_id, deleted_at=None)}
+        active = (
+            {c.id for c in await self.store.find(Concert, group_id=group_id, deleted_at=None)}
+            if catalog
+            else set()
+        )
         revisions = {
             s.approved_revision_id
-            for s in await self.store.find(Setlist, group_id=group_id)
+            for s in (await self.store.find(Setlist, group_id=group_id) if catalog else [])
             if s.approved_revision_id and s.concert_id in active
         }
         for revision in await self.store.get_many(Revision, revisions):
@@ -112,13 +171,14 @@ class MiniDrafts:
                     if not is_pause(item)
                 )
         songs.sort(key=lambda song: (-counts[str(song.id)], normalize(song.title), song.id))
-        return {
+        result = {
             "language": self.user.language,
             "group": group.name,
             "title": concert.title,
             "date": button_date(concert.date),
             "concert_id": str(concert.id),
             "version": version,
+            "session": str(identifier),
             "default_pause_seconds": snapshot["default_pause_seconds"],
             "planned_seconds": concert.performance_duration_seconds,
             "entries": entries(snapshot),
@@ -132,6 +192,9 @@ class MiniDrafts:
                 for song in songs
             ],
         }
+        if not catalog:
+            result.pop("catalog")
+        return result
 
     async def history(self, identifier: UUID, index: int) -> dict[str, Any]:
         _, data, target = await self.load(identifier)
@@ -187,7 +250,7 @@ class MiniDrafts:
         ).hexdigest()
         if data.get("save_request") == request_id:
             require(data.get("save_fingerprint") == fingerprint, "input")
-            current = await self.state(identifier)
+            current = await self.state(identifier, catalog=False)
             require(current["version"] == data["saved_version"], "conflict")
             return current
         group_id = UUID(data["group_id"])
@@ -226,7 +289,7 @@ class MiniDrafts:
             ordered=ordered,
             pauses_before=before,
         )
-        result = await self.state(identifier)
+        result = await self.state(identifier, catalog=False)
         row.command = json.dumps(
             {
                 **data,
@@ -239,6 +302,26 @@ class MiniDrafts:
             self.store, self.user, "miniapp_draft_saved", concert.id, group_id=str(group_id)
         )
         return result
+
+    async def publication_status(self, identifier: UUID) -> dict[str, Any]:
+        _, data, concert = await self.load(identifier)
+        require(
+            bool(data.get("publication_id")) and data.get("origin_chat_id") is not None, "input"
+        )
+        require(
+            bool(
+                await self.store.find(
+                    ChatBinding, group_id=concert.group_id, chat_id=data["origin_chat_id"]
+                )
+            ),
+            "miniapp_expired",
+        )
+        return {
+            "version": data.get("publication_version"),
+            "status": await self.store.publication_delivery(
+                UUID(data["publication_id"]), concert.group_id, concert.id, data["origin_chat_id"]
+            ),
+        }
 
     async def pause(self, identifier: UUID, value: str) -> int:
         await self.load(identifier)

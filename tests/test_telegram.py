@@ -267,7 +267,9 @@ async def test_router_accepts_only_replies_to_its_working_messages_and_persists_
         assert session.sent[-1].entities[0].type == "pre"
         assert session.sent[-1].parse_mode is None
         copy = session.sent[-1].reply_markup.inline_keyboard[0][0].callback_data
-        prompt = await send(copy, callback=True, actor=2)
+        await send(copy, callback=True, actor=2)
+        text_method = latest_message(session).reply_markup.inline_keyboard[0][0].callback_data
+        prompt = await send(text_method, callback=True, actor=2)
         assert latest_message(session).reply_markup.force_reply
         assert "Длительность" in prompt.text
         assert await send("Просто обсуждение") is None

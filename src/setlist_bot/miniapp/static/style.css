@@ -283,6 +283,9 @@ footer p {
   color: var(--hint);
   margin: 0 0 3px;
 }
+#publish {
+  grid-column: 1/-1;
+}
 dialog {
   max-width: min(92vw, 500px);
   max-height: 85vh;

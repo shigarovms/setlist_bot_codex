@@ -109,7 +109,10 @@ class Browser:
 @pytest.mark.skipif(
     shutil.which("chromium") is None, reason="Chromium is optional for local UI check"
 )
-async def test_phone_editor_drag_history_pause_save_and_live_themes(engine, world, tmp_path):
+@pytest.mark.parametrize("public_launch", [False, True])
+async def test_phone_editor_drag_history_pause_save_and_live_themes(
+    engine, world, tmp_path, public_launch
+):
     from datetime import date
 
     async with PostgresUnitOfWork(engine) as uow:
@@ -121,6 +124,9 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(engine, worl
         _, version, _ = await lists.read(world.group.id, past.id)
         await lists.approve(world.group.id, past.id, version)
     identifier, _ = await session(engine, world)
+    from test_miniapp_group import template
+
+    public_template = await template(engine, world) if public_launch else None
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         http_port = sock.getsockname()[1]
@@ -178,18 +184,32 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(engine, worl
             stub = """
                 window.Telegram={WebApp:{initData:INIT_DATA,colorScheme:'light',themeParams:{},
                 onEvent:(name,fn)=>{window.themeChange=fn},ready:()=>{},expand:()=>{},
+                close:()=>{window.testClosed=true},
                 enableClosingConfirmation:()=>{},disableClosingConfirmation:()=>{}}};
-            """.replace("INIT_DATA", json.dumps(signed()))
+            """.replace(
+                "INIT_DATA",
+                json.dumps(
+                    signed(chat_type="supergroup", start_param="sl_" + public_template.hex)
+                    if public_launch
+                    else signed()
+                ),
+            )
             await browser.call("Page.addScriptToEvaluateOnNewDocument", {"source": stub})
             await browser.call(
                 "Page.navigate",
                 {
-                    "url": origin + "/miniapp/#session=" + str(identifier),
+                    "url": origin
+                    + "/miniapp/"
+                    + ("" if public_launch else "#session=" + str(identifier)),
                 },
             )
             await browser.wait("document.querySelectorAll('.catalog-entry').length===1")
             await browser.js(
                 "document.querySelector('.add').click(); document.querySelector('.add').click()"
+            )
+            # No manual Save: exercise the debounce and real HTTP autosave.
+            await browser.wait(
+                "document.getElementById('status').textContent.includes('Сохранено')"
             )
             await browser.js(
                 "document.getElementById('add-pause').click(); "
@@ -220,7 +240,8 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(engine, worl
             await browser.js("document.getElementById('undo').click()")
             await browser.js("document.getElementById('save').click()")
             await browser.wait(
-                "document.getElementById('status').textContent.includes('Сохранено')"
+                "document.getElementById('save').disabled && "
+                "!document.getElementById('publish').disabled"
             )
             await browser.js("window.Telegram.WebApp.colorScheme='light'; window.themeChange()")
             assert await browser.js("document.documentElement.dataset.theme") == "light"
@@ -235,6 +256,27 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(engine, worl
                 assert not (
                     await Setlists(uow.store, world.admin).read(world.group.id, world.concert.id)
                 )[0]["blocks"][0]["items"]
+            # Explicit publication must wait for the existing Telegram worker acknowledgement.
+            from aiogram import Bot
+            from test_telegram import FakeTelegram
+
+            from setlist_bot.domain.entities import Outbox
+            from setlist_bot.main import deliver_one_outbox
+
+            await browser.js("document.getElementById('publish').click()")
+            for _ in range(50):
+                async with PostgresUnitOfWork(engine) as uow:
+                    pending = await uow.store.find(Outbox)
+                if pending:
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("Publication was not queued")
+            assert not await browser.js("window.testClosed === true")
+            bot = Bot("123456:TEST", session=FakeTelegram())
+            assert await deliver_one_outbox(bot, engine)
+            await browser.wait("window.testClosed === true")
+            await bot.session.close()
     finally:
         if browser:
             browser.reader.cancel()

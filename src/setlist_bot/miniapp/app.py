@@ -3,6 +3,7 @@ import base64
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from urllib.parse import parse_qsl
 from uuid import UUID
 
 from aiohttp import web
@@ -75,6 +76,7 @@ async def asset(request: web.Request) -> web.Response:
         "index.html": "text/html",
         "app.js": "text/javascript",
         "model.js": "text/javascript",
+        "persistence.js": "text/javascript",
         "style.css": "text/css",
     }
     if name not in types:
@@ -93,7 +95,7 @@ async def api(request: web.Request) -> web.Response:
     if not header.startswith("tma "):
         raise AppError("miniapp_auth")
     actor = verify_init_data(
-        header[4:], base64.urlsafe_b64decode(settings.auth_key.get_secret_value())
+        header[4:], base64.urlsafe_b64decode(settings.auth_key.get_secret_value()), allow_group=True
     )
     if request.app[GATE].locked():
         return web.json_response(
@@ -103,16 +105,31 @@ async def api(request: web.Request) -> web.Response:
         payload = await request.json() if request.method == "POST" else dict(request.query)
         if not isinstance(payload, dict):
             raise ValueError("Expected an object")
-        if not isinstance(payload.get("session"), str):
-            raise ValueError("Expected a session ID")
-        identifier = UUID(payload["session"])
         async with PostgresUnitOfWork(request.app[ENGINE]) as uow:
-            row = await uow.store.get(Confirmation, identifier)
-            user = await uow.store.get(User, row.user_id)
-            if user.telegram_id != actor:
+            users = await uow.store.find(User, telegram_id=actor)
+            if not users:
                 raise AppError("miniapp_auth")
+            user = users[0]
             request[LANGUAGE] = user.language
             service = MiniDrafts(uow.store, user)
+            if operation == "launch" and request.method == "GET":
+                # RU: Цель берётся только из проверенного Telegram start_param.
+                # EN: Never authorize a target supplied through initDataUnsafe or URL alone.
+                start = dict(parse_qsl(header[4:])).get("start_param", "")
+                if not start.startswith("sl_"):
+                    raise AppError("miniapp_auth")
+                editor = await service.open_template(UUID(start[3:]))
+                result = await service.state(editor.id)
+                result["bot_url"] = (
+                    f"https://t.me/{settings.bot_username}?start=performance_{result['concert_id']}"
+                )
+                return web.json_response(result)
+            if not isinstance(payload.get("session"), str):
+                raise ValueError("Expected a session ID")
+            identifier = UUID(payload["session"])
+            owner_session = await uow.store.get(Confirmation, identifier)
+            if owner_session.user_id != user.id:
+                raise AppError("miniapp_auth")
             if request.method == "GET" and operation == "state":
                 result = await service.state(identifier)
                 result["bot_url"] = (
@@ -128,7 +145,7 @@ async def api(request: web.Request) -> web.Response:
                         identifier, payload["version"], payload["entries"], payload["request_id"]
                     )
                 except AppError as exc:
-                    if exc.code != "conflict":
+                    if exc.code not in ("conflict", "selection_catalog_changed"):
                         raise
                     result = {
                         "error": "conflict",
@@ -139,6 +156,30 @@ async def api(request: web.Request) -> web.Response:
                 result["bot_url"] = (
                     f"https://t.me/{settings.bot_username}?start=performance_{result['concert_id']}"
                 )
+            elif request.method == "POST" and operation == "publish":
+                from setlist_bot.miniapp.publication import publish
+
+                try:
+                    result = await publish(
+                        service,
+                        identifier,
+                        payload["version"],
+                        payload["entries"],
+                        payload["request_id"],
+                    )
+                except AppError as exc:
+                    if exc.code not in ("conflict", "selection_catalog_changed"):
+                        raise
+                    return web.json_response(
+                        {
+                            "error": exc.code,
+                            "message": tr(user.language, exc.code),
+                            "latest": await service.state(identifier),
+                        },
+                        status=409,
+                    )
+            elif request.method == "GET" and operation == "publication":
+                result = await service.publication_status(identifier)
             else:
                 raise web.HTTPMethodNotAllowed(request.method, ["GET", "POST"])
         return web.json_response(result)

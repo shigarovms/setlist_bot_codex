@@ -33,10 +33,11 @@ async def test_button_only_on_current_editable_setlist_and_empty_prompt(engine, 
     assert empty.buttons[0][0] == "Предложить свой вариант"
     prompt = await send(button(empty, "copy_list "), actor=2)
     assert "Какой вариант вы предлагаете?" in prompt.text
-    assert prompt.deliveries[0][1].force_reply and prompt.deliveries[0][1].suggestion_template_id
+    text_prompt = await send(button(prompt, "copy_text "), actor=2)
+    assert text_prompt.force_reply and text_prompt.suggestion_template_id
     shown = await send("/suggestion\nКомета\nКомета")
     prompt = await send(button(shown, "copy_list "), actor=2)
-    assert prompt.deliveries[0][1].text.endswith("Комета\nКомета") and not prompt.buttons
+    assert (await send(button(prompt, "copy_text "), actor=2)).text.endswith("Комета\nКомета")
     history = await send("/history")
     old_revision = next(data for label, data in history.buttons if "вариант 1" in label)
     old_card = await send(old_revision)
@@ -58,7 +59,8 @@ async def test_private_template_cannot_be_read_by_other_user_or_forwarded(engine
     await send(f"/use_concert {world.concert.id}", private=True)
     shown = await send("/suggestion\nКомета", private=True)
     copy = button(shown, "copy_list ")
-    assert "Комета" in (await send(copy, private=True)).deliveries[0][1].text
+    methods = await send(copy, private=True)
+    assert "Комета" in (await send(button(methods, "pick_text "), private=True)).text
     assert "не найден" in (await send(copy, actor=2, private=True)).text
     assert "не найден" in (await send(copy, actor=2)).text
     processor = Processor(engine)
@@ -95,10 +97,8 @@ async def test_shared_copy_in_private_chat_is_owned_and_buttons_expire(engine, w
     await send(f"/use_group {world.group.id}", private=True)
     await send(f"/use_concert {world.concert.id}", private=True)
     private_shared = await send("/shared", private=True)
-    assert (
-        "Комета"
-        in (await send(button(private_shared, "copy_list "), private=True)).deliveries[0][1].text
-    )
+    methods = await send(button(private_shared, "copy_list "), private=True)
+    assert "Комета" in (await send(button(methods, "pick_text "), private=True)).text
     async with PostgresUnitOfWork(engine) as uow:
         for template in await uow.store.find(SongListTemplate):
             template.expires_at = now() - timedelta(seconds=1)
