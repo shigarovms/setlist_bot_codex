@@ -116,6 +116,19 @@ curl -fsS -o /dev/null -w '%{http_code}\n' https://212-192-217-128.sslip.io/mini
 Ожидается `running healthy` и HTTP 200. API без Telegram-авторизации должен
 отказать; успешная загрузка HTML сама по себе не открывает данные.
 
+Если сервис `miniapp` healthy, а установщик остановился сразу после запуска Caddy,
+это этап проверки публичного HTTPS. Обновлённый установщик ждёт готовности и
+отдельно сообщает HTTP-код, ошибку сертификата, DNS или таймаут. Для повторения
+уже подготовленной установки пересборка и миграции не нужны:
+
+```bash
+git pull --ff-only origin feature/web-admin
+python3 scripts/setup-sandbox-miniapp.py
+```
+
+Если HTTPS так и не готов, пришлите только код HTTP из curl и последние строки
+`docker logs --tail 30 setlist-sandbox-calendar_proxy-1`; приватные env-файлы не нужны.
+
 ## Проверки подготовки выпуска
 
 - Полный проект: **476 passed**, 169,31 с, отдельная `setlist_test`.
@@ -143,6 +156,9 @@ git log --oneline --grep='^feat: add private Telegram Mini App editor$'
 ```
 
 После выбора точного SHA, в **sandbox**:
+
+Если установлен последующий коммит `fix: wait for public Mini App HTTPS readiness`,
+сначала выполните `git revert <SHA_этого_исправления>`, затем откат ниже.
 
 ```bash
 docker stop setlist-sandbox-miniapp-1

@@ -8,10 +8,13 @@ import json
 import os
 import re
 import secrets
+import socket
+import ssl
 import subprocess
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import urlopen
 
@@ -60,6 +63,39 @@ def calendar_helpers():
     helpers = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(helpers)
     return helpers
+
+
+def wait_for_https(origin, attempts=20):
+    """RU: Caddy может ещё запускаться после up -d. EN: Readiness needs retries."""
+    reason = "not checked"
+    for attempt in range(attempts):
+        try:
+            with urlopen(origin + "/miniapp/", timeout=3) as response:
+                if response.status == 200:
+                    return
+                reason = f"HTTP {response.status}"
+        except HTTPError as exc:
+            reason = f"HTTP {exc.code}"
+        except (URLError, OSError, TimeoutError) as exc:
+            cause = exc.reason if isinstance(exc, URLError) else exc
+            # RU: Не печатаем произвольное исключение: там могут быть приватные данные.
+            # EN: Only classify the failure; never dump request headers or credentials.
+            if isinstance(cause, ssl.SSLCertVerificationError):
+                reason = "TLS certificate verification failed"
+            elif isinstance(cause, socket.gaierror):
+                reason = "DNS resolution failed"
+            elif isinstance(cause, TimeoutError):
+                reason = "connection timed out"
+            else:
+                reason = "HTTPS connection failed"
+        if attempt + 1 < attempts:
+            time.sleep(2)
+    raise SystemExit(
+        f"Mini App public HTTPS is not ready ({reason}). "
+        "Check: docker logs --tail 30 setlist-sandbox-calendar_proxy-1 . "
+        "Then rerun python3 scripts/setup-sandbox-miniapp.py . "
+        "Bot was not recreated by this setup step."
+    )
 
 
 def main():
@@ -195,9 +231,8 @@ def main():
     if not ready:
         raise SystemExit("Mini App unhealthy; bot was not recreated. Inspect miniapp logs.")
     run(compose + ["up", "-d", "--no-build", "--force-recreate", "calendar_proxy"])
-    with urlopen(origin + "/miniapp/", timeout=10) as response:
-        if response.status != 200:
-            raise SystemExit("Public Mini App is unavailable; bot was not recreated.")
+    print("Waiting for public Mini App HTTPS...", flush=True)
+    wait_for_https(origin)
     run(compose + ["up", "-d", "--no-build", "--no-deps", "bot"])
     run(compose + ["ps", "bot", "miniapp", "calendar", "calendar_proxy"])
     print("Sandbox Mini App enabled. Open a personal draft and choose the HTML editor.")

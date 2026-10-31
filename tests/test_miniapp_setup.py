@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -76,7 +77,8 @@ def test_setup_limits_scope_keeps_secrets_private_and_checks_https_before_bot(
     if https_ok:
         setup.main()
     else:
-        with pytest.raises(OSError):
+        monkeypatch.setattr(setup.time, "sleep", lambda _: None)
+        with pytest.raises(SystemExit, match="HTTPS connection failed"):
             setup.main()
     private = (tmp_path / ".env.miniapp").read_text()
     assert "MINIAPP_AUTH_KEY=" in private and "SYNTHETIC" not in private
@@ -90,3 +92,50 @@ def test_setup_limits_scope_keeps_secrets_private_and_checks_https_before_bot(
     if https_ok:
         assert operations.index(["HTTPS"]) < bot[0]
         assert "compose.admin.production-access.yaml" in operations[bot[0]]
+
+
+def test_https_retries_startup_errors_and_stops_after_success(monkeypatch):
+    setup = load("miniapp")
+    events, sleeps = [], []
+
+    class Ready:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    def probe(url, **kwargs):
+        events.append(url)
+        if len(events) == 1:
+            raise URLError(ConnectionRefusedError())
+        if len(events) == 2:
+            raise HTTPError(url, 502, "Bad gateway", {}, None)
+        return Ready()
+
+    monkeypatch.setattr(setup, "urlopen", probe)
+    monkeypatch.setattr(setup.time, "sleep", sleeps.append)
+    setup.wait_for_https("https://test.example.org")
+    assert len(events) == 3 and sleeps == [2, 2]
+
+
+def test_https_failure_classification_does_not_expose_exception_text(monkeypatch):
+    import socket
+    import ssl
+
+    setup = load("miniapp")
+    for cause, label in (
+        (ssl.SSLCertVerificationError("PRIVATE_TOKEN"), "TLS certificate verification failed"),
+        (socket.gaierror("PRIVATE_TOKEN"), "DNS resolution failed"),
+        (TimeoutError("PRIVATE_TOKEN"), "connection timed out"),
+    ):
+
+        def probe(*args, cause=cause, **kwargs):
+            raise URLError(cause)
+
+        monkeypatch.setattr(setup, "urlopen", probe)
+        with pytest.raises(SystemExit, match=label) as error:
+            setup.wait_for_https("https://test.example.org", attempts=1)
+        assert "PRIVATE_TOKEN" not in str(error.value)
