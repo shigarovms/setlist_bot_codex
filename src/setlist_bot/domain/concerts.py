@@ -89,7 +89,9 @@ def parse_concert(value: str) -> tuple[date, str]:
         shift = {"сегодня": 0, "today": 0, "завтра": 1, "tomorrow": 1, "послезавтра": 2}
         return current + timedelta(days=shift[relative[1].lower()]), text[relative.end() :].strip()
     numeric = re.match(
-        r"^(\d{4}|\d{1,2})\s*([./-])\s*(\d{1,2})(?:\s*[./-]\s*(\d{2}|\d{4}))?(?=\s|$)", text
+        r"^(\d{4}|\d{1,2})\s*([./-])\s*(\d{1,2})(?:\s*[./-]\s*(\d{2}|\d{4}))?\.?"
+        r"(?=\s|$)",
+        text,
     )
     try:
         if numeric:
@@ -107,7 +109,7 @@ def parse_concert(value: str) -> tuple[date, str]:
             result = upcoming_date(day, month, year)
             return result, text[numeric.end() :].strip()
         named = re.match(
-            r"^(\d{1,2})\s+([А-Яа-яЁёA-Za-z]+)\.?(?:\s+(\d{4})(?:\s*г(?:од(?:а)?)?\.?)?)?(?=\s|$)",
+            r"^(\d{1,2})\s*([А-Яа-яЁёA-Za-z]+)\.?(?:\s+(\d{4})(?:\s*г(?:од(?:а)?)?\.?)?)?(?=\s|$)",
             text,
         )
         if named:

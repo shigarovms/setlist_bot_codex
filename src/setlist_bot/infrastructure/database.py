@@ -106,7 +106,7 @@ table(
 table(
     e.Group,
     "groups",
-    col("setlist_style", String(10), server_default="mono"),
+    col("setlist_style", String(10), server_default="article"),
     col("admins_only_suggestions", Boolean, server_default="false"),
     col("owner_id", Uuid, ForeignKey("users.id"), nullable=True),
     col("reminders_enabled", Boolean, server_default="true"),

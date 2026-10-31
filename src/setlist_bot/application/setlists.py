@@ -50,10 +50,32 @@ class Setlists:
         self.store, self.user = store, user
         self.groups = Groups(store, user)
 
-    async def create(self, group_id: UUID, when: date, title: str = "") -> Concert:
+    async def create(
+        self,
+        group_id: UUID,
+        when: date,
+        title: str = "",
+        *,
+        duration: int | None = None,
+        performance_type: str = "",
+        city: str = "",
+        info: str = "",
+    ) -> Concert:
         group = await self.groups.access(group_id, admin=True)
         require(len(title) <= 200, "concert_input")
-        concert = Concert(group_id=group_id, date=when, title=title)
+        require(
+            duration is None or type(duration) is int and 0 < duration <= 86400, "pause_duration"
+        )
+        require(len(performance_type) <= 200 and len(city) <= 200 and len(info) <= 2000, "input")
+        concert = Concert(
+            group_id=group_id,
+            date=when,
+            title=title,
+            performance_duration_seconds=duration,
+            performance_type=performance_type,
+            city=city,
+            extra_info=info,
+        )
         self.store.add(concert)
         await self.store.flush()
         setlist = Setlist(

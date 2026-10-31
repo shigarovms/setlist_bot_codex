@@ -26,7 +26,7 @@ class User(Entity):
 
 @dataclass(kw_only=True)
 class Group(Entity):
-    setlist_style: str = "mono"
+    setlist_style: str = "article"
     admins_only_suggestions: bool = False
     owner_id: UUID | None = None
     reminders_enabled: bool = True

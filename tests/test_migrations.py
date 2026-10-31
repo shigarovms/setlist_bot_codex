@@ -28,6 +28,34 @@ async def test_migration_round_trip_and_schema_match(database_url, engine):
         alembic(database_url, *args)
 
 
+async def test_article_default_retains_audited_mono_and_all_performance_data(
+    database_url, engine, world
+):
+    from uuid import uuid4
+
+    from setlist_bot.domain.entities import AdminAudit
+    from setlist_bot.infrastructure.database import PostgresUnitOfWork
+
+    async with PostgresUnitOfWork(engine) as uow:
+        uow.store.add(
+            AdminAudit(
+                actor="telegram:1",
+                source="telegram",
+                action="group_setlist_settings",
+                target=str(world.group.id),
+                request_key=uuid4().hex,
+                details={"style": "mono"},
+            )
+        )
+    alembic(database_url, "downgrade", "c04f7a92d531")
+    alembic(database_url, "upgrade", "head")
+    async with engine.connect() as connection:
+        styles = dict((await connection.execute(text("SELECT id,setlist_style FROM groups"))).all())
+        assert styles[world.group.id] == "mono" and styles[world.other.id] == "article"
+        assert (await connection.execute(text("SELECT count(*) FROM concerts"))).scalar_one() == 3
+        assert (await connection.execute(text("SELECT count(*) FROM songs"))).scalar_one() == 2
+
+
 async def test_new_migration_refuses_loss_of_event_details(database_url, engine, world):
     await clear_synthetic_audit(engine)
     async with engine.begin() as connection:

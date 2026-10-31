@@ -87,6 +87,8 @@ MESSAGES = {
         "concert_city_label": "Город",
         "concert_info_label": "Доп. информация",
         "concert_create_preview": "Создать выступление {date} {title}?",
+        "concert_correct": "✏️ Изменить данные",
+        "concert_fields_conflict": "Для одного поля указаны разные значения. Оставьте одну длительность, город или тип и отправьте данные снова.",
         "concert_details_intro": "Эти поля необязательны. Их можно задать сейчас или позже в Опциях сет-листа этого выступления.",
         "concert_created": "Выступление создано.",
         "set_field": "Задать: {field}",
@@ -124,7 +126,7 @@ MESSAGES = {
             "Архивировать: /archive Название; восстановить: /unarchive Название.\n"
             "Предложения по каталогу: /proposals. Изменения участника одобряет администратор.\n"
             "\n"
-            "Выступление: /concert 2026-12-31  Название; выбор выступления: /concerts.\n"
+            "Выступление: /concert 23.04 Клуб Космос. 45мин. Сольник. Москва; выбор: /concerts.\n"
             "Список: /setlist; общий вариант: /shared.\n"
             "Добавить: /add Комета. Для списка — одна песня или длительность паузы на строку: 5 мин, 2:30, 1 час 13 минут 43 секунды.\n"
             "Новый вариант: /suggestion Названия песен. История сохраняется.\n"
@@ -312,7 +314,7 @@ MESSAGES = {
         "input_alias": "Название песни  Альтернативное название",
         "input_archive": "Название песни для архивирования.",
         "input_unarchive": "Название песни из архива для восстановления.",
-        "input_concert": "Введите дату и, при желании, название выступления.\nНапример: 22 декабря Сольное выступление",
+        "input_concert": "Ответьте на это сообщение датой выступления. Можно добавить название, длительность, тип, город и примечание. Между полями — два пробела или точка с пробелом. Порядок дополнительных параметров — любой.\n\n23.04 Клуб Космос. 45мин. Сольник. Москва\n\n25 декабря 2027 Арарат арена  Ереван  корп  31 мин\n\n15дек Летний парк  Питер  корп  1:25:00\n\nПеред созданием покажу, как понял данные.",
         "input_register": "Как другие участники коллектива будут видеть вас в боте? Например: Илья — гитара.",
         "input_language": "Язык интерфейса: ru или en.",
         "input_group_language": "Язык общего чата: ru или en.",
@@ -323,7 +325,7 @@ MESSAGES = {
         "input_add": "Название песни, например: Комета. Несколько песен — по одной на строку. Паузы — длительностью на отдельной строке: 5 мин, 2:30, 3 мин 30 сек.",
         "input_add_ambiguous": "Нашлось несколько песен. Уточните полное название ответом на этот вопрос:",
         "setlist_input": "Проверьте позиции и аргументы. /help — формат команды.",
-        "concert_input": "Введите дату и, при желании, название выступления.\nНапример: 22 декабря Сольное выступление",
+        "concert_input": "Ответьте на это сообщение датой выступления. Можно добавить название, длительность, тип, город и примечание. Между полями — два пробела или точка с пробелом. Порядок дополнительных параметров — любой.\n\n23.04 Клуб Космос. 45мин. Сольник. Москва\n\n25 декабря 2027 Арарат арена  Ереван  корп  31 мин\n\n15дек Летний парк  Питер  корп  1:25:00\n\nПеред созданием покажу, как понял данные.",
         "group_name": "Укажите название коллектива от 1 до 200 символов.",
         "group_creation_prompt": "🎸 Создание нового коллектива\n\nВведите название вашего коллектива ответом на это сообщение.\n/cancel — отмена.",
         "group_creation_review": "Вы хотите создать коллектив с названием «{name}»?\n\nВсё правильно?",
@@ -488,6 +490,8 @@ MESSAGES = {
         "concert_city_label": "City",
         "concert_info_label": "Additional information",
         "concert_create_preview": "Create event on {date} {title}?",
+        "concert_correct": "✏️ Edit details",
+        "concert_fields_conflict": "Multiple values for the same field. Keep one duration, city or type and resend.",
         "concert_details_intro": "These fields are optional. Set them now or later in this event’s setlist Options.",
         "concert_created": "Event created.",
         "set_field": "Set: {field}",
@@ -525,7 +529,7 @@ MESSAGES = {
             "Archive: /archive Title; restore: /unarchive Title.\n"
             "Catalog proposals: /proposals. Member changes require administrator approval.\n"
             "\n"
-            "Concert: /concert 2026-12-31  Title; select a concert: /concerts.\n"
+            "Performance: /concert 23.04 Cosmos Club. 45min. Solo. Moscow; select: /concerts.\n"
             "Setlist: /setlist; shared version: /shared.\n"
             "Add: /add Comet. For lists enter one song or pause duration per line: 5 min, 2:30, 1 hour 13 minutes 43 seconds.\n"
             "New variant: /suggestion Song titles. History is preserved.\n"
@@ -713,7 +717,7 @@ MESSAGES = {
         "input_alias": "Song title  Alternative title",
         "input_archive": "Title of the song to archive.",
         "input_unarchive": "Title of the archived song to restore.",
-        "input_concert": "Enter the date and an optional event title.\nFor example: 22 December Solo concert",
+        "input_concert": "Reply with the performance date. Optionally add a title, duration, type, city and notes. Separate fields with two spaces or a period followed by a space. Additional fields may be in any order.\n\n23.04 Cosmos Club. 45min. Solo. Moscow\n\n25 December 2027 Ararat Arena  Yerevan  corporate  31 min\n\n15Dec Summer Park  Saint Petersburg  corporate  1:25:00\n\nReview all recognized fields before creating.",
         "input_register": "How should this group see your name? For example: Alex — guitar.",
         "input_language": "Interface language: ru or en.",
         "input_group_language": "Group chat language: ru or en.",
@@ -724,7 +728,7 @@ MESSAGES = {
         "input_add": "Song title, for example: Comet. Multiple songs: one per line. Pauses: separate duration lines such as 5 min, 2:30, 3 min 30 sec.",
         "input_add_ambiguous": "Several songs matched. Reply with the complete title to clarify:",
         "setlist_input": "Check positions and arguments. See /help.",
-        "concert_input": "Enter the date and an optional event title.\nFor example: 22 December Solo concert",
+        "concert_input": "Reply with the performance date. Optionally add a title, duration, type, city and notes. Separate fields with two spaces or a period followed by a space. Additional fields may be in any order.\n\n23.04 Cosmos Club. 45min. Solo. Moscow\n\n25 December 2027 Ararat Arena  Yerevan  corporate  31 min\n\n15Dec Summer Park  Saint Petersburg  corporate  1:25:00\n\nReview all recognized fields before creating.",
         "group_name": "Use a group name between 1 and 200 characters.",
         "group_creation_prompt": "🎸 Create a new musical group\n\nReply to this message with the name of your group.\n/cancel — cancel.",
         "group_creation_review": "Create a musical group named “{name}”?\n\nIs this correct?",

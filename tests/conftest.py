@@ -78,6 +78,8 @@ async def world(engine: AsyncEngine) -> SimpleNamespace:
         await uow.store.flush()
         group = await Groups(uow.store, admin).create("Коллектив А", -100)
         other = await Groups(uow.store, admin).create("Коллектив Б", -200)
+        # Legacy-format regressions keep explicit mono; new-default tests create fresh groups.
+        group.setlist_style = other.setlist_style = "mono"
         membership = await Groups(uow.store, member).register(group.id, "гитарист")
         await uow.store.flush()
         await Groups(uow.store, admin).decide_member(group.id, membership.id, True)

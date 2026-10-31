@@ -63,6 +63,7 @@ from setlist_bot.domain.importing import (
     parse_import,
     read_table,
 )
+from setlist_bot.domain.performance_input import parse_performance
 from setlist_bot.domain.rules import (
     AppError,
     SongListError,
@@ -1236,17 +1237,60 @@ class Controller:
             return Response(self.t("ok"))
         if command == "concert":
             await self.groups.access(group_id, admin=True)
-            when, title = parse_concert(args)
-            require(len(title) <= 200, "concert_input")
-            return await self.confirm(
-                context,
-                f"create_concert {when.isoformat()} {title}",
-                self.t(
-                    "concert_create_preview",
-                    date=confirmation_date(when, self.language),
-                    title=title,
-                ),
+            performance_input = parse_performance(args)
+            preview = self.t(
+                "concert_create_preview",
+                date=confirmation_date(performance_input.date, self.language),
+                title=performance_input.title,
             )
+            for label, value in (
+                (
+                    "concert_duration_label",
+                    short_duration(performance_input.duration, self.language, minutes_only=True)
+                    if performance_input.duration
+                    else "",
+                ),
+                ("concert_type_label", performance_input.performance_type),
+                ("concert_city_label", performance_input.city),
+                ("concert_info_label", performance_input.info),
+            ):
+                if value:
+                    preview += "\n" + self.t(label) + ": " + value
+            response = await self.confirm(
+                context,
+                "create_performance " + json.dumps(performance_input.payload(), ensure_ascii=False),
+                preview,
+            )
+            key = response.buttons[0][1].split()[1]
+            response.buttons.insert(1, (self.t("concert_correct"), "concert_correct " + key))
+            return response
+        if command == "concert_correct":
+            row = await self.store.get(Confirmation, UUID(args))
+            data = json.loads(row.command)
+            require(
+                row.user_id == self.user.id
+                and row.chat_id == self.chat_id
+                and row.expires_at > now()
+                and data.get("kind") is None
+                and data.get("command", "").startswith("create_performance ")
+                and data["group_id"] == str(group_id)
+                and data["group_epoch"] == group.lifecycle_version,
+                "confirmation",
+            )
+            await self.groups.access(group_id, admin=True)
+            await self.store.delete(row)
+            return await self._request_input("concert", context)
+        if command == "create_performance":
+            require(confirmed, "confirmation")
+            values = json.loads(args)
+            concert = await self.setlists.create(
+                group_id, date.fromisoformat(values.pop("date")), **values
+            )
+            context.concert_id = concert.id
+            _, context.observed_version, _ = await self.setlists.read(
+                group_id, concert.id, private=self.private
+            )
+            return self._concert_settings(concert, created=True)
         if command == "create_concert":
             require(confirmed, "confirmation")
             raw_date, _, title = args.partition(" ")

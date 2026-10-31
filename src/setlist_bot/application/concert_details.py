@@ -1,4 +1,3 @@
-import re
 from uuid import UUID
 
 from setlist_bot.application.activity import record_activity
@@ -7,7 +6,8 @@ from setlist_bot.application.message_refresh import queue_card_refreshes
 from setlist_bot.application.ports import Store
 from setlist_bot.domain.concerts import parse_concert
 from setlist_bot.domain.entities import Concert, User
-from setlist_bot.domain.rules import parse_pause, require
+from setlist_bot.domain.performance_input import performance_seconds
+from setlist_bot.domain.rules import require
 
 FIELDS = {
     "concert_date",
@@ -35,13 +35,7 @@ class ConcertDetails:
             require(not suffix, "concert_input")
             concert.date = when
         elif field == "concert_duration":
-            if re.fullmatch(r"\d{1,2}:\d{2}", text):
-                text += ":00"
-            seconds = (
-                None
-                if text == "-"
-                else parse_pause(text + " мин" if text.isascii() and text.isdecimal() else text)
-            )
+            seconds = None if text == "-" else performance_seconds(text)
             require(text == "-" or seconds is not None, "pause_duration")
             concert.performance_duration_seconds = seconds
         else:

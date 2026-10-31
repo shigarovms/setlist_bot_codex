@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.methods import (
     AnswerCallbackQuery,
     DeleteMessage,
@@ -15,6 +16,7 @@ from aiogram.methods import (
     GetChatAdministrators,
     SendDocument,
     SendMessage,
+    SendRichMessage,
 )
 from aiogram.types import CallbackQuery, Chat, ChatMemberOwner, Message, Update, User
 
@@ -48,6 +50,10 @@ class FakeTelegram(BaseSession):
         pass
 
     async def make_request(self, bot, method, timeout=None):
+        if isinstance(method, SendRichMessage):
+            # Legacy text scenarios exercise explicit Article rejection and safe fallback.
+            # ArticleTelegram covers rich-message success with the real Telegram schema.
+            raise TelegramBadRequest(method=method, message="synthetic Article rejection")
         if isinstance(method, DeleteMessage):
             self.deleted.append(method)
             return True
@@ -181,11 +187,12 @@ async def test_aiogram_end_to_end_with_fake_telegram_and_real_postgres(engine, t
         suggested = await send(
             "/suggestion@setlist_test_bot\nСлавик\nСердце лёд\nМеланхолия\nПодожгу\nАтомы\nVIBY"
         )
-        assert "1. Славик" in suggested.text and "6. VIBY" in suggested.text
+        # New groups default to Article; its text fallback keeps three table columns.
+        assert "1  Славик" in suggested.text and "6  VIBY" in suggested.text
         assert any(row[0].text == "⚙️ Опции" for row in suggested.reply_markup.inline_keyboard)
         await send("/setlist", actor=2)
         appended = await send("/add\nКомета\nРадуга", actor=2)
-        assert "7. Комета" in appended.text and "8. Радуга" in appended.text
+        assert "7  Комета" in appended.text and "8  Радуга" in appended.text
 
 
 async def test_backup_is_sent_as_zip_document_through_telegram_transport(engine, world):
