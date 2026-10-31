@@ -31,6 +31,7 @@ from setlist_bot.application.trash import RETENTION, Trash
 from setlist_bot.domain.concerts import (
     button_date,
     compact_duration,
+    confirmation_date,
     date_label,
     parse_concert,
     today,
@@ -190,6 +191,10 @@ class Controller:
             payload["concert_epoch"] = (
                 await self.store.get(Concert, context.concert_id)
             ).lifecycle_version
+            if command.startswith("concert_date "):
+                payload["metadata_version"] = (
+                    await self.store.get(Concert, context.concert_id)
+                ).metadata_version
         if command.startswith(("change_shared approve", "publish_draft")):
             assert context.group_id is not None and context.concert_id is not None
             snapshot, _, _ = await self.setlists.read(
@@ -952,6 +957,8 @@ class Controller:
                     and data.get("concert_epoch", 0) == target_concert.lifecycle_version,
                     "confirmation",
                 )
+                if "metadata_version" in data:
+                    require(target_concert.metadata_version == data["metadata_version"], "conflict")
             for identifier, song_version in data.get("song_versions", {}).items():
                 song = await self.catalog.song(group_id, UUID(identifier))
                 require(song.version == song_version, "conflict")
@@ -1231,7 +1238,11 @@ class Controller:
             return await self.confirm(
                 context,
                 f"create_concert {when.isoformat()} {title}",
-                self.t("concert_create_preview", date=date_label(when, self.language), title=title),
+                self.t(
+                    "concert_create_preview",
+                    date=confirmation_date(when, self.language),
+                    title=title,
+                ),
             )
         if command == "create_concert":
             require(confirmed, "confirmation")
@@ -1249,6 +1260,15 @@ class Controller:
             if not args:
                 return await self._request_input(command, context)
             assert context.concert_id is not None
+            if command == "concert_date" and not confirmed:
+                when, suffix = parse_concert(args)
+                require(not suffix, "concert_input")
+                return await self.confirm(
+                    context,
+                    f"concert_date {when.isoformat()}",
+                    self.t("concert_date_preview", date=confirmation_date(when, self.language)),
+                    concert=True,
+                )
             concert = await ConcertDetails(self.store, self.user).update(
                 group_id, context.concert_id, command, args
             )
@@ -1280,8 +1300,17 @@ class Controller:
                 buttons.append((self.t("menu_back"), "concerts"))
             else:
                 buttons.insert(0, (self.t("past_concerts"), "past_concerts"))
+                memberships = await self.store.find(
+                    Membership, user_id=self.user.id, status="active"
+                )
+                mine = await self.store.get_many(Group, {member.group_id for member in memberships})
+                if sum(item.deleted_at is None for item in mine) > 1:
+                    buttons.insert(0, (self.t("my_groups"), "groups"))
             buttons.append((self.t("new_concert"), "concert"))
-            return Response(self.t("past_concerts" if past else "choose_concert"), buttons)
+            return Response(
+                self.t("past_concerts") if past else self.t("concerts_heading", name=group.name),
+                buttons,
+            )
         if command == "use_concert":
             await self.setlists.load(group_id, UUID(args))
             context.concert_id = UUID(args)
@@ -1818,6 +1847,7 @@ class Controller:
         buttons = []
         for command, value, label in (
             ("concert_title", concert.title, "concert_title_label"),
+            ("concert_date", confirmation_date(concert.date, self.language), "concert_date_label"),
             (
                 "concert_duration",
                 compact_duration(concert.performance_duration_seconds, self.language)

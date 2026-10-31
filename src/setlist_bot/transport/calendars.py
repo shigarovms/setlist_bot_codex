@@ -140,6 +140,13 @@ async def handle_calendar(c: Controller, command: str, args: str) -> Response:
         if (page + 1) * 20 < len(choices):
             buttons.append((c.t("music_next"), f"{command} {page + 1}"))
         buttons.append((c.t("calendar_links"), "cal_links") if command == "calendar" else back)
+        context = await c.groups.context(c.chat_id, True)
+        buttons.append(
+            (
+                c.t("back_concerts"),
+                f"group_concerts {context.group_id.hex}" if context.group_id else "groups",
+            )
+        )
         return Response(c.t("calendar_menu"), buttons)
     if command in ("cal_scope", "cal_create"):
         group_id = None if args == "all" else UUID(args)

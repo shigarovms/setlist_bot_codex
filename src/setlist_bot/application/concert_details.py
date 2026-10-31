@@ -5,10 +5,18 @@ from setlist_bot.application.activity import record_activity
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.message_refresh import queue_card_refreshes
 from setlist_bot.application.ports import Store
+from setlist_bot.domain.concerts import parse_concert
 from setlist_bot.domain.entities import Concert, User
 from setlist_bot.domain.rules import parse_pause, require
 
-FIELDS = {"concert_duration", "concert_type", "concert_title", "concert_city", "concert_info"}
+FIELDS = {
+    "concert_date",
+    "concert_duration",
+    "concert_type",
+    "concert_title",
+    "concert_city",
+    "concert_info",
+}
 PRESET_TYPES = {"solo": "Сольник", "corporate": "Корпорат", "festival": "Фест"}
 
 
@@ -22,7 +30,11 @@ class ConcertDetails:
         require(concert.group_id == group_id and concert.deleted_at is None, "not_found")
         require(field in FIELDS, "input")
         text = value.strip()
-        if field == "concert_duration":
+        if field == "concert_date":
+            when, suffix = parse_concert(text)
+            require(not suffix, "concert_input")
+            concert.date = when
+        elif field == "concert_duration":
             if re.fullmatch(r"\d{1,2}:\d{2}", text):
                 text += ":00"
             seconds = (

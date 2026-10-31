@@ -121,11 +121,13 @@ class Exports:
         """
         config = settings(self.user.export_settings)
         lighting = await self._lighting_snapshot(source.group_id, source.payload["snapshot"])
+        current_concert = await self.store.get(Concert, source.concert_id)
         if (
             source.payload.get("settings") == config
             and source.payload.get("layout_version") == LAYOUT_VERSION
             and source.payload.get("bot_username") == self.bot_username
             and source.payload.get("lighting_snapshot") == lighting
+            and source.payload.get("concert_date") == current_concert.date.isoformat()
         ):
             return source
         # RU: Старое меню может многократно запросить те же обновлённые поля.
@@ -138,6 +140,8 @@ class Exports:
             "layout_version": LAYOUT_VERSION,
             "bot_username": self.bot_username,
             "lighting_snapshot": lighting,
+            "concert_date": current_concert.date.isoformat(),
+            "concert_label": date_label(current_concert.date, source.payload.get("language", "ru")),
         }
         candidates = await self.store.find(
             ExportSnapshot,

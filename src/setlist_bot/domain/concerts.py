@@ -54,6 +54,27 @@ def button_date(value: date) -> str:
     return value.strftime("%d.%m" if value.year == today().year else "%d.%m.%Y")
 
 
+def confirmation_date(value: date, language: str = "ru") -> str:
+    months = MONTHS if language == "ru" else EN_MONTHS
+    return f"{value.day:02d} {months[value.month - 1]} {value.year}"
+
+
+def upcoming_date(day: int, month: int, year: int | None = None) -> date:
+    if year is not None:
+        return date(year, month, day)
+    current = today()
+    # RU: Ближайшая будущая дата, включая сегодня и следующий високосный год.
+    # EN: Invalid dates such as 31 April never become valid through rollover.
+    for candidate_year in range(current.year, min(current.year + 9, 10000)):
+        try:
+            candidate = date(candidate_year, month, day)
+        except ValueError:
+            continue
+        if candidate >= current:
+            return candidate
+    raise ValueError("Invalid calendar date")
+
+
 def compact_duration(seconds: int, language: str = "ru") -> str:
     hours, minutes = divmod((seconds + 59) // 60, 60)
     h, m = ("ч", "мин") if language == "ru" else ("h", "min")
@@ -72,6 +93,7 @@ def parse_concert(value: str) -> tuple[date, str]:
     )
     try:
         if numeric:
+            year: int | None
             first, _, second, third = numeric.groups()
             if len(first) == 4:
                 if third is None:
@@ -79,10 +101,10 @@ def parse_concert(value: str) -> tuple[date, str]:
                 year, month, day = int(first), int(second), int(third)
             else:
                 day, month = int(first), int(second)
-                year = int(third) if third else current.year
-                if year < 100:
+                year = int(third) if third else None
+                if year is not None and year < 100:
                     year += 2000
-            result = date(year, month, day)
+            result = upcoming_date(day, month, year)
             return result, text[numeric.end() :].strip()
         named = re.match(
             r"^(\d{1,2})\s+([А-Яа-яЁёA-Za-z]+)\.?(?:\s+(\d{4})(?:\s*г(?:од(?:а)?)?\.?)?)?(?=\s|$)",
@@ -109,8 +131,8 @@ def parse_concert(value: str) -> tuple[date, str]:
                 ]
             if len(indexes) != 1:
                 raise ValueError()
-            return date(
-                int(named[3]) if named[3] else current.year, indexes[0], int(named[1])
+            return upcoming_date(
+                int(named[1]), indexes[0], int(named[3]) if named[3] else None
             ), text[named.end() :].strip()
     except ValueError as exc:
         raise AppError("concert_input") from exc

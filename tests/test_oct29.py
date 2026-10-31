@@ -75,8 +75,9 @@ async def test_settings_title_type_order_clear_cancel_and_back(engine, world):
     await send(f"/use_group {world.group.id}", private=True)
     await send(f"/use_concert {world.concert.id}", private=True)
     panel = await send(f"concert_settings {world.concert.id}", private=True)
-    assert [label for label, _ in panel.buttons][:4] == [
+    assert [label for label, _ in panel.buttons][:5] == [
         "Изменить: Название",
+        "Изменить: Дата выступления",
         "Задать: Длительность выступления",
         "Изменить: Тип выступления",
         "Задать: Город",
