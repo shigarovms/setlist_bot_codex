@@ -73,7 +73,7 @@ class FakeCommandAPI:
 def legacy():
     return [
         BotCommand(command=name, description="Old command")
-        for name in ("all", "calc", "add_track", "remove_track")
+        for name in ("all", "calc", "add_track", "remove_track", "group")
     ]
 
 
@@ -106,6 +106,8 @@ def test_public_menu_registry_matches_real_commands_and_localization():
     assert "publish" in MENUS["private"] and "publish" not in MENUS["group"]
     assert "approve" in MENUS["admin"] and "approve" not in MENUS["private"]
     assert "delete_group" in MENUS["admin"] and "delete_group" not in MENUS["group"]
+    assert "new_band" in MENUS["group"] and "new_band" in MENUS["admin"]
+    assert all("group" not in names for names in MENUS.values())
     assert (
         menu_commands("private", "")[0].description == menu_commands("private", "ru")[0].description
     )

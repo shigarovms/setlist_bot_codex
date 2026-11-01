@@ -134,7 +134,8 @@ async def test_aiogram_end_to_end_with_fake_telegram_and_real_postgres(engine, t
             await dispatcher.feed_update(bot, update)
             return session.sent[-1]
 
-        registration = await send("/group Репетиционная группа")
+        registration = await send("/new_band@setlist_test_bot Репетиционная группа")
+        assert session.admin_requests == 1
         assert (
             "Создан"
             in (

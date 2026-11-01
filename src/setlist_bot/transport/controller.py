@@ -243,6 +243,10 @@ class Controller:
             raw_args = raw_args[1:]
         args = raw_args.strip()
         command = head.lstrip("/").split("@")[0].lower()
+        # RU: Старые сообщения /group работают, но в меню и справке только /new_band.
+        # EN: Normalize the hidden alias before invoking the existing creation workflow.
+        if command == "group":
+            command = "new_band"
         args = args.strip()
         if command == "start" and args == "calendar":
             return await self.execute("calendar")
@@ -714,7 +718,7 @@ class Controller:
                 if str(job.id) not in protected_music_imports:
                     job.status = "cancelled"
             return Response(self.t("ok"), delete_message_ids=cleanup)
-        if command == "group":
+        if command == "new_band":
             require(not self.private, "group_only")
             await self.groups.check_creation_chat(self.chat_id)
             if not args:

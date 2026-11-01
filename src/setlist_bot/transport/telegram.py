@@ -1085,7 +1085,10 @@ def make_router(processor: Processor, username: str, *, diagnostics: bool = Fals
             return
         chat_admin = False
         chat_owner_id = None
-        if head.split("@", 1)[0].casefold() in ("/group", "/chat_transfer") and not private:
+        if (
+            head.split("@", 1)[0].casefold() in ("/new_band", "/group", "/chat_transfer")
+            and not private
+        ):
             administrators = await bot.get_chat_administrators(message.chat.id)
             chat_admin = any(member.user.id == message.from_user.id for member in administrators)
             chat_owner_id = next(

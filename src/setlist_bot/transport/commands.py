@@ -76,7 +76,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "publish": ("Предложить личный черновик группе", "Publish your personal draft to the group"),
     "language": ("Личный язык интерфейса: ru или en", "Personal interface language: ru or en"),
     "cancel": ("Отменить ожидающие подтверждения", "Cancel pending confirmations"),
-    "group": ("Создать новый коллектив", "Create a new musical group"),
+    "new_band": ("Создать новый коллектив", "Create a new musical group"),
     "members": (
         "Заявки и участники коллектива (админ)",
         "Membership applications and members (admin)",
@@ -149,8 +149,8 @@ MENUS: dict[Menu, tuple[str, ...]] = {
     + COMMON[6:]
     + ("publish", "language")
     + ADMIN,
-    "group": COMMON + ("register", "group"),
-    "admin": COMMON + ("register", "group", "approve", "reopen") + ADMIN,
+    "group": COMMON + ("register", "new_band"),
+    "admin": COMMON + ("register", "new_band", "approve", "reopen") + ADMIN,
 }
 GLOBAL_SCOPES: tuple[tuple[BotCommandScopeUnion, Menu], ...] = (
     (BotCommandScopeDefault(), "default"),

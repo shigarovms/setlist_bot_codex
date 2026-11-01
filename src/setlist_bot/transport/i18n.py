@@ -115,9 +115,9 @@ MESSAGES = {
         "flat_list_only": "Сет-лист теперь единый список песен и пауз. Введите паузу отдельной строкой, например 5 мин.",
         "draft_publish": "Предложить этот вариант",
         "draft_edit": "Изменить",
-        "welcome": "Бот для репертуара и сет-листов. /help — команды.\nАдминистратор создаёт коллектив командой /group Название в общем чате. Участники: /register Ваша роль.",
+        "welcome": "Бот для репертуара и сет-листов. /help — команды.\nАдминистратор создаёт коллектив командой /new_band Название в общем чате. Участники: /register Ваша роль.",
         "help": (
-            "Начало работы\nПоддержка: /support.\nСоздание коллектива: /group Название. Начать может любой участник; владелец Telegram-чата подтверждает создание, становится владельцем коллектива, а инициатор — администратором. Управление правами — /members.\nВступление: /register Имя в коллективе. После подтверждения заявки доступны сет-листы; участникам команда меняет имя.\nВ личном чате: /groups — выбрать коллектив. Можно участвовать в нескольких коллективах.\nЯзык интерфейса: /language ru; язык коллектива: /group_language ru.\n\nОсновная команда — /concerts. Предстоящие и прошедшие выступления; ✅ означает, что сет-лист утверждён. Выберите выступление, чтобы открыть список, предложить вариант или перейти к настройкам. Кнопка «Новое выступление» создаёт выступление.\nВ личке /all_my_concerts — все ваши выступления из всех коллективов; /calendar — подписка на календарь Google или Apple.\nНапоминания накануне: /reminders.\n\n"
+            "Начало работы\nПоддержка: /support.\nСоздание коллектива: /new_band Название. Начать может любой участник; владелец Telegram-чата подтверждает создание, становится владельцем коллектива, а инициатор — администратором. Управление правами — /members.\nВступление: /register Имя в коллективе. После подтверждения заявки доступны сет-листы; участникам команда меняет имя.\nВ личном чате: /groups — выбрать коллектив. Можно участвовать в нескольких коллективах.\nЯзык интерфейса: /language ru; язык коллектива: /group_language ru.\n\nОсновная команда — /concerts. Предстоящие и прошедшие выступления; ✅ означает, что сет-лист утверждён. Выберите выступление, чтобы открыть список, предложить вариант или перейти к настройкам. Кнопка «Новое выступление» создаёт выступление.\nВ личке /all_my_concerts — все ваши выступления из всех коллективов; /calendar — подписка на календарь Google или Apple.\nНапоминания накануне: /reminders.\n\n"
             "Добавить новые песни: /add_new_songs Название  03:38  свет  110  комментарий.\n"
             "Последние три поля необязательны. Между полями — два и более пробела; - — пустое поле. Можно вставить таблицу текстом или как Article ответом на запрос команды.\n"
             "Каталог: /catalog [поиск]; архив песен: /archived.\n"
@@ -297,7 +297,7 @@ MESSAGES = {
         "not_found": "Объект не найден или недоступен.",
         "select_group": "Сначала выберите коллектив: /groups.",
         "select_concert": "Сначала выберите выступление: /concerts.",
-        "bind_first": "Сначала администратор должен создать в этом чате коллектив: /group Название.",
+        "bind_first": "Сначала администратор должен создать в этом чате коллектив: /new_band Название.",
         "view_first": "Сначала откройте /setlist, чтобы увидеть актуальную версию.",
         "conflict": "Данные уже изменились. Откройте актуальный список и повторите действие.",
         "approved": "Сет-лист утверждён. Администратор может выполнить /reopen.",
@@ -335,7 +335,7 @@ MESSAGES = {
         "group_creation_edit": "✏️ Нет, изменить название",
         "group_creation_cancel": "❌ Отмена",
         "group_creation_cancelled": "Создание коллектива отменено.",
-        "group_creation_expired": "Этот диалог уже завершён или устарел. Начните заново командой /group.",
+        "group_creation_expired": "Этот диалог уже завершён или устарел. Начните заново командой /new_band.",
         "invitation": "Приглашение не найдено, использовано или истекло.",
         "already_member": "Вы уже участник или ваша заявка ожидает подтверждения.",
         "already_bound": "В этом чате уже создан коллектив.",
@@ -520,9 +520,9 @@ MESSAGES = {
         "flat_list_only": "Setlists now contain a flat sequence of songs and pauses. Enter a pause as a duration-only line, for example 5 min.",
         "draft_publish": "Propose this variant",
         "draft_edit": "Edit",
-        "welcome": "Repertoire and setlist bot. /help — commands.\nA Telegram chat administrator creates the group with /group Name in the group chat. Members: /register Your role.",
+        "welcome": "Repertoire and setlist bot. /help — commands.\nA Telegram chat administrator creates the group with /new_band Name in the group chat. Members: /register Your role.",
         "help": (
-            "Getting started\nSupport: /support.\nAny member can start registration with /group Name. The Telegram chat owner confirms and owns the group; the initiator becomes an administrator. Manage roles with /members.\nJoin: /register Group display name. Existing members use it to change their name.\nPrivate chat: /groups — choose a group; you can belong to several.\nLanguage: /language en; group language: /group_language en.\n\nYour main tool is /concerts: upcoming and past performances; ✅ means the setlist is approved. Select an event to open its setlist, propose a variant or change settings. New concert creates an event.\nIn private, /all_my_concerts lists your performances across all groups; /calendar connects a Google or Apple calendar subscription.\nDay-before reminders: /reminders.\n\n"
+            "Getting started\nSupport: /support.\nAny member can start registration with /new_band Name. The Telegram chat owner confirms and owns the group; the initiator becomes an administrator. Manage roles with /members.\nJoin: /register Group display name. Existing members use it to change their name.\nPrivate chat: /groups — choose a group; you can belong to several.\nLanguage: /language en; group language: /group_language en.\n\nYour main tool is /concerts: upcoming and past performances; ✅ means the setlist is approved. Select an event to open its setlist, propose a variant or change settings. New concert creates an event.\nIn private, /all_my_concerts lists your performances across all groups; /calendar connects a Google or Apple calendar subscription.\nDay-before reminders: /reminders.\n\n"
             "Add new songs: /add_new_songs Title  03:38  lights  110  comment.\n"
             "The last three fields are optional. Separate fields with two or more spaces; - means empty. Paste a text table or reply to the command prompt with an Article table.\n"
             "Catalog: /catalog [search]; archived songs: /archived.\n"
@@ -702,7 +702,7 @@ MESSAGES = {
         "not_found": "Object not found or unavailable.",
         "select_group": "Select a group first: /groups.",
         "select_concert": "Select a concert first: /concerts.",
-        "bind_first": "An administrator must create the group in this chat first: /group Name.",
+        "bind_first": "An administrator must create the group in this chat first: /new_band Name.",
         "view_first": "Open /setlist first to see the current version.",
         "conflict": "The data has changed. Open the current list and repeat your action.",
         "approved": "The setlist is approved. An administrator can /reopen it.",
@@ -740,7 +740,7 @@ MESSAGES = {
         "group_creation_edit": "✏️ No, change the name",
         "group_creation_cancel": "❌ Cancel",
         "group_creation_cancelled": "Group creation cancelled.",
-        "group_creation_expired": "This dialog has ended or expired. Start again with /group.",
+        "group_creation_expired": "This dialog has ended or expired. Start again with /new_band.",
         "invitation": "Invitation missing, expired or already used.",
         "already_member": "You are already a member or your application is pending.",
         "already_bound": "This chat already has a group.",

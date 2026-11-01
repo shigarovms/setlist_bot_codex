@@ -69,7 +69,7 @@ async def test_reply_dialog_creates_using_existing_membership_and_ignores_unrela
     engine, world
 ):
     send = messenger(engine)
-    prompt = await send("/group", remember=100)
+    prompt = await send("/new_band", remember=100)
     assert prompt.force_reply and prompt.group_creation_id
     assert "Создание нового коллектива" in prompt.text
     assert await bound_group(engine) is None
@@ -95,7 +95,7 @@ async def test_reply_dialog_creates_using_existing_membership_and_ignores_unrela
     assert "устарел" in (await send(button(preview, "group_create_yes"), callback=True)).text
 
 
-@pytest.mark.parametrize("command", ["/group", "/group Название", "/group " + "x" * 201])
+@pytest.mark.parametrize("command", ["/new_band", "/new_band Название", "/new_band " + "x" * 201])
 async def test_bound_chat_rejected_before_name_prompt_or_validation(engine, world, command):
     send = messenger(engine)
     response = await send(command, chat=-100)
@@ -110,7 +110,7 @@ async def test_edit_name_rotates_prompt_and_confirmation_and_invalid_input_can_b
     engine, world
 ):
     send = messenger(engine)
-    await send("/group", remember=100)
+    await send("/new_band", remember=100)
     invalid = await send("x" * 201, reply=100, remember=101)
     assert invalid.force_reply and "от 1 до 200" in invalid.text
     assert await send("Старый ответ", reply=100) is None
@@ -131,8 +131,8 @@ async def test_cancel_clears_only_own_dialog_and_old_buttons_cannot_create(
     engine, world, via_command
 ):
     send = messenger(engine)
-    await send("/group", remember=100)
-    await send("/group", actor=2, remember=200)
+    await send("/new_band", remember=100)
+    await send("/new_band", actor=2, remember=200)
     preview = await send("Название", reply=100)
     if via_command:
         await send("/cancel")
@@ -145,17 +145,18 @@ async def test_cancel_clears_only_own_dialog_and_old_buttons_cannot_create(
     assert button(other, "group_create_yes")
 
 
-async def test_fast_command_private_chat_and_admin_checks_remain_compatible(engine, world):
+@pytest.mark.parametrize("name", ["new_band", "new_band@setlist_test_bot", "group"])
+async def test_fast_command_private_chat_and_admin_checks_remain_compatible(engine, world, name):
     send = messenger(engine)
-    assert (await send("/group", admin=False)).force_reply
-    assert "общем чате" in (await send("/group", private=True, chat=1)).text
-    await send("/group", remember=100)
+    assert (await send("/new_band", admin=False)).force_reply
+    assert "общем чате" in (await send("/new_band", private=True, chat=1)).text
+    await send("/new_band", remember=100)
     preview = await send("Название", reply=100)
     foreign = await send(button(preview, "group_create_yes"), actor=2, callback=True)
     assert "владелец" in foreign.text
     demoted = await send(button(preview, "group_create_yes"), owner=2, callback=True)
     assert "владелец" in demoted.text and await bound_group(engine) is None
-    quick = await send("/group Быстрый коллектив")
+    quick = await send(f"/{name} Быстрый коллектив")
     created = await send(button(quick, "group_create_yes"), callback=True)
     assert "Быстрый коллектив" in created.text
     assert (await bound_group(engine)).name == "Быстрый коллектив"
@@ -164,12 +165,12 @@ async def test_fast_command_private_chat_and_admin_checks_remain_compatible(engi
 
 async def test_expired_dialog_and_restarted_prompt_do_not_accept_old_answers(engine, world):
     send = messenger(engine)
-    prompt = await send("/group", remember=100)
+    prompt = await send("/new_band", remember=100)
     async with PostgresUnitOfWork(engine) as uow:
         session = await uow.store.get(Confirmation, prompt.group_creation_id)
         session.expires_at = now() - timedelta(seconds=1)
     assert await send("Поздний ответ", reply=100) is None
-    await send("/group", remember=101)
+    await send("/new_band", remember=101)
     assert await send("Старый ответ", reply=100) is None
     preview = await send("Название", reply=101)
     async with PostgresUnitOfWork(engine) as uow:
@@ -181,8 +182,8 @@ async def test_expired_dialog_and_restarted_prompt_do_not_accept_old_answers(eng
 
 async def test_concurrent_admins_can_create_only_one_group_in_same_chat(engine, world):
     send = messenger(engine)
-    await send("/group", remember=100)
-    await send("/group", actor=2, remember=200)
+    await send("/new_band", remember=100)
+    await send("/new_band", actor=2, remember=200)
     first = await send("Первый", reply=100)
     second = await send("Второй", actor=2, reply=200)
     results = await asyncio.gather(
@@ -194,13 +195,36 @@ async def test_concurrent_admins_can_create_only_one_group_in_same_chat(engine, 
         assert len(await uow.store.find(ChatBinding, chat_id=-300)) == 1
         group = await bound_group(engine)
         assert len(await uow.store.find(Membership, group_id=group.id)) in (1, 2)
-    assert (await send("/group")).text == "В этом чате уже создан коллектив."
+    assert (await send("/new_band")).text == "В этом чате уже создан коллектив."
 
 
 def test_group_menu_has_requested_description_and_remains_admin_scoped():
     commands = {command.command: command.description for command in menu_commands("admin", "ru")}
-    assert commands["group"] == "Создать новый коллектив"
-    assert "group" not in [command.command for command in menu_commands("private", "ru")]
+    assert commands["new_band"] == "Создать новый коллектив"
+    assert "group" not in commands
+    assert "new_band" not in [command.command for command in menu_commands("private", "ru")]
+
+
+@pytest.mark.parametrize("language", ["ru", "en"])
+async def test_start_has_three_steps_with_valid_public_commands_and_fits_description(
+    engine, world, language
+):
+    import re
+
+    from setlist_bot.transport.commands import DESCRIPTIONS
+
+    async with PostgresUnitOfWork(engine) as uow:
+        (await uow.store.get(User, world.admin.id)).language = language
+    send = messenger(engine)
+    start = await send("/start", private=True, chat=1)
+    assert len(start.text.encode("utf-16-le")) // 2 <= 512
+    assert re.findall(r"^[1-9][.] ", start.text, flags=re.MULTILINE) == ["1. ", "2. ", "3. "]
+    commands = set(re.findall(r"/([a-z_]+)", start.text))
+    assert commands == {"new_band", "register", "concerts", "calendar", "help", "support"}
+    assert commands <= DESCRIPTIONS.keys()
+    help_response = await send("/help", private=True, chat=1)
+    assert "/new_band" in help_response.text
+    assert "group" not in re.findall(r"/([a-z_]+)", help_response.text)
 
 
 @pytest.mark.parametrize("language", ["ru", "en"])
@@ -212,11 +236,11 @@ async def test_new_group_offers_all_catalog_methods_with_search_first(
         (await uow.store.get(User, world.admin.id)).language = language
     send = messenger(engine)
     if dialog:
-        await send("/group", remember=100)
+        await send("/new_band", remember=100)
         preview = await send("Новый коллектив", reply=100)
         created = await send(button(preview, "group_create_yes"), callback=True)
     else:
-        preview = await send("/group Новый коллектив")
+        preview = await send("/new_band Новый коллектив")
         created = await send(button(preview, "group_create_yes"), callback=True)
     group = await bound_group(engine)
     assert [action for _, action in created.buttons] == [

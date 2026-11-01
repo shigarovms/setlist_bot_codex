@@ -44,6 +44,7 @@ ACTIONS = frozenset(
         "start",
         "help",
         "group",
+        "new_band",
         "group_create_yes",
         "group_create_edit",
         "group_create_cancel",
