@@ -36,7 +36,7 @@ async def test_automatic_greeting_is_only_for_join_and_distinguishes_registered_
             await dispatcher.feed_update(bot, update)
             await dispatcher.feed_update(bot, update)
         assert len(session.sent) == 2
-        assert "/group" in session.sent[0].text and "уже зарегистрирован" in session.sent[1].text
+        assert "/new_band" in session.sent[0].text and "уже зарегистрирован" in session.sent[1].text
         unchanged = update.model_copy(
             update={
                 "update_id": 91002,

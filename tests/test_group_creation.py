@@ -149,7 +149,7 @@ async def test_cancel_clears_only_own_dialog_and_old_buttons_cannot_create(
 async def test_fast_command_private_chat_and_admin_checks_remain_compatible(engine, world, name):
     send = messenger(engine)
     assert (await send("/new_band", admin=False)).force_reply
-    assert "общем чате" in (await send("/new_band", private=True, chat=1)).text
+    assert "общем Telegram-чате" in (await send("/new_band", private=True, chat=1)).text
     await send("/new_band", remember=100)
     preview = await send("Название", reply=100)
     foreign = await send(button(preview, "group_create_yes"), actor=2, callback=True)
@@ -225,6 +225,24 @@ async def test_start_has_three_steps_with_valid_public_commands_and_fits_descrip
     help_response = await send("/help", private=True, chat=1)
     assert "/new_band" in help_response.text
     assert "group" not in re.findall(r"/([a-z_]+)", help_response.text)
+
+
+@pytest.mark.parametrize("language", ["ru", "en"])
+@pytest.mark.parametrize("command", ["/new_band", "/new_band Название", "/group"])
+async def test_private_band_creation_explains_where_to_begin_without_starting_dialog(
+    engine, world, language, command
+):
+    async with PostgresUnitOfWork(engine) as uow:
+        (await uow.store.get(User, world.admin.id)).language = language
+        group_count = len(await uow.store.find(Group))
+    response = await messenger(engine)(command, private=True, chat=1)
+    assert "/new_band" in response.text
+    assert ("Добавьте туда бота" if language == "ru" else "Add the bot there") in response.text
+    assert ("После регистрации" if language == "ru" else "After registration") in response.text
+    assert not response.force_reply and not response.buttons
+    async with PostgresUnitOfWork(engine) as uow:
+        assert len(await uow.store.find(Group)) == group_count
+        assert not await uow.store.find(Confirmation, chat_id=1)
 
 
 @pytest.mark.parametrize("language", ["ru", "en"])

@@ -719,7 +719,7 @@ class Controller:
                     job.status = "cancelled"
             return Response(self.t("ok"), delete_message_ids=cleanup)
         if command == "new_band":
-            require(not self.private, "group_only")
+            require(not self.private, "new_band_private")
             await self.groups.check_creation_chat(self.chat_id)
             if not args:
                 return self._group_name_prompt(await self.groups.begin_creation(self.chat_id))
