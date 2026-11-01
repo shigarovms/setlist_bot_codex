@@ -33,7 +33,11 @@ class ConcertDetails:
         if field == "concert_date":
             when, suffix = parse_concert(text)
             require(not suffix, "concert_input")
-            concert.date = when
+            if concert.date != when:
+                concert.date = when
+                from setlist_bot.application.staffing import invalidate_staffing
+
+                await invalidate_staffing(self.store, concert)
         elif field == "concert_duration":
             seconds = None if text == "-" else performance_seconds(text)
             require(text == "-" or seconds is not None, "pause_duration")

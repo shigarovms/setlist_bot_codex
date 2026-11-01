@@ -63,17 +63,26 @@ class Calendars:
             (group for group in groups if group.deleted_at is None), key=lambda g: (g.name, g.id)
         )
 
-    async def subscription(self, group_id: UUID | None) -> CalendarSubscription | None:
-        rows = await self.store.find(CalendarSubscription, owner_id=self.user.id, group_id=group_id)
+    async def subscription(
+        self, group_id: UUID | None, scope: str = "groups"
+    ) -> CalendarSubscription | None:
+        rows = await self.store.find(
+            CalendarSubscription, owner_id=self.user.id, group_id=group_id, scope=scope
+        )
         return rows[0] if rows else None
 
-    async def create(self, group_id: UUID | None) -> tuple[CalendarSubscription, str | None]:
+    async def create(
+        self, group_id: UUID | None, scope: str = "groups"
+    ) -> tuple[CalendarSubscription, str | None]:
         # RU: Один порядок блокировок, в том числе для прямых вызовов без Processor.
         # EN: Serialize double-clicks before checking a nullable unique scope.
+        require(
+            scope in ("groups", "personal") and (scope == "groups" or group_id is None), "input"
+        )
         if group_id is not None:
             await Groups(self.store, self.user).access(group_id)
         await self.store.get(User, self.user.id, lock=True)
-        row = await self.subscription(group_id)
+        row = await self.subscription(group_id, scope)
         if row is not None and row.enabled:
             return row, None
         require(self.vault is not None, "calendar_key_unavailable")
@@ -84,6 +93,7 @@ class Calendars:
                 group_id=group_id,
                 token_hash=token_hash(token),
                 language=self.user.language,
+                scope=scope,
             )
             self.store.add(row)
         else:

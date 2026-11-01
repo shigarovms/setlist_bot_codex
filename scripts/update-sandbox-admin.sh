@@ -77,6 +77,10 @@ fi
 SETLIST_SANDBOX_DIR="$PWD" bash scripts/backup-sandbox.sh
 "${compose[@]}" run --rm --no-deps migrate
 "${compose[@]}" run --rm --no-deps --entrypoint .venv/bin/setlist-bot migrate --check
+if [[ "$calendar_enabled" == true ]]; then
+  "${compose[@]}" exec -T db psql -X -U setlist -d setlist_sandbox -v ON_ERROR_STOP=1 \
+    -c 'GRANT SELECT(scope) ON calendar_subscriptions TO setlist_calendar_reader; GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch) ON gig_invitations TO setlist_calendar_reader;'
+fi
 if [[ "$miniapp_enabled" == true ]]; then
   # RU: Только средняя; прочие поля коллектива остаются read-only для Mini App.
   # EN: Apply this narrow grant before starting the updated HTTP writer.

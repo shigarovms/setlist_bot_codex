@@ -55,6 +55,7 @@ class ChatBinding(Entity):
 
 @dataclass(kw_only=True)
 class CalendarSubscription(Entity):
+    scope: str = "groups"
     token_ciphertext: str = ""
     owner_id: UUID
     group_id: UUID | None
@@ -378,3 +379,73 @@ class DeploymentIdentity(Entity):
     key: str = "main"
     bot_id: int
     environment: str
+
+
+@dataclass(kw_only=True)
+class StaffRole(Entity):
+    group_id: UUID
+    name: str
+    name_key: str
+
+
+@dataclass(kw_only=True)
+class LineupTemplate(Entity):
+    group_id: UUID
+    name: str
+    name_key: str
+    slots: list[dict[str, Any]] = field(default_factory=list)
+    version: int = 1
+
+
+@dataclass(kw_only=True)
+class StaffContact(Entity):
+    group_id: UUID
+    user_id: UUID
+    role_id: UUID
+    preference: str = "normal"
+    worked_count: int = 0
+
+
+@dataclass(kw_only=True)
+class GigSlot(Entity):
+    group_id: UUID
+    concert_id: UUID
+    role_id: UUID
+    position: int
+    preferred_user_id: UUID | None = None
+    required: bool = True
+    version: int = 1
+
+
+@dataclass(kw_only=True)
+class GigInvitation(Entity):
+    group_id: UUID
+    concert_id: UUID
+    slot_id: UUID
+    user_id: UUID
+    date: date
+    concert_epoch: int
+    expires_at: datetime
+    status: str = "pending"
+    version: int = 1
+    replacement_id: UUID | None = None
+    worked: bool = False
+    created_at: datetime = field(default_factory=now)
+
+
+@dataclass(kw_only=True)
+class StaffReplacement(Entity):
+    group_id: UUID
+    concert_id: UUID
+    source_id: UUID
+    target_id: UUID | None = None
+    status: str = "pending"
+    version: int = 1
+    expires_at: datetime
+
+
+@dataclass(kw_only=True)
+class BusyPeriod(Entity):
+    user_id: UUID
+    starts_on: date
+    ends_on: date

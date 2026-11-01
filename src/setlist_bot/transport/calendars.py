@@ -118,19 +118,31 @@ async def handle_calendar(c: Controller, command: str, args: str) -> Response:
         page = int(args) if args else 0
         require(0 <= page <= 10000, "input")
         if command == "calendar":
-            choices = [(c.t("calendar_all"), "cal_scope all")] + [
-                (g.name, f"cal_scope {g.id.hex}") for g in groups
-            ]
+            choices = [
+                (c.t("staff_personal_calendar"), "cal_scope personal"),
+                (c.t("calendar_all"), "cal_scope all"),
+            ] + [(g.name, f"cal_scope {g.id.hex}") for g in groups]
         else:
             names = {g.id: g.name for g in groups}
             rows = await c.store.find(CalendarSubscription, owner_id=c.user.id, enabled=True)
             rows.sort(key=lambda r: (r.created_at, r.id))
             choices = [
                 (
-                    c.t("calendar_all")
+                    c.t("staff_personal_calendar")
+                    if row.scope == "personal"
+                    else c.t("calendar_all")
                     if row.group_id is None
                     else names.get(row.group_id, c.t("calendar_unavailable_group")),
-                    f"cal_scope {'all' if row.group_id is None else row.group_id.hex}",
+                    (
+                        "cal_scope "
+                        + (
+                            "personal"
+                            if row.scope == "personal"
+                            else "all"
+                            if row.group_id is None
+                            else row.group_id.hex
+                        )
+                    ),
                 )
                 for row in rows
             ]
@@ -149,18 +161,21 @@ async def handle_calendar(c: Controller, command: str, args: str) -> Response:
         )
         return Response(c.t("calendar_menu"), buttons)
     if command in ("cal_scope", "cal_create"):
-        group_id = None if args == "all" else UUID(args)
+        scope = "personal" if args == "personal" else "groups"
+        group_id = None if args in ("all", "personal") else UUID(args)
         groups_by_id = {g.id: g for g in await service.groups()}
-        row = await service.subscription(group_id)
+        row = await service.subscription(group_id, scope)
         require(group_id is None or group_id in groups_by_id or row is not None, "forbidden")
         if command == "cal_create":
-            row, token = await service.create(group_id)
+            row, token = await service.create(group_id, scope)
             if token:
                 return link_response(c, row.id, token)
             return await show_link(c, service, row.id)
         if row is not None and row.enabled:
             title = (
-                c.t("calendar_all")
+                c.t("staff_personal_calendar")
+                if scope == "personal"
+                else c.t("calendar_all")
                 if group_id is None
                 else (
                     groups_by_id[group_id].name

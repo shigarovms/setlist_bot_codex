@@ -157,7 +157,11 @@ def test_sandbox_release_grants_only_default_pause_before_miniapp_start(sandbox_
     (app / ".env.miniapp").write_text("MINIAPP_DATABASE_URL=PRIVATE_MINIAPP\n")
     result, operations = invoke(sandbox_release, "server")
     assert result.returncode == 0, result.stderr
-    grant = next(i for i, args in enumerate(operations) if "psql" in args and "-c" in args)
+    grant = next(
+        i
+        for i, args in enumerate(operations)
+        if "psql" in args and args[-1].startswith("GRANT UPDATE(default_pause_seconds)")
+    )
     args = operations[grant]
     assert args[args.index("-d") + 1] == "setlist_sandbox"
     assert args[-1] == "GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp;"

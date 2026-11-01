@@ -250,6 +250,10 @@ class Controller:
         args = args.strip()
         if command == "start" and args == "calendar":
             return await self.execute("calendar")
+        if command == "start" and args == "my_gigs":
+            return await self.execute("my_gigs")
+        if command == "start" and args.startswith("gig_"):
+            return await self.execute("sf_view " + args.removeprefix("gig_"))
         if command == "start" and args.startswith("performance_"):
             return await self.execute("my_concert " + args.removeprefix("performance_"))
         if command == "start" and args.startswith("draft_"):
@@ -274,6 +278,10 @@ class Controller:
             return await self._suggestion_prompt(own_template.id)
         if command == "copy_text":
             return await self._text_suggestion(UUID(args))
+        if command in ("team", "lineup", "my_gigs", "busy") or command.startswith("sf_"):
+            from setlist_bot.transport.staffing import handle
+
+            return await handle(self, command, args)
         if command == "calendar" or command.startswith("cal_"):
             from setlist_bot.transport.calendars import handle_calendar
 
@@ -1910,6 +1918,7 @@ class Controller:
             )
         buttons.extend(
             [
+                (self.t("staff_lineup"), f"sf_lineup {concert.id.hex}"),
                 (self.t("open_setlist"), f"use_concert {concert.id}"),
                 (self.t("delete_concert_button"), f"delete_concert {concert.id}"),
                 (self.t("menu_back"), f"concert_options {concert.id}"),
@@ -2708,6 +2717,7 @@ class Controller:
                 buttons.append(
                     (self.t("concert_settings"), f"concert_settings {data['concert_id']}")
                 )
+            buttons.append((self.t("staff_lineup"), f"sf_lineup {UUID(data['concert_id']).hex}"))
             if variants:
                 buttons.append((self.t("menu_variants"), f"slmenu {key} variants"))
             if self.private or member.role == "admin":

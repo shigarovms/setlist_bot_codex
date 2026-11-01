@@ -16,7 +16,7 @@ from urllib.request import urlopen
 
 ROOT = Path("/opt/setlist_bot_sandbox")
 ROLE = "setlist_calendar_reader"
-SCHEMA = "f2d7c614a083"
+SCHEMA = "a1426785384d"
 TABLES = (
     "concerts",
     "deployment_identity",
@@ -79,10 +79,12 @@ def grants():
         f"GRANT USAGE ON SCHEMA public TO {ROLE};\n"
         f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {ROLE};\n"
         f"GRANT SELECT ON {','.join(TABLES)} TO {ROLE};\n"
-        "GRANT SELECT(id,owner_id,group_id,token_hash,language,enabled,version,created_at) "
+        "GRANT SELECT(id,owner_id,group_id,token_hash,language,enabled,version,created_at,scope) "
         f"ON calendar_subscriptions TO {ROLE};\n"
         f"GRANT SELECT(id,name,deleted_at) ON groups TO {ROLE};\n"
         f"GRANT SELECT(group_id,user_id,status) ON memberships TO {ROLE};\n"
+        "GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch) "
+        f"ON gig_invitations TO {ROLE};\n"
         f"ALTER ROLE {ROLE} SET default_transaction_read_only = on;\n"
     )
 

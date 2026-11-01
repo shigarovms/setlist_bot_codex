@@ -31,6 +31,12 @@ class Trash:
             e.Item,
             e.PersonalDraft,
             e.Submission,
+            e.StaffRole,
+            e.LineupTemplate,
+            e.StaffContact,
+            e.GigSlot,
+            e.GigInvitation,
+            e.StaffReplacement,
         ):
             rows = await self.store.find(kind, group_id=group_id)
             parts.extend(asdict(row) for row in sorted(rows, key=lambda row: row.id))
@@ -47,6 +53,10 @@ class Trash:
             await self._cancel_outbox(group_id, chat_id=binding.chat_id)
             await self.store.delete(binding)
         await self._clear_contexts(group_id)
+        from setlist_bot.application.staffing import invalidate_staffing
+
+        for event in await self.store.find(e.Concert, group_id=group_id):
+            await invalidate_staffing(self.store, event, deleted=True)
         return group
 
     async def restore_group(self, group_id: UUID, epoch: int) -> e.Group:
@@ -79,6 +89,9 @@ class Trash:
         concert.deleted_at = e.now()
         concert.lifecycle_version += 1
         await self._cancel_outbox(group_id, concert_id=concert_id)
+        from setlist_bot.application.staffing import invalidate_staffing
+
+        await invalidate_staffing(self.store, concert, deleted=True)
         from setlist_bot.application.deleted_cards import retire_cards
 
         await retire_cards(self.store, concert)
@@ -90,7 +103,14 @@ class Trash:
         concert = await self.store.get(e.Concert, concert_id)
         require(concert.group_id == group_id and concert.deleted_at is None, "not_found")
         parts = [asdict(concert)]
-        for kind in (e.Setlist, e.PersonalDraft, e.Submission):
+        for kind in (
+            e.Setlist,
+            e.PersonalDraft,
+            e.Submission,
+            e.GigSlot,
+            e.GigInvitation,
+            e.StaffReplacement,
+        ):
             parts.extend(
                 asdict(row)
                 for row in sorted(

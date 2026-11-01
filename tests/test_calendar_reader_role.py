@@ -47,12 +47,32 @@ async def test_public_service_works_with_real_read_only_role_without_private_tab
         bot_username="botToPract696_bot",
     )
     app = create_app(settings)
+    from test_calendars import KEY
+    from test_staffing import invite, reply, setup_slots
+
+    from setlist_bot.application.calendars import Calendars
+
+    one, _ = await setup_slots(engine, world)
+    appointment = await invite(engine, world.admin, one, world.member.id)
+    await reply(engine, world.member, appointment)
+    async with PostgresUnitOfWork(engine) as uow:
+        _, personal_token = await Calendars(uow.store, world.member, KEY).create(None, "personal")
     try:
         async with TestClient(TestServer(app)) as client:
             response = await client.get(f"/calendar/{token}.ics")
             assert response.status == 200 and "Коллектив А" in await response.text()
             assert (await client.get("/healthz")).status == 200
-            for table in ("users", "personal_drafts", "support_messages", "admin_sessions"):
+            personal = await client.get(f"/calendar/{personal_token}.ics")
+            assert personal.status == 200
+            assert "gig_" + appointment.hex in (await personal.text()).replace("\r\n ", "")
+            for table in (
+                "users",
+                "personal_drafts",
+                "support_messages",
+                "admin_sessions",
+                "busy_periods",
+                "staff_contacts",
+            ):
                 async with app[ENGINE].connect() as connection:
                     with pytest.raises(DBAPIError):
                         await connection.execute(text(f"SELECT * FROM {table}"))

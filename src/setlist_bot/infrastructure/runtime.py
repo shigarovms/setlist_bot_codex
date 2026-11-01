@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from setlist_bot.domain.entities import DeploymentIdentity, now
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 
-SCHEMA_REVISION = "f2d7c614a083"
+SCHEMA_REVISION = "a1426785384d"
 LOCK_NAMESPACE = 1397509964
 
 

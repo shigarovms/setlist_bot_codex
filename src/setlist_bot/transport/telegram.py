@@ -242,6 +242,23 @@ class Processor:
                     # RU: Ответ принимается на сохранённое сообщение в текущем чате поддержки.
                     # EN: Route only exact, persisted reply targets in the configured support chat.
                     if not is_callback and not command.lstrip().startswith("/"):
+                        if reply_message_id is not None:
+                            for staff_session in await uow.store.find(
+                                Confirmation, user_id=user.id, chat_id=chat_id
+                            ):
+                                staff_data = json.loads(staff_session.command)
+                                if staff_data.get(
+                                    "kind"
+                                ) == "staff_input" and reply_message_id in staff_data.get(
+                                    "message_ids", []
+                                ):
+                                    from setlist_bot.transport.staffing import (
+                                        input_reply as staff_input_reply,
+                                    )
+
+                                    return await staff_input_reply(
+                                        controller, staff_session, command
+                                    )
                         if reply_message_id is not None and not private:
                             if await Support(uow.store, user).reply(
                                 chat_id, reply_message_id, command

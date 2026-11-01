@@ -13,6 +13,7 @@ class CalendarEvent:
     city: str
     description: str
     sequence: int
+    route: str = ""
 
 
 def text_value(value: str) -> str:
@@ -78,7 +79,7 @@ def render_calendar(
                 "SUMMARY:" + text_value(event.summary),
                 "LOCATION:" + text_value(event.city),
                 "DESCRIPTION:" + text_value(event.description),
-                f"URL:https://t.me/{username}?start=performance_{event.id.hex}",
+                f"URL:https://t.me/{username}?start={event.route or 'performance_' + event.id.hex}",
                 "TRANSP:TRANSPARENT",
                 "END:VEVENT",
             ]

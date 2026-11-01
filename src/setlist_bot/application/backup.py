@@ -40,6 +40,10 @@ class Backup:
             ("items", e.Item),
             ("revisions", e.Revision),
             ("submissions", e.Submission),
+            ("staff_roles", e.StaffRole),
+            ("lineup_templates", e.LineupTemplate),
+            ("gig_slots", e.GigSlot),
+            ("gig_invitations", e.GigInvitation),
         ):
             data[name] = [asdict(row) for row in await self.store.find(kind, group_id=group_id)]
         members = []

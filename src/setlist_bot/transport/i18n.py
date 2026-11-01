@@ -2,6 +2,7 @@ from typing import Any
 
 from setlist_bot.transport.calendar_texts import TEXTS as CALENDAR_TEXTS
 from setlist_bot.transport.music_texts import TEXTS as MUSIC_TEXTS
+from setlist_bot.transport.staffing_texts import TEXTS as STAFFING_TEXTS
 from setlist_bot.transport.workflow_texts import TEXTS as WORKFLOW_TEXTS
 
 MESSAGES = {
@@ -827,7 +828,23 @@ MESSAGES["en"]["help"] += (
     "\n\nSetlist settings in Options apply to the whole group: monospaced or Article display and administrator-only suggestions. To move to a new chat: /groups in private → select group → Move to another chat (owner only). Follow the generated single-use /chat_transfer command.\nWe collect pseudonymous usage statistics without message content; detailed events are retained for 90 days."
 )
 
-for _catalog in (MUSIC_TEXTS, WORKFLOW_TEXTS, CALENDAR_TEXTS):
+
+MESSAGES["ru"]["help"] += (
+    "\n\nСоставы: /team — роли, шаблоны и знакомые исполнители (администратор); "
+    "/lineup — состав выбранного выступления. Приглашения принимаются в личке. "
+    "/my_gigs — ваши участия, приглашения и запросы подмены; /busy — личная занятость. "
+    "В /calendar есть отдельная подписка на подтверждённые участия. "
+    "Совпадение дат — возможное пересечение; бот не читает внешние календари."
+)
+MESSAGES["en"]["help"] += (
+    "\n\nStaffing: /team — roles, templates and known performers (administrator); "
+    "/lineup — selected performance lineup. Reply to invitations in private. "
+    "/my_gigs — assignments, invitations and substitution requests; /busy — private busy periods. "
+    "/calendar offers a separate confirmed-assignment subscription. "
+    "Same-day bookings are possible conflicts; external calendars are not read."
+)
+
+for _catalog in (MUSIC_TEXTS, WORKFLOW_TEXTS, CALENDAR_TEXTS, STAFFING_TEXTS):
     for _language, _texts in _catalog.items():
         MESSAGES[_language].update(_texts)
 

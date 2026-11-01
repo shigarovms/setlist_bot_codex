@@ -133,7 +133,11 @@ def test_existing_public_writers_stop_before_final_backup_and_keep_their_overrid
     assert all("compose.public.production.yaml" in args for args in starts)
     assert any(args[-2:] == ["calendar", "miniapp"] for args in starts)
     assert starts[-1][-1] == "bot"
-    grant = next(i for i, args in enumerate(operations) if "psql" in args and "-c" in args)
+    grant = next(
+        i
+        for i, args in enumerate(operations)
+        if "psql" in args and args[-1].startswith("GRANT UPDATE(default_pause_seconds)")
+    )
     args = operations[grant]
     assert args[args.index("-d") + 1] == "setlist"
     assert args[-1] == "GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp;"

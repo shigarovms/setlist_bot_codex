@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from types import TracebackType
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import (
@@ -22,6 +22,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     case,
+    or_,
     select,
     text,
 )
@@ -151,6 +152,7 @@ table(
 table(
     e.CalendarSubscription,
     "calendar_subscriptions",
+    col("scope", String(10), server_default="groups"),
     col("token_ciphertext", Text, server_default=""),
     col("owner_id", Uuid, ForeignKey("users.id", ondelete="CASCADE")),
     col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), nullable=True),
@@ -159,7 +161,10 @@ table(
     col("enabled", Boolean),
     col("version", Integer),
     col("created_at", DateTime(timezone=True)),
-    UniqueConstraint("owner_id", "group_id", postgresql_nulls_not_distinct=True),
+    UniqueConstraint("owner_id", "group_id", "scope", postgresql_nulls_not_distinct=True),
+    CheckConstraint(
+        "scope IN ('groups','personal') AND (scope='groups' OR group_id IS NULL)", name="scope"
+    ),
     CheckConstraint("language IN ('ru', 'en')", name="language"),
     CheckConstraint("version > 0", name="version"),
 )
@@ -543,6 +548,131 @@ table(
 )
 
 
+table(
+    e.StaffRole,
+    "staff_roles",
+    col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), index=True),
+    col("name", String(100)),
+    col("name_key", String(100)),
+    UniqueConstraint("group_id", "name_key", name="uq_staff_roles_name"),
+    UniqueConstraint("group_id", "id", name="uq_staff_roles_tenant"),
+)
+table(
+    e.LineupTemplate,
+    "lineup_templates",
+    col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), index=True),
+    col("name", String(100)),
+    col("name_key", String(100)),
+    col("slots", JSONB),
+    col("version", Integer),
+    UniqueConstraint("group_id", "name_key"),
+)
+table(
+    e.StaffContact,
+    "staff_contacts",
+    col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), index=True),
+    col("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE")),
+    col("role_id", Uuid),
+    col("preference", String(10)),
+    col("worked_count", Integer),
+    ForeignKeyConstraint(
+        ["group_id", "role_id"], ["staff_roles.group_id", "staff_roles.id"], ondelete="CASCADE"
+    ),
+    UniqueConstraint("group_id", "user_id", "role_id"),
+    CheckConstraint("preference IN ('normal','preferred','hidden')", name="preference"),
+    CheckConstraint("worked_count >= 0", name="worked_count"),
+)
+table(
+    e.GigSlot,
+    "gig_slots",
+    col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), index=True),
+    col("concert_id", Uuid),
+    col("role_id", Uuid),
+    col("position", Integer),
+    col("preferred_user_id", Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+    col("required", Boolean),
+    col("version", Integer),
+    ForeignKeyConstraint(
+        ["group_id", "concert_id"], ["concerts.group_id", "concerts.id"], ondelete="CASCADE"
+    ),
+    ForeignKeyConstraint(["group_id", "role_id"], ["staff_roles.group_id", "staff_roles.id"]),
+    UniqueConstraint("group_id", "concert_id", "position", name="uq_gig_slots_position"),
+    UniqueConstraint("group_id", "concert_id", "id", name="uq_gig_slots_tenant"),
+)
+table(
+    e.GigInvitation,
+    "gig_invitations",
+    col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), index=True),
+    col("concert_id", Uuid),
+    col("slot_id", Uuid),
+    col("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True),
+    col("date", Date, index=True),
+    col("concert_epoch", Integer),
+    col("expires_at", DateTime(timezone=True), index=True),
+    col("status", String(20)),
+    col("version", Integer),
+    col(
+        "replacement_id",
+        Uuid,
+        ForeignKey(
+            "staff_replacements.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_gig_invitation_replacement",
+        ),
+        nullable=True,
+    ),
+    col("worked", Boolean),
+    col("created_at", DateTime(timezone=True)),
+    ForeignKeyConstraint(
+        ["group_id", "concert_id", "slot_id"],
+        ["gig_slots.group_id", "gig_slots.concert_id", "gig_slots.id"],
+        ondelete="CASCADE",
+    ),
+    UniqueConstraint("group_id", "concert_id", "id"),
+    CheckConstraint(
+        "status IN ('pending','confirmed','conditional','accepted',"
+        "'declined','cancelled','replaced','reconfirm')",
+        name="status",
+    ),
+    Index(
+        "uq_gig_slot_confirmed", "slot_id", unique=True, postgresql_where=text("status='confirmed'")
+    ),
+)
+table(
+    e.StaffReplacement,
+    "staff_replacements",
+    col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), index=True),
+    col("concert_id", Uuid),
+    col("source_id", Uuid),
+    col("target_id", Uuid, ForeignKey("gig_invitations.id", ondelete="SET NULL"), nullable=True),
+    col("status", String(12)),
+    col("version", Integer),
+    col("expires_at", DateTime(timezone=True)),
+    ForeignKeyConstraint(
+        ["group_id", "concert_id", "source_id"],
+        ["gig_invitations.group_id", "gig_invitations.concert_id", "gig_invitations.id"],
+        ondelete="CASCADE",
+    ),
+    CheckConstraint("status IN ('pending','approved','cancelled','rejected')", name="status"),
+    Index(
+        "uq_staff_replacement_pending",
+        "source_id",
+        unique=True,
+        postgresql_where=text("status='pending'"),
+    ),
+)
+table(
+    e.BusyPeriod,
+    "busy_periods",
+    col("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True),
+    col("starts_on", Date),
+    col("ends_on", Date),
+    CheckConstraint("ends_on >= starts_on AND ends_on-starts_on <= 366", name="range"),
+    UniqueConstraint("user_id", "starts_on", "ends_on"),
+)
+
+
 class PostgresStore:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -660,6 +790,59 @@ class PostgresStore:
 
     async def lock_chat(self, chat_id: int) -> None:
         await self.session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": chat_id})
+
+    async def lock_people(self, identifiers: set[UUID]) -> None:
+        # RU: Блокировки людей берутся до коллективов, в одном порядке между группами.
+        # EN: Cross-band reservations serialize per person; no unrelated bands are blocked.
+        for identifier in sorted(identifiers):
+            await self.session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:key,0))"),
+                {"key": "setlist-staff:" + str(identifier)},
+            )
+
+    async def staffing_conflicts(
+        self, identifiers: set[UUID], when: date, exclude: UUID | None
+    ) -> dict[UUID, tuple[int, int]]:
+        """RU: Два запроса на список кандидатов.
+
+        EN: Return counts, never other bands' details.
+        """
+        if not identifiers:
+            return {}
+        invites, concerts, groups, periods = (
+            metadata.tables[name]
+            for name in ("gig_invitations", "concerts", "groups", "busy_periods")
+        )
+        query = (
+            select(invites.c.user_id, invites.c.status)
+            .join(concerts, invites.c.concert_id == concerts.c.id)
+            .join(groups, invites.c.group_id == groups.c.id)
+            .where(
+                invites.c.user_id.in_(identifiers),
+                invites.c.date == when,
+                concerts.c.date == invites.c.date,
+                concerts.c.lifecycle_version == invites.c.concert_epoch,
+                concerts.c.deleted_at.is_(None),
+                groups.c.deleted_at.is_(None),
+                or_(invites.c.status == "confirmed", invites.c.expires_at > e.now()),
+            )
+        )
+        if exclude is not None:
+            query = query.where(invites.c.concert_id != exclude)
+        counts = {identifier: [0, 0] for identifier in identifiers}
+        for user_id, status in (await self.session.execute(query)).all():
+            if status == "confirmed":
+                counts[cast(UUID, user_id)][0] += 1
+            elif status in ("pending", "conditional", "reconfirm", "accepted"):
+                counts[cast(UUID, user_id)][1] += 1
+        busy = select(periods.c.user_id).where(
+            periods.c.user_id.in_(identifiers),
+            periods.c.starts_on <= when,
+            periods.c.ends_on >= when,
+        )
+        for user_id in (await self.session.scalars(busy)).all():
+            counts[cast(UUID, user_id)][0] += 1
+        return {identifier: (value[0], value[1]) for identifier, value in counts.items()}
 
     async def delete(self, entity: e.Entity) -> None:
         await self.session.delete(entity)

@@ -73,12 +73,17 @@ assert target.startswith('setlist_admin_release_') and target.endswith('_test')
 original = make_url(os.environ['DATABASE_URL'])
 assert original.database == 'setlist'
 os.environ['DATABASE_URL'] = original.set(database=target).render_as_string(hide_password=False)
-tables = ('users','groups','songs','concerts','revisions','personal_drafts','export_files')
+tables = ('users','groups','songs','concerts','revisions','personal_drafts','export_files',
+          'calendar_subscriptions','staff_roles','lineup_templates','staff_contacts',
+          'gig_slots','gig_invitations','staff_replacements','busy_periods')
 async def inspect_copy():
     engine = create_async_engine(os.environ['DATABASE_URL'])
     try:
         async with engine.connect() as connection:
-            counts = [int(await connection.scalar(text(f'SELECT count(*) FROM {name}'))) for name in tables]
+            counts = []
+            for name in tables:
+                exists = await connection.scalar(text('SELECT to_regclass(:name)'), {'name': name})
+                counts.append(int(await connection.scalar(text(f'SELECT count(*) FROM {name}'))) if exists else 0)
             version = await connection.scalar(text('SELECT version_num FROM alembic_version'))
             return counts, version
     finally:
@@ -104,8 +109,11 @@ SETLIST_APP_DIR="$PWD" bash scripts/backup-server.sh
 "${compose[@]}" run --rm --no-deps migrate
 "${compose[@]}" run --rm --no-deps --entrypoint .venv/bin/setlist-bot migrate --check
 if [[ "$public_enabled" == true ]]; then
-  # RU: Меняется доступ только к средней, не данные или пароль другого контура.
-  # EN: Existing deployments need the same narrow grant as fresh public setup.
+  # RU: Публичный календарь читает назначения, но не личную занятость и предпочтения.
+  # EN: Narrow read grants only; no access to private availability or contact preferences.
+  "${compose[@]}" exec -T db psql -X -U setlist -d setlist -v ON_ERROR_STOP=1 \
+    -c 'GRANT SELECT(scope) ON calendar_subscriptions TO setlist_calendar_reader; GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch) ON gig_invitations TO setlist_calendar_reader;'
+  # RU/EN: Existing Mini App deployments also need the average-pause column grant.
   "${compose[@]}" exec -T db psql -X -U setlist -d setlist -v ON_ERROR_STOP=1 \
     -c 'GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp;'
   "${compose[@]}" up -d --no-build --no-deps calendar miniapp

@@ -20,7 +20,7 @@ from urllib.request import urlopen
 
 ROOT = Path("/opt/setlist_bot_sandbox")
 ROLE = "setlist_miniapp"
-SCHEMA = "f2d7c614a083"
+SCHEMA = "a1426785384d"
 READ_TABLES = (
     "users",
     "groups",

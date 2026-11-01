@@ -146,6 +146,10 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
             event = await uow.store.get(Outbox, pending.id, lock=True)
             if event.sent:
                 return False
+            if event.support_kind == "staffing":
+                from setlist_bot.infrastructure.staffing_delivery import deliver_staffing
+
+                return await deliver_staffing(bot, uow, event)
             if event.support_kind == "music":
                 from setlist_bot.infrastructure.workflow_delivery import deliver_music
 
