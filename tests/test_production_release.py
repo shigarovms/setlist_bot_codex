@@ -112,3 +112,24 @@ def test_wrong_bot_is_rejected_before_build_backup_or_stop(release_environment):
     assert not any(
         any(x in args for x in ("build", "pg_dump", "stop", "run")) for args in operations
     )
+
+
+def test_existing_public_writers_stop_before_final_backup_and_keep_their_override(
+    release_environment,
+):
+    app, _, _ = release_environment
+    (app / ".env.calendar").write_text("PRIVATE_CALENDAR\n")
+    (app / ".env.miniapp").write_text("PRIVATE_MINIAPP\n")
+    (app / "scripts/setup-production-public.py").write_text(
+        "import sys\nassert sys.argv[1:] == ['--check-key']\n"
+    )
+    result, operations = invoke(release_environment)
+    assert result.returncode == 0, result.stderr
+    stop = next(i for i, args in enumerate(operations) if "stop" in args)
+    assert operations[stop][-3:] == ["bot", "calendar", "miniapp"]
+    final_dump = max(i for i, args in enumerate(operations) if "pg_dump" in args)
+    assert stop < final_dump
+    starts = [args for args in operations if "up" in args]
+    assert all("compose.public.production.yaml" in args for args in starts)
+    assert any(args[-2:] == ["calendar", "miniapp"] for args in starts)
+    assert starts[-1][-1] == "bot"

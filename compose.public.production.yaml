@@ -1,0 +1,51 @@
+# Production HTTP services use production-only roles/keys and no Bot API token.
+services:
+  bot:
+    env_file: [.env.calendar-key]
+    environment:
+      CALENDAR_PUBLIC_BASE_URL: ${CALENDAR_PUBLIC_BASE_URL:-}
+      MINIAPP_PUBLIC_BASE_URL: ${MINIAPP_PUBLIC_BASE_URL:-}
+  calendar:
+    image: setlist_bot_codex-bot
+    command: [".venv/bin/python", "-m", "setlist_bot.calendar"]
+    env_file: [.env.calendar]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp:size=8m"]
+    mem_limit: 192m
+    cpus: 0.5
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    networks:
+      default:
+      public_edge:
+        aliases: [setlist-production-calendar]
+    healthcheck:
+      test: ["CMD", ".venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz',timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+  miniapp:
+    image: setlist_bot_codex-bot
+    command: [".venv/bin/python", "-m", "setlist_bot.miniapp"]
+    env_file: [.env.miniapp]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp:size=8m"]
+    mem_limit: 192m
+    cpus: 0.75
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    networks:
+      default:
+      public_edge:
+        aliases: [setlist-production-miniapp]
+    healthcheck:
+      test: ["CMD", ".venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/healthz',timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+networks:
+  public_edge:
+    external: true
+    name: setlist-public-edge

@@ -42,6 +42,9 @@ if [[ -f .env.miniapp ]]; then
   compose+=(-f compose.miniapp.sandbox.yaml)
   miniapp_enabled=true
 fi
+if [[ -f .env.production-public ]]; then
+  compose+=(-f compose.proxy.production-access.yaml)
+fi
 production_access="$(python3 - <<'PY'
 from pathlib import Path
 values = {}

@@ -139,3 +139,13 @@ def test_sandbox_release_stops_and_recreates_existing_calendar_without_touching_
     assert any(args[-1] == "calendar_proxy" for args in starts)
     assert all("compose.calendar.sandbox.yaml" in args for args in starts)
     assert "PRIVATE_CALENDAR_CREDENTIAL" not in result.stdout + result.stderr
+
+
+def test_sandbox_release_preserves_shared_production_proxy(sandbox_release):
+    app, _, _ = sandbox_release
+    (app / ".env.calendar").write_text("CALENDAR_DATABASE_URL=PRIVATE_CALENDAR\n")
+    (app / ".env.production-public").write_text("PRODUCTION_PUBLIC_HOST=production.example.org\n")
+    result, operations = invoke(sandbox_release, "server")
+    assert result.returncode == 0, result.stderr
+    proxy = next(args for args in operations if "up" in args and args[-1] == "calendar_proxy")
+    assert "compose.proxy.production-access.yaml" in proxy

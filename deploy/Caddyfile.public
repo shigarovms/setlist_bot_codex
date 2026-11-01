@@ -1,0 +1,19 @@
+import /etc/caddy/Caddyfile.sandbox
+
+{$PRODUCTION_PUBLIC_HOST} {
+	@editor path /miniapp /miniapp/*
+	handle @editor {
+		redir /miniapp /miniapp/ 308
+		reverse_proxy setlist-production-miniapp:8091
+	}
+	@feed {
+		path /calendar/*.ics
+		method GET HEAD
+	}
+	handle @feed {
+		reverse_proxy setlist-production-calendar:8090
+	}
+	handle {
+		respond "Not found" 404
+	}
+}

@@ -15,14 +15,14 @@
 	@editor path /miniapp /miniapp/*
 	handle @editor {
 		redir /miniapp /miniapp/ 308
-		reverse_proxy miniapp:8091
+		reverse_proxy setlist-sandbox-miniapp-1:8091
 	}
 	@feed {
 		path /calendar/*.ics
 		method GET HEAD
 	}
 	handle @feed {
-		reverse_proxy calendar:8090
+		reverse_proxy setlist-sandbox-calendar-1:8090
 	}
 	handle {
 		respond "Not found" 404

@@ -12,6 +12,16 @@ if [[ -n "$(git status --porcelain)" ]]; then
   exit 1
 fi
 compose=(docker compose -f compose.yaml -f compose.production.yaml)
+public_enabled=false
+if [[ -f .env.calendar || -f .env.miniapp ]]; then
+  if [[ ! -f .env.calendar || ! -f .env.miniapp ]]; then
+    echo "Incomplete production public service configuration; finish setup before releasing."
+    exit 1
+  fi
+  python3 scripts/setup-production-public.py --check-key
+  compose+=(-f compose.public.production.yaml)
+  public_enabled=true
+fi
 "${compose[@]}" config --quiet
 identity="$("${compose[@]}" exec -T bot .venv/bin/python -c 'from setlist_bot.config import Settings; token=Settings().bot_token; print(token.get_secret_value().split(":",1)[0] if token else "missing")')"
 if [[ "$identity" != 7430933141 ]]; then
@@ -84,11 +94,33 @@ PY
 created=false
 
 # No production downtime until the rehearsal has succeeded. Take a final fresh copy.
-"${compose[@]}" stop bot
+if [[ "$public_enabled" == true ]]; then
+  "${compose[@]}" stop bot calendar miniapp
+else
+  "${compose[@]}" stop bot
+fi
 stopped=true
 SETLIST_APP_DIR="$PWD" bash scripts/backup-server.sh
 "${compose[@]}" run --rm --no-deps migrate
 "${compose[@]}" run --rm --no-deps --entrypoint .venv/bin/setlist-bot migrate --check
+if [[ "$public_enabled" == true ]]; then
+  "${compose[@]}" up -d --no-build --no-deps calendar miniapp
+  "${compose[@]}" exec -T miniapp .venv/bin/python - <<'PY'
+import time
+from urllib.request import urlopen
+for attempt in range(20):
+    try:
+        for url in ('http://calendar:8090/healthz', 'http://127.0.0.1:8091/healthz'):
+            with urlopen(url, timeout=3) as response:
+                assert response.status == 200
+        print('Production HTTP service health OK.', flush=True)
+        break
+    except Exception:
+        time.sleep(2)
+else:
+    raise SystemExit('Production HTTP services unhealthy; polling remains stopped.')
+PY
+fi
 "${compose[@]}" up -d --no-build --no-deps bot
 stopped=false
 "${compose[@]}" exec -T bot .venv/bin/setlist-bot --check

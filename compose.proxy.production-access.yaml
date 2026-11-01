@@ -1,0 +1,16 @@
+# The existing sandbox Caddy owns ports 80/443 and serves both distinct hostnames.
+# It joins an HTTP-only edge network, not the private production database network.
+# Both projects have services named calendar/miniapp: Caddy uses unique container/edge aliases.
+services:
+  calendar_proxy:
+    env_file: [.env.production-public]
+    volumes:
+      - ./deploy/Caddyfile.public:/etc/caddy/Caddyfile:ro
+      - ./deploy/Caddyfile.calendar:/etc/caddy/Caddyfile.sandbox:ro
+    networks:
+      - default
+      - public_edge
+networks:
+  public_edge:
+    external: true
+    name: setlist-public-edge
