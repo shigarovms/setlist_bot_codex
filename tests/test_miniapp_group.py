@@ -72,7 +72,10 @@ async def test_public_launch_is_personal_and_target_is_taken_from_signed_telegra
 
 async def test_method_menu_has_editor_first_and_text_list_is_sent_only_once(engine, world):
     p = Processor(
-        engine, bot_username="botToPract696_bot", miniapp_public_base_url="https://example.org"
+        engine,
+        bot_username="botToPract696_bot",
+        miniapp_public_base_url="https://example.org",
+        setlist_legacy_input_enabled=True,
     )
     await p.process(1, 1, -100, f"/use_concert {world.concert.id}", private=False)
     group = await p.process(2, 1, -100, "/suggestion", private=False)

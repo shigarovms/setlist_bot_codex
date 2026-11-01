@@ -56,7 +56,16 @@ async def errors(
             message = tr(request.get(LANGUAGE, "ru"), exc.code)
         except KeyError:
             message = tr("ru", "input")
-        response = web.json_response({"error": exc.code, "message": message}, status=status)
+        result = {"error": exc.code, "message": message}
+        if exc.code == "admin_suggestions_only" and request.match_info.get("operation") == "launch":
+            # RU: Подписанный запуск уже проверен; запрос прав остаётся у существующего бота.
+            # EN: Keep permission requests in Telegram, without expanding the public SQL role.
+            start = dict(parse_qsl(request.headers["Authorization"][4:])).get("start_param", "")
+            target = UUID(start.removeprefix("sl_"))
+            result["action_url"] = (
+                f"https://t.me/{request.app[SETTINGS].bot_username}?start=draft_{target.hex}"
+            )
+        response = web.json_response(result, status=status)
     except (ValueError, TypeError, KeyError, IndexError):
         response = web.json_response({"error": "input", "message": tr("ru", "input")}, status=400)
     except web.HTTPException as exc:
@@ -142,7 +151,11 @@ async def api(request: web.Request) -> web.Response:
             elif request.method == "POST" and operation == "save":
                 try:
                     result = await service.save(
-                        identifier, payload["version"], payload["entries"], payload["request_id"]
+                        identifier,
+                        payload["version"],
+                        payload["entries"],
+                        payload["request_id"],
+                        default_pause_seconds=payload.get("default_pause_seconds"),
                     )
                 except AppError as exc:
                     if exc.code not in ("conflict", "selection_catalog_changed"):

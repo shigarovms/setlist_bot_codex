@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     calendar_public_base_url: str = ""
     calendar_link_key: SecretStr | None = None
     miniapp_public_base_url: str = ""
+    setlist_legacy_input_enabled: bool = False
 
     @field_validator("miniapp_public_base_url")
     @classmethod

@@ -92,3 +92,40 @@ test("conflict blocks automatic overwrites and retains local entries", async () 
   assert.equal(saver.current[0].song_id, "A");
   assert.equal(saver.blocked, true);
 });
+
+test("gap-only edit is saved and a late acknowledgement preserves a newer gap", async () => {
+  const calls = [], first = deferred();
+  const saver = new DraftPersistence(0, [song("A"), song("A")], async (payload) => {
+    calls.push(structuredClone(payload));
+    return calls.length === 1 ? first.promise : {version: 2, ...payload};
+  }, () => {}, () => {}, 5);
+  saver.pause();
+  saver.setDraft([song("A"), song("A")], 30);
+  assert.equal(saver.dirty(), true);
+  const request = saver.saveOnce();
+  saver.setDraft([song("A"), song("A")], 0);
+  first.resolve({version: 1, entries: [song("A"), song("A")], default_pause_seconds: 30});
+  await request;
+  assert.equal(saver.defaultPause, 0);
+  assert.equal(saver.dirty(), true);
+  await saver.flush();
+  assert.deepEqual(calls.map(p => p.default_pause_seconds), [30, 0]);
+  assert.equal(saver.dirty(), false);
+});
+
+test("lost response retries the same gap before saving a newer list and gap", async () => {
+  const calls = [];
+  const saver = new DraftPersistence(0, [], async (payload) => {
+    calls.push(structuredClone(payload));
+    if (calls.length === 1) throw Error("offline");
+    return {...payload, version: calls.length - 1};
+  }, () => {}, () => {}, 5);
+  saver.pause();
+  saver.setDraft([song("A")], 20);
+  await assert.rejects(saver.saveOnce());
+  saver.setDraft([song("B")], 0);
+  await saver.flush();
+  assert.deepEqual(calls[0], calls[1]);
+  assert.equal(calls[2].default_pause_seconds, 0);
+  assert.equal(calls[2].entries[0].song_id, "B");
+});

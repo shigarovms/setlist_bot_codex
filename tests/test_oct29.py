@@ -153,13 +153,11 @@ async def make_past(uow, world, days, seconds, kind="", *, approved=True, group=
     [
         ("", 650, "closest"),
         ("Сольник", 650, "same"),
-        ("Сольник", 721, "closest"),
+        ("Сольник", 721, "same"),
         ("Сольник", 720, "same"),
     ],
 )
-async def test_recommendation_nearest_duration_with_bounded_type_preference(
-    engine, world, kind, same_seconds, expected
-):
+async def test_recommendation_type_then_duration(engine, world, kind, same_seconds, expected):
     async with PostgresUnitOfWork(engine) as uow:
         closest, close_title = await make_past(uow, world, 20, 601, "Фест")
         same, same_title = await make_past(uow, world, 30, same_seconds, "Сольник")
@@ -180,7 +178,7 @@ async def test_recommendation_no_duration_latest_and_group_copy_heading(engine, 
         await make_past(uow, world, 20, 600, "Сольник")
         last, title = await make_past(uow, world, 2, 650, "Фест")
         target = await uow.store.get(Concert, world.concert.id)
-        target.performance_type = "Сольник"
+        target.performance_type = ""
         result = await suggested_titles(uow.store, world.admin, target)
         assert result.source_date == last.date and result.titles == [title]
     send = sender(engine)

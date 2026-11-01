@@ -303,6 +303,7 @@ class Setlists:
         song_ids: list[UUID] | None = None,
         ordered: list[UUID | int] | None = None,
         pauses_before: list[int | None] | None = None,
+        default_pause_seconds: int | None = None,
     ) -> None:
         """Resolve every input before writing a single atomic setlist revision."""
         await self.groups.can_suggest(group_id)
@@ -311,6 +312,16 @@ class Setlists:
         require((draft.version if draft else setlist.version) == expected, "conflict")
         require(private or not setlist.approved, "approved")
         content = flat_content(draft.content) if draft else await self._working(setlist)
+        if default_pause_seconds is not None:
+            # RU: Порядок песен и средняя сохраняются одной версией личного черновика.
+            # EN: A single atomic draft write prevents a gap edit from racing the song list.
+            require(
+                private
+                and type(default_pause_seconds) is int
+                and 0 <= default_pause_seconds <= 86400,
+                "pause_duration",
+            )
+            content["default_pause_seconds"] = default_pause_seconds
         catalog = Catalog(self.store, self.user)
         items: list[dict[str, Any]]
         if ordered is None and song_ids is None:

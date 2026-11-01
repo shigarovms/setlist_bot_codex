@@ -145,6 +145,7 @@ class Controller:
         calendar_public_base_url: str = "",
         calendar_link_key: str = "",
         miniapp_public_base_url: str = "",
+        setlist_legacy_input_enabled: bool = False,
     ) -> None:
         self.store, self.user, self.chat_id = store, user, chat_id
         self.chat_owner_id: int | None = None
@@ -153,6 +154,7 @@ class Controller:
         self.calendar_public_base_url = calendar_public_base_url
         self.calendar_link_key = calendar_link_key
         self.miniapp_public_base_url = miniapp_public_base_url
+        self.setlist_legacy_input_enabled = setlist_legacy_input_enabled
         self.private, self.chat_admin = private, chat_admin
         self.language = user.language
         self.groups = Groups(store, user)
@@ -2125,6 +2127,27 @@ class Controller:
         return comment, copied, context, version
 
     async def _suggestion_prompt(self, template_id: UUID) -> Response:
+        if self._direct_editor():
+            await self.templates.load(template_id)
+            return Response(
+                self.t("editor_prompt"),
+                [(self.t("miniapp_open"), self._editor_link(template_id))],
+            )
+        return await self._legacy_suggestion_prompt(template_id)
+
+    def _direct_editor(self) -> bool:
+        return bool(
+            self.miniapp_public_base_url
+            and self.bot_username
+            and not self.setlist_legacy_input_enabled
+        )
+
+    def _editor_link(self, template_id: UUID) -> str:
+        return f"https://t.me/{self.bot_username}?startapp=sl_{template_id.hex}"
+
+    async def _legacy_suggestion_prompt(self, template_id: UUID) -> Response:
+        # RU: Архив прежних способов ввода: включается одним флагом, без копии логики.
+        # EN: Keep both tested adapters available for a reversible UI experiment.
         comment, copied, context, version = await self._suggestion_parts(template_id)
         assert context.group_id is not None and context.concert_id is not None
         if self.private:
@@ -2620,6 +2643,8 @@ class Controller:
                 if data["template_id"]
                 else f"slact {key} reopen"
             )
+            if data["template_id"] and self._direct_editor():
+                proposal = self._editor_link(UUID(data["template_id"]))
             buttons = [
                 (self.t("copy_variant"), proposal),
                 (self.t("menu_options"), f"slmenu {key} options"),
@@ -2771,6 +2796,8 @@ class Controller:
                     data["source_chat_id"],
                     private=False,
                     bot_username=self.bot_username,
+                    miniapp_public_base_url=self.miniapp_public_base_url,
+                    setlist_legacy_input_enabled=self.setlist_legacy_input_enabled,
                 )
                 source.language = (await self.store.get(Group, UUID(data["group_id"]))).language
                 rows = await self.store.find(Confirmation, id=UUID(data["card_id"]))

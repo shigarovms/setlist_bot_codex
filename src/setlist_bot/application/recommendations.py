@@ -20,6 +20,21 @@ class Suggestion:
     duration_seconds: int = 0
 
 
+def recommendation_key(
+    target: Concert, source: Concert, seconds: int
+) -> tuple[bool, int, int, str]:
+    """RU: Тип → длительность → свежесть. EN: Stable, lexicographic recommendation ranking."""
+    return (
+        bool(target.performance_type)
+        and normalize(source.performance_type) != normalize(target.performance_type),
+        abs(seconds - target.performance_duration_seconds)
+        if target.performance_duration_seconds
+        else 0,
+        -source.date.toordinal(),
+        str(source.id),
+    )
+
+
 async def suggested_titles(store: Store, user: User, concert: Concert) -> Suggestion:
     songs = await Catalog(store, user).list_songs(concert.group_id)
     active = {str(song.id): song for song in songs}
@@ -44,27 +59,7 @@ async def suggested_titles(store: Store, user: User, concert: Concert) -> Sugges
             for item in snapshot["blocks"][0]["items"]
         ):
             candidates.append((past[setlist.concert_id], snapshot, totals(snapshot)[2]))
-    target = concert.performance_duration_seconds
-    if target and candidates:
-        # RU: Тип имеет приоритет только в пределах ±20%; затем решает близость времени.
-        # EN: Prefer a matching type only within tolerance, then minimize duration distance.
-        same_type = [
-            entry
-            for entry in candidates
-            if concert.performance_type
-            and normalize(entry[0].performance_type) == normalize(concert.performance_type)
-            and abs(entry[2] - target) <= target * 0.2
-        ]
-        candidates = sorted(
-            same_type or candidates,
-            key=lambda entry: (
-                abs(entry[2] - target),
-                -entry[0].date.toordinal(),
-                str(entry[0].id),
-            ),
-        )
-    else:
-        candidates.sort(key=lambda entry: entry[0].date, reverse=True)
+    candidates.sort(key=lambda entry: recommendation_key(concert, entry[0], entry[2]))
     base: list[str] = []
     used: set[str] = set()
     if candidates:

@@ -3,10 +3,11 @@ import { clone, wire } from "./model.js";
 // RU: Одна запись за раз. Повтор после обрыва связи отправляет тот же снимок и request_id.
 // EN: Serialize writes; a late acknowledgement never replaces newer local edits.
 export class DraftPersistence {
-  constructor(version, entries, send, onSaved, onError) {
+  constructor(version, entries, send, onSaved, onError, defaultPause = 5) {
     this.version = version;
     this.current = wire(entries);
-    this.baseline = JSON.stringify(this.current);
+    this.defaultPause = defaultPause;
+    this.baseline = this.snapshot();
     this.send = send;
     this.onSaved = onSaved;
     this.onError = onError;
@@ -18,11 +19,19 @@ export class DraftPersistence {
   }
   dirty() {
     return (
-      this.pending !== null || JSON.stringify(this.current) !== this.baseline
+      this.pending !== null || this.snapshot() !== this.baseline
     );
+  }
+  snapshot() {
+    return JSON.stringify([this.current, this.defaultPause]);
   }
   setEntries(entries) {
     this.current = wire(entries);
+    this.schedule();
+  }
+  setDraft(entries, defaultPause) {
+    this.current = wire(entries);
+    this.defaultPause = defaultPause;
     this.schedule();
   }
   pause() {
@@ -57,16 +66,21 @@ export class DraftPersistence {
     this.pending ??= {
       version: this.version,
       entries: clone(this.current),
+      default_pause_seconds: this.defaultPause,
       request_id: crypto.randomUUID(),
     };
     const sent = this.pending;
     this.inflight = this.send(sent)
       .then((saved) => {
         const unchanged =
-          JSON.stringify(this.current) === JSON.stringify(sent.entries);
+          this.snapshot() === JSON.stringify([sent.entries, sent.default_pause_seconds]);
         this.version = saved.version;
-        this.baseline = JSON.stringify(wire(saved.entries));
-        if (unchanged) this.current = wire(saved.entries);
+        const gap = saved.default_pause_seconds ?? sent.default_pause_seconds;
+        this.baseline = JSON.stringify([wire(saved.entries), gap]);
+        if (unchanged) {
+          this.current = wire(saved.entries);
+          this.defaultPause = gap;
+        }
         this.pending = null;
         this.lastError = null;
         this.onSaved(saved, unchanged);

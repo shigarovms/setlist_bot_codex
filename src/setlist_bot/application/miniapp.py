@@ -10,6 +10,7 @@ from uuid import UUID
 from setlist_bot.application.activity import record_activity
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
+from setlist_bot.application.recommendations import recommendation_key
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.domain.concerts import button_date, today
 from setlist_bot.domain.entities import (
@@ -56,6 +57,7 @@ class MiniDrafts:
         group = await self.groups.access(group_id)
         concert = await self.store.get(Concert, concert_id)
         await self.lists.load(group_id, concert_id)
+        snapshot, version, _ = await self.lists.read(group_id, concert_id)
         bindings = await self.store.find(ChatBinding, group_id=group_id)
         session = Confirmation(
             user_id=self.user.id,
@@ -69,6 +71,8 @@ class MiniDrafts:
                     "group_epoch": group.lifecycle_version,
                     "concert_epoch": concert.lifecycle_version,
                     "origin_chat_id": bindings[0].chat_id if bindings else None,
+                    "history_max_version": version,
+                    "history_empty": not entries(snapshot),
                 }
             ),
         )
@@ -112,7 +116,17 @@ class MiniDrafts:
                 and data.get("launch_id") == str(identifier)
                 and row.expires_at > now()
             ):
-                await self.load(row.id)
+                _, data, target = await self.load(row.id)
+                snapshot, version, _ = await self.lists.read(template.group_id, target.id)
+                # RU: Повторное открытие видит новые общие версии, личный ввод остаётся.
+                # EN: Reset only the navigation anchor; preserve draft and retry receipts.
+                row.command = json.dumps(
+                    {
+                        **{key: value for key, value in data.items() if key != "history_sources"},
+                        "history_max_version": version,
+                        "history_empty": not entries(snapshot),
+                    }
+                )
                 return row
         row = await self.create(template.group_id, template.concert_id)
         row.command = json.dumps({**json.loads(row.command), "launch_id": str(identifier)})
@@ -197,45 +211,105 @@ class MiniDrafts:
         return result
 
     async def history(self, identifier: UUID, index: int) -> dict[str, Any]:
-        _, data, target = await self.load(identifier)
+        row, data, target = await self.load(identifier)
         group_id = UUID(data["group_id"])
+        # RU: Фиксируем порядок при первом просмотре, автосохранение его не переставляет.
+        # EN: Store only public revision IDs; never include another user's private draft.
+        if "history_sources" not in data:
+            sources = await self._history_sources(group_id, target, data)
+            data = {**data, "history_sources": sources}
+            row.command = json.dumps(data)
+        sources = data["history_sources"]
+        require(type(index) is int and 0 <= index < len(sources), "miniapp_no_history")
+        source = sources[index]
+        revision = await self.store.get(Revision, UUID(source["revision_id"]))
+        setlist = await self.store.get(Setlist, revision.setlist_id)
+        concert = await self.store.get(Concert, setlist.concert_id)
+        require(
+            revision.group_id == setlist.group_id == concert.group_id == group_id
+            and concert.deleted_at is None,
+            "miniapp_no_history",
+        )
+        label = " · ".join(part for part in (button_date(concert.date), concert.title) if part)
+        if source["kind"] == "version":
+            label = ("Версия " if self.user.language == "ru" else "Version ") + str(revision.number)
+        elif source["kind"] == "recommendation":
+            label = ("Рекомендуем · " if self.user.language == "ru" else "Suggested · ") + label
+        return {
+            "index": index,
+            "count": len(sources),
+            "kind": source["kind"],
+            "label": label,
+            "default_pause_seconds": flat_content(revision.snapshot)["default_pause_seconds"],
+            "seconds": totals(revision.snapshot)[2],
+            "entries": entries(revision.snapshot),
+        }
+
+    async def _history_sources(
+        self, group_id: UUID, target: Concert, data: dict[str, Any]
+    ) -> list[dict[str, str]]:
+        current = await self.lists.load(group_id, target.id)
+        versions = [
+            r
+            for r in await self.lists.history(group_id, target.id)
+            if r.number <= data.get("history_max_version", current.version) and entries(r.snapshot)
+        ]
+        versions.sort(key=lambda r: r.number, reverse=True)
         concerts = {
             c.id: c
             for c in await self.store.find(Concert, group_id=group_id, deleted_at=None)
             if c.date < min(today(), target.date)
         }
-        sources = [
+        past = [
             s
             for s in await self.store.find(Setlist, group_id=group_id)
             if s.concert_id in concerts and s.approved_revision_id
         ]
-        sources.sort(
+        past.sort(
             key=lambda source: (concerts[source.concert_id].date, source.concert_id), reverse=True
         )
-        require(type(index) is int and 0 <= index < len(sources), "miniapp_no_history")
-        source = sources[index]
-        assert source.approved_revision_id is not None
-        revision = await self.store.get(Revision, source.approved_revision_id)
-        require(revision.group_id == group_id and revision.setlist_id == source.id, "forbidden")
-        concert = concerts[source.concert_id]
-        return {
-            "index": index,
-            "count": len(sources),
-            "label": " · ".join(
-                part for part in (button_date(concert.date), concert.title) if part
-            ),
-            "seconds": totals(revision.snapshot)[2],
-            "entries": entries(revision.snapshot),
+        approved = {
+            r.setlist_id: r
+            for r in await self.store.get_many(
+                Revision, {s.approved_revision_id for s in past if s.approved_revision_id}
+            )
         }
+        past = [s for s in past if s.id in approved and entries(approved[s.id].snapshot)]
+        result = [{"kind": "version", "revision_id": str(r.id)} for r in versions]
+        if not versions and data.get("history_empty", True) and past:
+            best = min(
+                past,
+                key=lambda s: recommendation_key(
+                    target,
+                    concerts[s.concert_id],
+                    totals(approved[s.id].snapshot)[2],
+                ),
+            )
+            result.append({"kind": "recommendation", "revision_id": str(best.approved_revision_id)})
+            past.remove(best)
+        result.extend(
+            {"kind": "performance", "revision_id": str(s.approved_revision_id)} for s in past
+        )
+        return result
 
     async def save(
-        self, identifier: UUID, expected: int, values: list[dict[str, Any]], request_id: str
+        self,
+        identifier: UUID,
+        expected: int,
+        values: list[dict[str, Any]],
+        request_id: str,
+        default_pause_seconds: int | None = None,
     ) -> dict[str, Any]:
         row, data, concert = await self.load(identifier)
         require(type(expected) is int and isinstance(values, list) and len(values) <= 200, "input")
         require(all(isinstance(item, dict) for item in values), "input")
         require(isinstance(request_id, str), "input")
         require(str(UUID(request_id)) == request_id, "input")
+        require(
+            default_pause_seconds is None
+            or (type(default_pause_seconds) is int and 0 <= default_pause_seconds <= 86400),
+            "pause_duration",
+        )
         require(
             all(
                 item.get("kind") != "song"
@@ -245,8 +319,13 @@ class MiniDrafts:
             ),
             "input",
         )
+        # RU: Старое открытое окно повторяет прежний запрос без поля средней.
+        # EN: Preserve legacy retry fingerprints across a rolling deployment.
+        fingerprint_values = [expected, values]
+        if default_pause_seconds is not None:
+            fingerprint_values.append(default_pause_seconds)
         fingerprint = hashlib.sha256(
-            json.dumps([expected, values], sort_keys=True).encode()
+            json.dumps(fingerprint_values, sort_keys=True).encode()
         ).hexdigest()
         if data.get("save_request") == request_id:
             require(data.get("save_fingerprint") == fingerprint, "input")
@@ -288,6 +367,7 @@ class MiniDrafts:
             private=True,
             ordered=ordered,
             pauses_before=before,
+            default_pause_seconds=default_pause_seconds,
         )
         result = await self.state(identifier, catalog=False)
         row.command = json.dumps(

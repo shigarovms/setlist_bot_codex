@@ -93,11 +93,13 @@ class Processor:
         calendar_public_base_url: str = "",
         calendar_link_key: str = "",
         miniapp_public_base_url: str = "",
+        setlist_legacy_input_enabled: bool = False,
     ) -> None:
         self.analytics = analytics
         self.calendar_public_base_url = calendar_public_base_url
         self.calendar_link_key = calendar_link_key
         self.miniapp_public_base_url = miniapp_public_base_url
+        self.setlist_legacy_input_enabled = setlist_legacy_input_enabled
         self.monitor = monitor
         self.engine = engine
         self.bot_username = bot_username
@@ -201,6 +203,7 @@ class Processor:
                 calendar_public_base_url=self.calendar_public_base_url,
                 calendar_link_key=self.calendar_link_key,
                 miniapp_public_base_url=self.miniapp_public_base_url,
+                setlist_legacy_input_enabled=self.setlist_legacy_input_enabled,
             )
             controller.chat_owner_id = chat_owner_id
             controller.sender_username = sender_username or ""

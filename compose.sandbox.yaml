@@ -38,6 +38,7 @@ services:
       RUNTIME_ENVIRONMENT: sandbox
       RUNTIME_LOCATION: ${RUNTIME_LOCATION:-sandbox-server}
       TELEGRAM_DIAGNOSTICS: ${TELEGRAM_DIAGNOSTICS:-true}
+      SETLIST_LEGACY_INPUT_ENABLED: ${SETLIST_LEGACY_INPUT_ENABLED:-false}
     restart: unless-stopped
     depends_on:
       migrate:

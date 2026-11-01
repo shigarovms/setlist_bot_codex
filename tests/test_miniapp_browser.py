@@ -218,6 +218,17 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             )
             await browser.wait("document.querySelectorAll('#setlist li').length===3")
             assert await browser.js("document.getElementById('total').textContent") == "10:21"
+            await browser.js(
+                "document.getElementById('average-pause').click(); "
+                "document.getElementById('average-value').value='30'; "
+                "document.getElementById('average-form').requestSubmit()"
+            )
+            assert await browser.js("document.getElementById('total').textContent") == "10:46"
+            await browser.wait(
+                "document.getElementById('status').textContent.includes('Сохранено')"
+            )
+            await browser.js("document.getElementById('undo').click()")
+            assert await browser.js("document.getElementById('total').textContent") == "10:21"
             await browser.drag(
                 "#setlist li:last-child .handle", "#setlist li:first-child", touch=True
             )

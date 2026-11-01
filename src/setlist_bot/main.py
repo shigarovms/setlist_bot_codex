@@ -3,6 +3,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 from datetime import datetime, time, timedelta
 from uuid import UUID
 
@@ -89,7 +90,16 @@ async def deliver_card_refresh(bot: Bot, uow: PostgresUnitOfWork, event: Outbox)
     owner = await uow.store.get(User, group.owner_id)
     runtime_rows = await uow.store.find(RuntimeStatus, component="bot")
     username = runtime_rows[0].details.get("bot_username", "") if runtime_rows else ""
-    controller = Controller(uow.store, owner, event.chat_id, private=False, bot_username=username)
+    controller = Controller(
+        uow.store,
+        owner,
+        event.chat_id,
+        private=False,
+        bot_username=username,
+        miniapp_public_base_url=os.environ.get("MINIAPP_PUBLIC_BASE_URL", ""),
+        setlist_legacy_input_enabled=os.environ.get("SETLIST_LEGACY_INPUT_ENABLED", "").lower()
+        in ("true", "1", "yes", "on"),
+    )
     controller.language = group.language
     try:
         await controller.menus.validate(data)
@@ -506,6 +516,7 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
                             if settings.calendar_link_key
                             else "",
                             miniapp_public_base_url=settings.miniapp_public_base_url,
+                            setlist_legacy_input_enabled=settings.setlist_legacy_input_enabled,
                         ),
                         me.username or "",
                         diagnostics=settings.telegram_diagnostics,

@@ -48,6 +48,12 @@ const words = {
     add: "Добавить",
     pauseTitle: "Длительность паузы",
     pauseHint: "Без единиц — минуты",
+    average: "Средняя пауза",
+    seconds: "сек",
+    averageTitle: "Средняя пауза между песнями",
+    averageHint: "В секундах. 0 — без пауз. Отдельные паузы сохраняются.",
+    apply: "Применить",
+    requestAccess: "Запросить права у владельца",
     reload: "Обновите редактор, чтобы получить актуальный каталог.",
   },
   en: {
@@ -92,12 +98,19 @@ const words = {
     add: "Add",
     pauseTitle: "Pause duration",
     pauseHint: "Numbers without units mean minutes",
+    average: "Average pause",
+    seconds: "s",
+    averageTitle: "Average pause between songs",
+    averageHint: "In seconds. 0 means no pause. Individual pauses are kept.",
+    apply: "Apply",
+    requestAccess: "Request administrator access",
     reload: "Reopen the editor to refresh the catalog.",
   },
 };
 let lang = "ru",
   state = null,
   current = [],
+  defaultPause = 5,
   undos = [],
   preview = null,
   historyIndex = -1,
@@ -179,11 +192,11 @@ function withKeys(items) {
   return items.map((item) => ({ ...clone(item), key: crypto.randomUUID() }));
 }
 function remember() {
-  undos.push(clone(current));
+  undos.push({ entries: clone(current), gap: defaultPause });
   if (undos.length > 50) undos.shift();
   publishAttempt = null;
 }
-function change(next) {
+function change(next, gap = defaultPause) {
   if (busy) return;
   if (next.length > 200) {
     status(t("limit"), true);
@@ -191,7 +204,8 @@ function change(next) {
   }
   remember();
   current = next;
-  saver?.setEntries(current);
+  defaultPause = gap;
+  saver?.setDraft(current, defaultPause);
   render();
   status(t("dirty"));
 }
@@ -226,7 +240,9 @@ function render() {
     .join(" · ");
   $("catalog").inert = busy;
   $("setlist").inert = busy;
-  $("older").disabled = busy;
+  $("older").disabled = busy || (preview && historyIndex + 1 >= preview.count);
+  $("average-pause").disabled = busy || !!preview;
+  $("average-pause").textContent = `${t("average")}: ${preview?.default_pause_seconds ?? defaultPause}${t("seconds")} · ⚙`;
   $("use-history").disabled = busy;
   const items = preview?.entries ?? current,
     numbers = numbered(items);
@@ -292,7 +308,7 @@ function render() {
     $("setlist").append(row);
   });
   $("total").textContent = clock(
-    preview ? preview.seconds : total(current, state.default_pause_seconds),
+    preview ? preview.seconds : total(current, defaultPause),
   );
   $("planned").textContent =
     `${t("planned")}: ${state.planned_seconds ? clock(state.planned_seconds) : t("unknown")}`;
@@ -467,6 +483,8 @@ async function browse(index) {
     return;
   }
   try {
+    busy = true;
+    render();
     const source = await api("history", { index });
     preview = source;
     historyIndex = index;
@@ -474,6 +492,9 @@ async function browse(index) {
     status(t("ready"));
   } catch (error) {
     status(error.message, true);
+  } finally {
+    busy = false;
+    render();
   }
 }
 $("older").addEventListener("click", () => browse(historyIndex + 1));
@@ -494,15 +515,18 @@ $("use-history").addEventListener("click", () => {
         }
       : item;
   });
+  const gap = preview.default_pause_seconds;
   preview = null;
   historyIndex = -1;
-  change(withKeys(replacement));
+  change(withKeys(replacement), gap);
 });
 $("undo").addEventListener("click", () => {
   if (undos.length) {
-    current = undos.pop();
+    const previous = undos.pop();
+    current = previous.entries;
+    defaultPause = previous.gap;
     publishAttempt = null;
-    saver?.setEntries(current);
+    saver?.setDraft(current, defaultPause);
     render();
     status(dirty() ? t("dirty") : t("ready"));
   }
@@ -526,6 +550,20 @@ $("add-pause").addEventListener("click", () => {
   $("pause-value").focus();
 });
 $("pause-cancel").addEventListener("click", () => $("pause-dialog").close());
+$("average-pause").addEventListener("click", () => {
+  if (!state || busy || preview) return;
+  $("average-value").value = defaultPause;
+  $("average-dialog").showModal();
+  $("average-value").focus();
+});
+$("average-cancel").addEventListener("click", () => $("average-dialog").close());
+$("average-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const gap = Number($("average-value").value);
+  if (!Number.isInteger(gap) || gap < 0 || gap > 86400) return;
+  if (gap !== defaultPause) change(clone(current), gap);
+  $("average-dialog").close();
+});
 $("pause-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("pause-submit").disabled = true;
@@ -564,11 +602,15 @@ function persistence() {
     (payload) => api("save", payload, "POST"),
     (saved, unchanged) => {
       state = { ...state, ...saved };
-      if (unchanged) current = withKeys(saved.entries);
+      if (unchanged) {
+        current = withKeys(saved.entries);
+        defaultPause = saved.default_pause_seconds;
+      }
       if (!drag) render();
       status(dirty() ? t("dirty") : t("saved"));
     },
     saveError,
+    defaultPause,
   );
 }
 $("save").addEventListener("click", async () => {
@@ -640,6 +682,7 @@ $("load-latest").addEventListener("click", () => {
   if (dirty() && !confirm(t("replace"))) return;
   state = { ...state, ...latest };
   current = withKeys(latest.entries);
+  defaultPause = latest.default_pause_seconds;
   saver?.pause();
   persistence();
   publishAttempt = null;
@@ -696,6 +739,10 @@ function labels() {
     "pause-submit": "add",
     "pause-title": "pauseTitle",
     "pause-label": "pauseHint",
+    "average-title": "averageTitle",
+    "average-label": "averageHint",
+    "average-cancel": "cancel",
+    "average-submit": "apply",
   }))
     $(id).textContent = t(key);
   $("search").placeholder = t("search");
@@ -716,11 +763,21 @@ async function boot() {
       .filter(Boolean)
       .join(" · ");
     current = withKeys(state.entries);
+    defaultPause = state.default_pause_seconds;
     persistence();
     render();
     status(t("ready"));
   } catch (error) {
     status(error.message, true);
+    if (error.data?.action_url) {
+      $("access-request").hidden = false;
+      $("access-request").textContent = t("requestAccess");
+      $("access-request").onclick = () => {
+        if (tg?.openTelegramLink) tg.openTelegramLink(error.data.action_url);
+        else location.href = error.data.action_url;
+        tg?.close?.();
+      };
+    }
   }
 }
 document.addEventListener("visibilitychange", () => {

@@ -22,10 +22,11 @@ MESSAGES = {
         "back_concerts": "◀️ Назад к выступлениям",
         "group_events": "Мероприятия {name}",
         "miniapp_open": "🖐 Открыть редактор",
+        "editor_prompt": "Откройте редактор: добавьте песни, настройте паузы и отправьте свой вариант коллективу.",
         "suggestion_private_button": "🎵 Собрать вариант в личке",
         "miniapp_auth": "Откройте редактор заново кнопкой под сет-листом.",
         "miniapp_expired": "Редактор устарел. Откройте его заново из личного черновика.",
-        "miniapp_no_history": "Более ранних утверждённых сет-листов пока нет.",
+        "miniapp_no_history": "Более ранних версий и утверждённых сет-листов пока нет.",
         "miniapp_catalog_limit": "Каталог слишком большой для редактора. Используйте текстовый ввод или кнопки.",
         "my_groups": "Мои коллективы",
         "concerts_heading": "Выступления {name}:",
@@ -147,7 +148,7 @@ MESSAGES = {
             "\n"
             "В личке правки меняют только личный черновик. Отправить свой вариант группе: /publish.\n"
             "Ответ списком на рабочий сет-лист или приглашение — предложение нового варианта.\n"
-            "Выбор песен и действий доступен также кнопками. /cancel — отмена текущего ввода и подтверждений.\n"
+            "«Предложить свой вариант» и «Изменить» открывают редактор: перетаскивайте песни, задавайте среднюю паузу и выбирайте прежние версии стрелками. /cancel — отмена текущего ввода и подтверждений.\n"
         ),
         "ok": "Готово.",
         "empty": "Пока пусто.",
@@ -426,10 +427,11 @@ MESSAGES = {
         "back_concerts": "◀️ Back to performances",
         "group_events": "Performances — {name}",
         "miniapp_open": "🖐 Open editor",
+        "editor_prompt": "Open the editor to add songs, adjust pauses and propose your draft to the group.",
         "suggestion_private_button": "🎵 Build in private chat",
         "miniapp_auth": "Reopen the editor using the button below a setlist.",
         "miniapp_expired": "This editor session expired. Reopen it from your private draft.",
-        "miniapp_no_history": "There are no earlier approved setlists.",
+        "miniapp_no_history": "There are no earlier versions or approved setlists.",
         "miniapp_catalog_limit": "This catalog is too large for the editor. Use text input or song buttons.",
         "my_groups": "My groups",
         "concerts_heading": "Performances — {name}:",
@@ -551,7 +553,7 @@ MESSAGES = {
             "\n"
             "In private chat edits change only your personal draft. Send your variant to the group: /publish.\n"
             "Replying with a list to a working setlist or invitation proposes a new variant.\n"
-            "Song selection and actions are also available through buttons. /cancel cancels input and pending confirmations.\n"
+            "Suggest your variant and Edit open the editor: drag songs, set an average pause and browse versions with the arrows. /cancel cancels input and pending confirmations.\n"
         ),
         "ok": "Done.",
         "empty": "Nothing here yet.",
