@@ -3,6 +3,8 @@ name: setlist-sandbox
 services:
   db:
     image: postgres:17
+    # RU: База запускается после перезагрузки хоста. EN: Preserve a manual stop.
+    restart: unless-stopped
     environment:
       POSTGRES_USER: setlist
       POSTGRES_PASSWORD: setlist
