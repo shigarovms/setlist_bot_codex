@@ -17,6 +17,7 @@ from setlist_bot.domain.entities import (
     ChatBinding,
     Concert,
     Confirmation,
+    Membership,
     Revision,
     Setlist,
     Song,
@@ -194,6 +195,13 @@ class MiniDrafts:
             "version": version,
             "session": str(identifier),
             "default_pause_seconds": snapshot["default_pause_seconds"],
+            "group_default_pause_seconds": group.default_pause_seconds,
+            "can_set_group_default": any(
+                member.role == "admin"
+                for member in await self.store.find(
+                    Membership, group_id=group_id, user_id=self.user.id, status="active"
+                )
+            ),
             "planned_seconds": concert.performance_duration_seconds,
             "entries": entries(snapshot),
             "catalog": [
@@ -358,6 +366,7 @@ class MiniDrafts:
                 require(lead is None or type(lead) is int and 0 <= lead <= 86400, "pause_duration")
                 ordered.append(song.id)
                 before.append(lead)
+        previous, _, _ = await self.lists.read(group_id, concert.id, private=True)
         await self.lists.edit_songs(
             group_id,
             concert.id,
@@ -369,6 +378,26 @@ class MiniDrafts:
             pauses_before=before,
             default_pause_seconds=default_pause_seconds,
         )
+        if (
+            default_pause_seconds is not None
+            and default_pause_seconds != previous["default_pause_seconds"]
+        ):
+            membership = (
+                await self.store.find(
+                    Membership, group_id=group_id, user_id=self.user.id, status="active"
+                )
+            )[0]
+            if membership.role == "admin":
+                # RU: В одной транзакции обновляем черновик и настройку новых выступлений.
+                # EN: Never rewrite approved history, existing setlists or other private drafts.
+                await self.groups.set_default_pause(group_id, str(default_pause_seconds))
+                record_activity(
+                    self.store,
+                    self.user,
+                    "group_default_pause_changed",
+                    group_id,
+                    seconds=default_pause_seconds,
+                )
         result = await self.state(identifier, catalog=False)
         row.command = json.dumps(
             {

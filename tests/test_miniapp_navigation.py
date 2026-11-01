@@ -8,7 +8,7 @@ from test_oct29 import make_past
 
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.setlists import Setlists
-from setlist_bot.domain.entities import Concert, PersonalDraft, Revision
+from setlist_bot.domain.entities import Concert, Group, PersonalDraft, Revision
 from setlist_bot.domain.rules import AppError, totals
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.transport.telegram import Processor
@@ -30,14 +30,39 @@ async def test_average_pause_is_atomic_private_idempotent_and_keeps_explicit_pau
         assert totals(snapshot)[2] == 218 * 3 + 180 + 30
         assert await service.lists.read(world.group.id, world.concert.id) == before
         assert len(await uow.store.find(Revision)) == before_revisions
+        assert (await uow.store.get(Group, world.group.id)).default_pause_seconds == 30
+        future = await service.lists.create(world.group.id, world.concert.date)
+        assert (await service.lists.read(world.group.id, future.id))[0][
+            "default_pause_seconds"
+        ] == 30
+        assert (await uow.store.get(Group, world.other.id)).default_pause_seconds == 5
         with pytest.raises(AppError, match="input"):
             await service.save(identifier, initial["version"], values, request, 60)
     async with PostgresUnitOfWork(engine) as uow:
         service = MiniDrafts(uow.store, world.admin)
         zero = await service.save(identifier, saved["version"], values, str(uuid4()), 0)
         assert zero["default_pause_seconds"] == 0
+        assert (await uow.store.get(Group, world.group.id)).default_pause_seconds == 0
         with pytest.raises(AppError, match="conflict"):
             await service.save(identifier, saved["version"], values, str(uuid4()), 10)
+
+
+async def test_member_pause_is_private_and_unchanged_autosave_does_not_reset_group_default(
+    engine, world
+):
+    identifier, initial = await session(engine, world, member=True)
+    async with PostgresUnitOfWork(engine) as uow:
+        service = MiniDrafts(uow.store, world.member)
+        assert initial["can_set_group_default"] is False
+        saved = await service.save(identifier, initial["version"], [song(world)], str(uuid4()), 30)
+        assert saved["default_pause_seconds"] == 30
+        assert (await uow.store.get(Group, world.group.id)).default_pause_seconds == 5
+    admin_id, admin_initial = await session(engine, world)
+    async with PostgresUnitOfWork(engine) as uow:
+        (await uow.store.get(Group, world.group.id)).default_pause_seconds = 20
+        service = MiniDrafts(uow.store, world.admin)
+        await service.save(admin_id, admin_initial["version"], [song(world)], str(uuid4()), 5)
+        assert (await uow.store.get(Group, world.group.id)).default_pause_seconds == 20
 
 
 @pytest.mark.parametrize("gap", [-1, True, 1.5, "30", 86401])

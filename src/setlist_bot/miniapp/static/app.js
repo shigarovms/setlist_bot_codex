@@ -49,9 +49,12 @@ const words = {
     pauseTitle: "Длительность паузы",
     pauseHint: "Без единиц — минуты",
     average: "Средняя пауза",
+    averageShort: "Сред. пауза",
     seconds: "сек",
     averageTitle: "Средняя пауза между песнями",
     averageHint: "В секундах. 0 — без пауз. Отдельные паузы сохраняются.",
+    averageGroupHint: "В секундах. Сохранится и для новых сет-листов коллектива. Отдельные паузы не изменятся.",
+    averagePrivateHint: "В секундах. Изменится только ваш черновик. Паузу для новых выступлений задаёт администратор.",
     apply: "Применить",
     requestAccess: "Запросить права у владельца",
     reload: "Обновите редактор, чтобы получить актуальный каталог.",
@@ -99,9 +102,12 @@ const words = {
     pauseTitle: "Pause duration",
     pauseHint: "Numbers without units mean minutes",
     average: "Average pause",
+    averageShort: "Avg. pause",
     seconds: "s",
     averageTitle: "Average pause between songs",
     averageHint: "In seconds. 0 means no pause. Individual pauses are kept.",
+    averageGroupHint: "In seconds. Also applies to new group setlists. Individual pauses are kept.",
+    averagePrivateHint: "In seconds. Only your draft changes. Administrators set the default for new performances.",
     apply: "Apply",
     requestAccess: "Request administrator access",
     reload: "Reopen the editor to refresh the catalog.",
@@ -242,7 +248,8 @@ function render() {
   $("setlist").inert = busy;
   $("older").disabled = busy || (preview && historyIndex + 1 >= preview.count);
   $("average-pause").disabled = busy || !!preview;
-  $("average-pause").textContent = `${t("average")}: ${preview?.default_pause_seconds ?? defaultPause}${t("seconds")} · ⚙`;
+  $("average-pause").textContent = t("averageShort");
+  $("average-pause").setAttribute("aria-label", `${t("average")}: ${preview?.default_pause_seconds ?? defaultPause}${t("seconds")}`);
   $("use-history").disabled = busy;
   const items = preview?.entries ?? current,
     numbers = numbered(items);
@@ -553,6 +560,7 @@ $("pause-cancel").addEventListener("click", () => $("pause-dialog").close());
 $("average-pause").addEventListener("click", () => {
   if (!state || busy || preview) return;
   $("average-value").value = defaultPause;
+  $("average-label").textContent = t(state.can_set_group_default ? "averageGroupHint" : "averagePrivateHint");
   $("average-dialog").showModal();
   $("average-value").focus();
 });

@@ -78,12 +78,6 @@ p {
   color: var(--hint);
   font-size: 14px;
 }
-.compact {
-  margin-top: 8px;
-  padding: 6px 10px;
-  font-size: 14px;
-  color: var(--hint);
-}
 button,
 input {
   font: inherit;
@@ -162,6 +156,9 @@ nav span {
 }
 .toolbar button {
   flex: 1;
+  min-width: 0;
+  padding-inline: 6px;
+  font-size: 14px;
 }
 .workspace {
   display: grid;

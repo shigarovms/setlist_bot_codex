@@ -204,6 +204,15 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 },
             )
             await browser.wait("document.querySelectorAll('.catalog-entry').length===1")
+            assert await browser.js(
+                "Array.from(document.querySelectorAll('#average-pause')).length===1 && "
+                "document.getElementById('undo').nextElementSibling.id==='average-pause' && "
+                "document.getElementById('average-pause').nextElementSibling.id==='add-pause'"
+            )
+            assert (
+                await browser.js("document.getElementById('average-pause').textContent")
+                == "Сред. пауза"
+            )
             await browser.js(
                 "document.querySelector('.add').click(); document.querySelector('.add').click()"
             )

@@ -44,12 +44,15 @@ def grants():
     # RU: Только личные черновики, служебная сессия и журнал. Общий сет-лист — read-only.
     # EN: UPDATE(id) is required by PostgreSQL for SELECT FOR UPDATE on tenant/role rows;
     # the application never mutates IDs. No catalog, approval or support writes are granted.
+    # RU: Средняя коллектива — единственная изменяемая настройка, после проверки admin.
+    # EN: Grant only this settings column; all other group properties remain read-only.
     return (
         f"GRANT CONNECT ON DATABASE setlist_sandbox TO {ROLE};\n"
         f"GRANT USAGE ON SCHEMA public TO {ROLE};\n"
         f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {ROLE};\n"
         f"GRANT SELECT ON {','.join(READ_TABLES)} TO {ROLE};\n"
         f"GRANT UPDATE(id) ON groups,memberships TO {ROLE};\n"
+        f"GRANT UPDATE(default_pause_seconds) ON groups TO {ROLE};\n"
         f"GRANT INSERT,UPDATE(content,version) ON personal_drafts TO {ROLE};\n"
         f"GRANT INSERT,UPDATE(command,expires_at) ON confirmations TO {ROLE};\n"
         f"GRANT INSERT,SELECT,UPDATE(snapshot) ON submissions TO {ROLE};\n"

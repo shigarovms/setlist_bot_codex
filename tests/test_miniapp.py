@@ -338,6 +338,8 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 "UPDATE setlists SET approved=true",
                 "UPDATE songs SET title='bad'",
                 "UPDATE memberships SET role='admin'",
+                "UPDATE groups SET name='forbidden'",
+                "UPDATE groups SET owner_id=NULL",
                 "DELETE FROM personal_drafts",
             ):
                 async with app[ENGINE].connect() as connection:

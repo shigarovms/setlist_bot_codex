@@ -13,9 +13,11 @@ from setlist_bot.infrastructure.database import PostgresUnitOfWork
 class Renderer:
     def __init__(self):
         self.payloads = []
+        self.modes = []
 
     def render(self, payload, audience, language, transliterate):
         self.payloads.append(deepcopy(payload))
+        self.modes.append((language, transliterate))
         return b"%PDF-" + audience.encode()
 
 
@@ -98,6 +100,51 @@ async def test_repeated_export_reuses_existing_bytes(engine, world):
         first = await exports.files(source.id, "lights", "ru", False, renderer)
         second = await exports.files(source.id, "lights", "ru", False, renderer)
         assert first == second and len(renderer.payloads) == 1
+
+
+async def test_pdf_language_controls_transliteration_and_normalizes_old_buttons(engine, world):
+    async with PostgresUnitOfWork(engine) as uow:
+        exports, source = await approved_export(uow, world)
+        renderer = Renderer()
+        english = await exports.files(source.id, "all", "en", False, renderer)
+        assert renderer.modes == [("en", True), ("en", True)]
+        assert all("-en-latin.pdf" in name for name, _ in english)
+        # The old explicit flag resolves to the same cache entry for each language.
+        assert await exports.files(source.id, "all", "en", True, renderer) == english
+        russian = await exports.files(source.id, "all", "ru", True, renderer)
+        assert renderer.modes[-2:] == [("ru", False), ("ru", False)]
+        assert all("-latin" not in name for name, _ in russian)
+        assert await exports.files(source.id, "all", "ru", False, renderer) == russian
+        assert len(renderer.payloads) == 4
+
+
+async def test_export_menu_has_only_language_toggle(engine, world):
+    from setlist_bot.transport.controller import Controller
+
+    async with PostgresUnitOfWork(engine) as uow:
+        _, source = await approved_export(uow, world)
+        controller = Controller(uow.store, world.admin, -100, private=False)
+        russian = await controller.execute(f"export_menu {source.id.hex}")
+        assert not any("Транслитерация" in label for label, _ in russian.buttons)
+        english_action = next(
+            action for label, action in russian.buttons if label.startswith("Язык PDF:")
+        )
+        english = await controller.execute(english_action)
+        assert any(label == "Язык PDF: EN" for label, _ in english.buttons)
+        assert all(
+            action.endswith(" en 1")
+            for _, action in english.buttons
+            if action.startswith("export_file ")
+        )
+        russian_action = next(
+            action for label, action in english.buttons if label.startswith("Язык PDF:")
+        )
+        russian = await controller.execute(russian_action)
+        assert all(
+            action.endswith(" ru 0")
+            for _, action in russian.buttons
+            if action.startswith("export_file ")
+        )
 
 
 async def test_new_layout_regenerates_export_without_overwriting_old_pdf(engine, world):

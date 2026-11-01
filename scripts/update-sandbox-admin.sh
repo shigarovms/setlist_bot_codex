@@ -77,6 +77,12 @@ fi
 SETLIST_SANDBOX_DIR="$PWD" bash scripts/backup-sandbox.sh
 "${compose[@]}" run --rm --no-deps migrate
 "${compose[@]}" run --rm --no-deps --entrypoint .venv/bin/setlist-bot migrate --check
+if [[ "$miniapp_enabled" == true ]]; then
+  # RU: Только средняя; прочие поля коллектива остаются read-only для Mini App.
+  # EN: Apply this narrow grant before starting the updated HTTP writer.
+  "${compose[@]}" exec -T db psql -X -U setlist -d setlist_sandbox -v ON_ERROR_STOP=1 \
+    -c 'GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp;'
+fi
 "${compose[@]}" up -d --no-build --no-deps admin
 "${compose[@]}" exec -T admin .venv/bin/python - <<'PY'
 import json

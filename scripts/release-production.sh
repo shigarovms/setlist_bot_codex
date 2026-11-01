@@ -104,6 +104,10 @@ SETLIST_APP_DIR="$PWD" bash scripts/backup-server.sh
 "${compose[@]}" run --rm --no-deps migrate
 "${compose[@]}" run --rm --no-deps --entrypoint .venv/bin/setlist-bot migrate --check
 if [[ "$public_enabled" == true ]]; then
+  # RU: Меняется доступ только к средней, не данные или пароль другого контура.
+  # EN: Existing deployments need the same narrow grant as fresh public setup.
+  "${compose[@]}" exec -T db psql -X -U setlist -d setlist -v ON_ERROR_STOP=1 \
+    -c 'GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp;'
   "${compose[@]}" up -d --no-build --no-deps calendar miniapp
   "${compose[@]}" exec -T miniapp .venv/bin/python - <<'PY'
 import time

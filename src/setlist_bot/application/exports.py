@@ -195,6 +195,9 @@ class Exports:
         renderer: PdfRenderer,
     ) -> list[tuple[str, bytes]]:
         require(audience in ("musicians", "lights", "all") and language in ("ru", "en"), "input")
+        # RU: Один выбор языка управляет также алфавитом, включая старые кнопки.
+        # EN: Normalize before cache lookup; preserve immutable previously generated files.
+        transliterate = language == "en"
         export = await self.configured(await self.load(export_id))
         from setlist_bot.application.ux import milestone
 

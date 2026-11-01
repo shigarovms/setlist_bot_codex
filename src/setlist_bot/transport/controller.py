@@ -610,11 +610,11 @@ class Controller:
             language = values[-2] if len(values) > 1 else export.payload["language"]
             latin = values[-1] if len(values) > 1 else "0"
             require(language in ("ru", "en") and latin in ("0", "1"), "input")
-            response = self._export_menu(export.id, export.payload, language, latin == "1")
+            response = self._export_menu(export.id, export.payload, language)
             if command == "export_file":
                 require(len(values) == 4, "input")
                 response.files = await self.exports.files(
-                    export.id, values[1], language, latin == "1", PdfDocuments()
+                    export.id, values[1], language, language == "en", PdfDocuments()
                 )
                 response.text = self.t("export_ready") + "\n\n" + response.text
             if export.payload.get("menu_card_id"):
@@ -1519,7 +1519,7 @@ class Controller:
                 private=self.private,
                 back="shared" if self.private else "setlist",
             )
-            return self._export_menu(export.id, export.payload, export.payload["language"], False)
+            return self._export_menu(export.id, export.payload, export.payload["language"])
         if command == "pause" and not args:
             response = await self._show(context)
             response.text += "\n\n" + self.t("pause_usage")
@@ -1830,9 +1830,9 @@ class Controller:
         )
         return [(tr(language or self.language, "export_button"), f"export_menu {export.id.hex}")]
 
-    def _export_menu(
-        self, export_id: UUID, payload: dict[str, Any], language: str, latin: bool
-    ) -> Response:
+    def _export_menu(self, export_id: UUID, payload: dict[str, Any], language: str) -> Response:
+        latin = language == "en"
+        next_language = "ru" if latin else "en"
         buttons = [
             (self.t(label), f"export_file {export_id.hex} {audience} {language} {int(latin)}")
             for label, audience in (
@@ -1844,11 +1844,7 @@ class Controller:
         buttons += [
             (
                 self.t("export_language", code=language.upper()),
-                f"export_menu {export_id.hex} {'en' if language == 'ru' else 'ru'} {int(latin)}",
-            ),
-            (
-                self.t("export_latin_on" if latin else "export_latin_off"),
-                f"export_menu {export_id.hex} {language} {int(not latin)}",
+                f"export_menu {export_id.hex} {next_language} {int(not latin)}",
             ),
             (self.t("back_button"), f"export_back {export_id.hex}"),
         ]
