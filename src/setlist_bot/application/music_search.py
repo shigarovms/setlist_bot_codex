@@ -130,7 +130,8 @@ class MusicSearches:
             writer.writerow([title, clock(row["seconds"]), "", row["bpm"] or "", ""])
         importer = Importer(self.store, self.user, self.chat_id)
         pending = await importer.create(job.group_id, buffer.getvalue())
-        plan = await importer.preview(job.group_id, pending.id)
+        # RU/EN: Internet import still skips existing songs; no unpreviewed BPM enrichment.
+        plan = await importer.preview(job.group_id, pending.id, supplement_existing=False)
         require(not plan.errors and not plan.parsed.error, "import_fix")
         job.status = "preview"
         self.write(
@@ -148,9 +149,13 @@ class MusicSearches:
     async def commit(self, job: MusicSearch, token: str) -> int:
         require(job.status == "preview" and token == job.data.get("preview_token"), "already_done")
         importer = Importer(self.store, self.user, self.chat_id)
-        count = await importer.commit(
-            job.group_id, UUID(job.data["import_id"]), job.data["fingerprint"]
+        result = await importer.commit(
+            job.group_id,
+            UUID(job.data["import_id"]),
+            job.data["fingerprint"],
+            supplement_existing=False,
         )
+        count = result.added
         job.status = "done"
         self.write(job, imported_count=count)
         return count

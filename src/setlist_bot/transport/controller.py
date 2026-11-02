@@ -6,7 +6,7 @@ from typing import Any, Literal
 from uuid import UUID
 
 from setlist_bot.application.backup import Backup
-from setlist_bot.application.catalog import SONG_FIELDS, Catalog
+from setlist_bot.application.catalog import SONG_FIELDS, Catalog, missing_song_fields
 from setlist_bot.application.chat_cleanup import collect as cleanup_messages
 from setlist_bot.application.command_inputs import (
     GROUP_INPUTS,
@@ -941,6 +941,23 @@ class Controller:
             require(not new_song_row.error, new_song_row.error or "song_input")
             require(new_song_row.data is not None, "song_input")
             assert new_song_row.data is not None
+            existing = await self.catalog.exact_song(group_id, new_song_row.title)
+            if existing:
+                additions = missing_song_fields(existing, new_song_row.data)
+                if not additions:
+                    return Response(existing.title + "\n\n" + self.t("import_none"))
+                data = {key: getattr(existing, key) for key in SONG_FIELDS}
+                data.update(additions)
+                return await self.confirm(
+                    context,
+                    "save_song "
+                    + json.dumps(
+                        {"data": data, "song_id": str(existing.id), "expected": existing.version}
+                    ),
+                    self._supplement_card(existing.title, additions)
+                    + "\n\n"
+                    + self.t("import_note"),
+                )
             return await self.confirm(
                 context,
                 "save_song "
@@ -950,8 +967,10 @@ class Controller:
         if command == "commit_import":
             require(confirmed, "confirmation")
             identifier, fingerprint = args.split()
-            count = await self.importer.commit(group_id, UUID(identifier), fingerprint)
-            return Response(self.t("import_done", count=count))
+            imported = await self.importer.commit(group_id, UUID(identifier), fingerprint)
+            return Response(
+                self.t("import_done", count=imported.added, supplemented=imported.supplemented)
+            )
         if command in ("map_start", "map_header", "map_col"):
             values = args.split()
             job = await self.importer.job(group_id, UUID(values[0]))
@@ -1383,12 +1402,15 @@ class Controller:
                 buttons.append((self.t("menu_back"), "concerts"))
             else:
                 buttons.insert(0, (self.t("past_concerts"), "past_concerts"))
-                memberships = await self.store.find(
-                    Membership, user_id=self.user.id, status="active"
-                )
-                mine = await self.store.get_many(Group, {member.group_id for member in memberships})
-                if sum(item.deleted_at is None for item in mine) > 1:
-                    buttons.insert(0, (self.t("my_groups"), "groups"))
+                if self.private:
+                    memberships = await self.store.find(
+                        Membership, user_id=self.user.id, status="active"
+                    )
+                    mine = await self.store.get_many(
+                        Group, {member.group_id for member in memberships}
+                    )
+                    if sum(item.deleted_at is None for item in mine) > 1:
+                        buttons.insert(0, (self.t("my_groups"), "groups"))
             buttons.append((self.t("new_concert"), "concert"))
             return Response(
                 self.t("past_concerts") if past else self.t("concerts_heading", name=group.name),
@@ -2553,6 +2575,11 @@ class Controller:
             return matches[0]
         return await self.catalog.song(group_id, identifier)
 
+    def _supplement_card(self, title: str, fields: dict[str, Any]) -> str:
+        lines = [self.t("import_supplement", title=title)]
+        lines.extend(f"{self.t('import_field_' + key)}: {value}" for key, value in fields.items())
+        return "\n".join(lines)
+
     async def _import_preview(self, context: Context, job: CatalogImport) -> Response:
         plan = await self.importer.preview(job.group_id, job.id)
         if plan.parsed.error == "import_columns" or (
@@ -2570,12 +2597,15 @@ class Controller:
                 new=len(plan.new),
                 duplicates=len(plan.duplicates),
                 errors=len(plan.errors),
+                supplements=len(plan.supplements),
             ),
         ]
         if plan.parsed.error:
             lines.append(self.t(plan.parsed.error))
         for data in plan.new:
             lines.append(self.t("import_new") + ": " + self._song_card(data))
+        for update in plan.supplements:
+            lines.append(self._supplement_card(update.title, update.fields))
         for row in plan.duplicates:
             lines.append(f"{row.title}: {self.t('import_duplicate')}")
         for row in plan.errors:
@@ -2586,12 +2616,12 @@ class Controller:
             )
         lines.append(self.t("import_note"))
         preview = "\n\n".join(lines)
-        if plan.new and not plan.errors and not plan.parsed.error:
+        if (plan.new or plan.supplements) and not plan.errors and not plan.parsed.error:
             response = await self.confirm(
                 context, f"commit_import {job.id} {plan.fingerprint}", preview
             )
         else:
-            if not plan.new and not plan.errors and not plan.parsed.error:
+            if not plan.new and not plan.supplements and not plan.errors and not plan.parsed.error:
                 preview += "\n" + self.t("import_none")
             response = Response(preview, [(self.t("cancel_button"), f"import_cancel {job.id.hex}")])
         response.buttons.insert(-1, (self.t("import_map"), f"map_start {job.id.hex}"))

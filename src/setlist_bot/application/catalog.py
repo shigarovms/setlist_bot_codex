@@ -11,6 +11,20 @@ from setlist_bot.domain.entities import CatalogProposal, Membership, Song, SongA
 from setlist_bot.domain.rules import SongListError, normalize, require, search_key, validate_song
 
 SONG_FIELDS = ("title", "duration_seconds", "bpm", "lights", "comment")
+SUPPLEMENT_FIELDS = ("bpm", "lights", "comment")
+
+
+def missing_song_fields(song: Song, incoming: dict[str, Any]) -> dict[str, Any]:
+    """RU: Импорт заполняет только пустое. EN: Never overwrite existing catalog metadata."""
+
+    def populated(value: Any) -> bool:
+        return value is not None and (bool(value.strip()) if isinstance(value, str) else True)
+
+    return {
+        key: incoming[key]
+        for key in SUPPLEMENT_FIELDS
+        if not populated(getattr(song, key)) and populated(incoming.get(key))
+    }
 
 
 class Catalog:
@@ -31,6 +45,20 @@ class Catalog:
         song = await self.store.get(Song, song_id)
         require(song.group_id == group_id, "not_found")
         return song
+
+    async def exact_song(self, group_id: UUID, title: str) -> Song | None:
+        """RU/EN: Import matching uses exact normalized titles/aliases, never fuzzy search."""
+        await self.groups.access(group_id)
+        key = normalize(title)
+        songs = await self.store.find(Song, group_id=group_id)
+        identifiers = {song.id for song in songs if normalize(song.title) == key}
+        identifiers.update(
+            alias.song_id
+            for alias in await self.store.find(SongAlias, group_id=group_id)
+            if normalize(alias.title) == key
+        )
+        require(len(identifiers) <= 1, "import_ambiguous")
+        return next((song for song in songs if song.id in identifiers), None)
 
     async def save(
         self,

@@ -61,7 +61,24 @@ async def test_concerts_names_and_multi_group_switch(engine, world):
     send = sender(engine)
     many = await send("/concerts")
     assert many.text == "Выступления Коллектив А:"
-    assert many.buttons[0] == ("Мои коллективы", "groups")
-    assert many.buttons[1][1] == "past_concerts"
+    assert many.buttons[0][1] == "past_concerts"
+    assert not any(action == "groups" for _, action in many.buttons)
+    await send(f"/use_group {world.group.id}", private=True)
+    personal = await send("/concerts", private=True)
+    assert personal.buttons[0] == ("Мои коллективы", "groups")
+    assert personal.buttons[1][1] == "past_concerts"
     single = await send("/concerts", actor=2)
     assert single.buttons[0][1] == "past_concerts"
+
+
+@pytest.mark.parametrize("private", [False, True])
+async def test_back_to_performances_only_offers_group_switch_in_private(engine, world, private):
+    from test_setlist_menus import action
+
+    send = sender(engine)
+    if private:
+        await send(f"/use_group {world.group.id}", private=True)
+    card = await send(f"/use_concert {world.concert.id}", private=private, remember=70)
+    returned = await send(action(card, "◀️ Назад к выступлениям"), private=private, source=70)
+    assert returned.text == "Выступления Коллектив А:"
+    assert any(callback == "groups" for _, callback in returned.buttons) is private
