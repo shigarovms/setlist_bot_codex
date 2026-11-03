@@ -169,3 +169,20 @@ def test_large_lighting_notes_split_across_pages_and_repeat_headers():
     value = text(pdf)
     assert len(pdf.pages) > 2 and "Начало" in value and "КОНЕЦ" in value
     assert sum("Комментарий" in page.extract_text() for page in pdf.pages) >= 2
+
+
+@pytest.mark.parametrize("language", ["ru", "en"])
+def test_empty_pause_is_blank_for_musicians_but_keeps_lighting_time_and_total(language):
+    from setlist_bot.domain.rules import pause_item, totals
+
+    payload = sample_payload()
+    items = payload["snapshot"]["blocks"][0]["items"]
+    payload["snapshot"]["blocks"][0]["items"] = [items[0], pause_item(180, ""), items[1]]
+    before = deepcopy(payload)
+    musician_text = text(reader(PdfDocuments().render(payload, "musicians", language, False)))
+    lighting_text = text(reader(PdfDocuments().render(payload, "lights", language, False)))
+    assert "03:00" not in musician_text
+    assert "03:00" in lighting_text
+    assert totals(payload["snapshot"])[2] == 223 + 180 + 218
+    assert "10:21" in lighting_text
+    assert payload == before

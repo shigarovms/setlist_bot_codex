@@ -47,7 +47,7 @@ def test_pdf_and_article_keep_literal_or_blank_pause_labels(audience, label):
     payload = sample_payload()
     payload["snapshot"]["blocks"][0]["items"] = [pause_item(180, label)]
     pdf_text = " ".join(text(reader(PdfDocuments().render(payload, audience, "ru", False))).split())
-    assert "03:00" in pdf_text
+    assert ("03:00" in pdf_text) == (audience != "musicians" or label != "")
     if label:
         if len(label) > 200:
             # Repeated page headers interrupt a long paragraph, but no words may disappear.

@@ -180,6 +180,11 @@ class PdfDocuments:
         numbers = entry_labels(items)
         for position, item in enumerate(items, 1):
             title = " ".join(title_text(item["title"], transliterate).split())
+            if is_pause(item) and item.get("pause_label") == "":
+                # RU: Пустая подпись означает пустую строку, но время остаётся в итоге.
+                # EN: A deliberately blank stage cue occupies a row without printed time.
+                story.append(Spacer(1, style()["size"] * 1.2 + 22))
+                continue
             if is_pause(item):
                 title = (
                     title_text(
