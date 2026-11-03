@@ -83,6 +83,8 @@ async def deliver_staffing(bot: Bot, uow: PostgresUnitOfWork, event: Outbox) -> 
         )
         body.text = title + "\n\n" + body.text
         await send_response(bot, event.chat_id, body)
+        if not event.payload.get("admin"):
+            row.notified_at = row.notified_at or now()
         event.sent, event.delivered_at = True, now()
         event.attempts += 1
         event.last_error = ""

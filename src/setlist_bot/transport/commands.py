@@ -37,7 +37,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "team": ("Составы и знакомые исполнители (админ)", "Lineups and known performers (admin)"),
     "lineup": ("Состав выбранного выступления", "Selected performance lineup"),
     "my_gigs": ("Мои участия и приглашения", "My assignments and invitations"),
-    "busy": ("Отметить личную занятость", "Mark a private busy period"),
+    "set_no_concert_days": ("Отметить личную занятость", "Mark a private busy period"),
     "reminders": ("Настроить напоминания о сет-листах", "Setlist reminders"),
     "start": ("Начать работу с ботом", "Start using the bot"),
     "support": ("Связаться с поддержкой", "Contact support"),
@@ -151,7 +151,7 @@ ADMIN = (
 MENUS: dict[Menu, tuple[str, ...]] = {
     "default": COMMON[:6],
     "private": COMMON[:6]
-    + ("all_my_concerts", "calendar", "my_gigs", "busy")
+    + ("all_my_concerts", "calendar", "my_gigs", "set_no_concert_days")
     + COMMON[6:]
     + ("publish", "language")
     + ADMIN,

@@ -14,7 +14,8 @@ async def test_selected_group_opens_its_performances_before_optional_transfer(en
         "Мероприятия Коллектив Б",
         f"group_concerts {world.other.id.hex}",
     )
-    assert selected.buttons[1][1].startswith("ct_begin ")
+    assert selected.buttons[1] == ("Составы Коллектив Б", f"sf_team {world.other.id.hex}")
+    assert selected.buttons[2][1].startswith("ct_begin ")
     opened = await send(selected.buttons[0][1], private=True)
     assert any(str(world.other_concert.id) in action for _, action in opened.buttons)
     member = await send(f"/use_group {world.group.id}", actor=2, private=True)

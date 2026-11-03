@@ -63,7 +63,6 @@ from setlist_bot.domain.importing import (
     parse_import,
     read_table,
 )
-from setlist_bot.domain.performance_input import parse_performance
 from setlist_bot.domain.rules import (
     AppError,
     SongListError,
@@ -278,6 +277,8 @@ class Controller:
             return await self._suggestion_prompt(own_template.id)
         if command == "copy_text":
             return await self._text_suggestion(UUID(args))
+        if command == "set_no_concert_days":
+            command = "busy"
         if command in ("team", "lineup", "my_gigs", "busy") or command.startswith("sf_"):
             from setlist_bot.transport.staffing import handle
 
@@ -671,6 +672,7 @@ class Controller:
                     "support",
                     "song_selection",
                     "create_group",
+                    "staff_input",
                 ) and prompt_data.get("command") not in ("music_query", "music_duration"):
                     other_dialog = True
                 if (
@@ -793,6 +795,17 @@ class Controller:
             return Response(
                 self.t("selected", name=group.name),
                 [(self.t("group_events", name=group.name), f"group_concerts {group.id.hex}")]
+                + (
+                    [(self.t("staff_group_lineups", name=group.name), f"sf_team {group.id.hex}")]
+                    if await self.store.find(
+                        Membership,
+                        group_id=group.id,
+                        user_id=self.user.id,
+                        role="admin",
+                        status="active",
+                    )
+                    else []
+                )
                 + (
                     [(self.t("transfer_button"), f"ct_begin {group.id.hex}")]
                     if group.owner_id == self.user.id
@@ -1292,33 +1305,9 @@ class Controller:
             return Response(self.t("ok"))
         if command == "concert":
             await self.groups.access(group_id, admin=True)
-            performance_input = parse_performance(args)
-            preview = self.t(
-                "concert_create_preview",
-                date=confirmation_date(performance_input.date, self.language),
-                title=performance_input.title,
-            )
-            for label, value in (
-                (
-                    "concert_duration_label",
-                    short_duration(performance_input.duration, self.language, minutes_only=True)
-                    if performance_input.duration
-                    else "",
-                ),
-                ("concert_type_label", performance_input.performance_type),
-                ("concert_city_label", performance_input.city),
-                ("concert_info_label", performance_input.info),
-            ):
-                if value:
-                    preview += "\n" + self.t(label) + ": " + value
-            response = await self.confirm(
-                context,
-                "create_performance " + json.dumps(performance_input.payload(), ensure_ascii=False),
-                preview,
-            )
-            key = response.buttons[0][1].split()[1]
-            response.buttons.insert(1, (self.t("concert_correct"), "concert_correct " + key))
-            return response
+            from setlist_bot.transport.staffing_creation import prepare
+
+            return await prepare(self, group_id, args)
         if command == "concert_correct":
             row = await self.store.get(Confirmation, UUID(args))
             data = json.loads(row.command)
@@ -1338,6 +1327,19 @@ class Controller:
         if command == "create_performance":
             require(confirmed, "confirmation")
             values = json.loads(args)
+            from setlist_bot.application.staffing import Staffing
+            from setlist_bot.domain.entities import LineupTemplate
+            from setlist_bot.transport.staffing import action as staff_action
+
+            template_id = values.pop("_lineup_id", None)
+            template_version = values.pop("_lineup_version", None)
+            template = None
+            if template_id:
+                template = await self.store.get(LineupTemplate, UUID(template_id))
+                require(
+                    template.group_id == group_id and template.version == template_version,
+                    "input_expired",
+                )
             concert = await self.setlists.create(
                 group_id, date.fromisoformat(values.pop("date")), **values
             )
@@ -1345,7 +1347,33 @@ class Controller:
             _, context.observed_version, _ = await self.setlists.read(
                 group_id, concert.id, private=self.private
             )
-            return self._concert_settings(concert, created=True)
+            if template:
+                await Staffing(self.store, self.user).apply_template(
+                    concert.id, template.id, template.version
+                )
+            response = self._concert_settings(concert, created=True)
+            if template and any(slot.get("user_id") for slot in template.slots):
+                response.deliveries.append(
+                    (
+                        self.chat_id,
+                        Response(
+                            self.t("staff_creation_check"),
+                            [
+                                (
+                                    self.t("staff_check_send"),
+                                    staff_action(
+                                        self,
+                                        "defaults_preview",
+                                        event_id=str(concert.id),
+                                        group_id=str(group_id),
+                                    ),
+                                ),
+                                (self.t("staff_lineup"), f"sf_lineup {concert.id.hex}"),
+                            ],
+                        ),
+                    )
+                )
+            return response
         if command == "create_concert":
             require(confirmed, "confirmation")
             raw_date, _, title = args.partition(" ")
@@ -2250,11 +2278,22 @@ class Controller:
 
     def _created_group(self, group: Group) -> Response:
         from setlist_bot.transport.music_search import methods
+        from setlist_bot.transport.staffing import action
 
-        return Response(
-            self.t("created_group", name=group.name) + "\n\n" + self.t("music_onboarding"),
-            methods(self, group_id=group.id),
+        response = Response(
+            self.t("created_group", name=group.name) + "\n\n" + self.t("staff_onboarding"),
+            [
+                (
+                    self.t("staff_setup_main"),
+                    action(self, "onboard_lineup", group_id=str(group.id)),
+                ),
+                (self.t("staff_later"), action(self, "onboard_later", group_id=str(group.id))),
+            ],
         )
+        response.deliveries.append(
+            (self.chat_id, Response(self.t("music_onboarding"), methods(self, group_id=group.id)))
+        )
+        return response
 
     def _group_name_prompt(self, session: Confirmation, *, invalid: bool = False) -> Response:
         return Response(

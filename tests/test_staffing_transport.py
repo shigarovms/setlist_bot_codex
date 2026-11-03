@@ -36,6 +36,18 @@ def messenger(engine):
     return send
 
 
+async def make_staffing_due(engine):
+    from sqlalchemy import text
+
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "UPDATE outbox SET next_attempt_at=now()-interval '1 second' "
+                "WHERE support_kind='staffing' AND NOT sent"
+            )
+        )
+
+
 async def test_force_reply_template_contact_and_invitation_flow_without_group_membership(
     engine, world
 ):
@@ -43,7 +55,7 @@ async def test_force_reply_template_contact_and_invitation_flow_without_group_me
     await send(f"/use_group {world.group.id}", private=True, chat=1)
     await send(f"/use_concert {world.concert.id}", private=True, chat=1)
     team = await send("/team", private=True, chat=1)
-    prompt = await send(button(team, "шаблон"), private=True, chat=1, remember=100)
+    prompt = await send(button(team, "Создать состав"), private=True, chat=1, remember=100)
     assert prompt.force_reply
     assert await send("Постороннее сообщение", actor=2, private=True, chat=1, reply=100) is None
     await send("Малый\nВокал  3\nDJ", private=True, chat=1, reply=100)
@@ -54,8 +66,9 @@ async def test_force_reply_template_contact_and_invitation_flow_without_group_me
             world.concert.id, template.id, template.version
         )
     lineup = await send("/lineup", private=True, chat=1)
-    assert "не назначен" in lineup.text
-    candidates = await send(button(lineup, "1. Вокал"), private=True, chat=1)
+    assert "пригласить" in lineup.text
+    role_card = await send(button(lineup, "1. Вокал"), private=True, chat=1)
+    candidates = await send(button(role_card, "Выбрать исполнителя"), private=True, chat=1)
     await send(
         next(action for label, action in candidates.buttons if "пересечений" in label),
         private=True,
@@ -64,6 +77,7 @@ async def test_force_reply_template_contact_and_invitation_flow_without_group_me
     async with PostgresUnitOfWork(engine) as uow:
         row = (await uow.store.find(GigInvitation, user_id=world.stranger.id))[0]
         identifier = row.id
+    await make_staffing_due(engine)
     session = FakeTelegram()
     async with Bot("123456:TEST", session=session) as bot:
         assert await deliver_one_outbox(bot, engine)
@@ -86,6 +100,7 @@ async def test_blocked_invitation_reports_to_admin_and_retry_is_available(engine
                 raise TelegramForbiddenError(method=method, message="blocked")
             return await super().make_request(bot, method, timeout)
 
+    await make_staffing_due(engine)
     session = Blocked()
     async with Bot("123456:TEST", session=session) as bot:
         assert not await deliver_one_outbox(bot, engine)
@@ -103,7 +118,8 @@ async def test_needed_cancellation_requires_confirmation_and_revokes_guest_acces
     send = messenger(engine)
     await send(f"/use_group {world.group.id}", private=True, chat=1)
     lineup = await send(f"sf_lineup {world.concert.id.hex}", private=True, chat=1)
-    confirm = await send(button(lineup, "Инструмент не нужен"), private=True, chat=1)
+    card = await send(button(lineup, "1. Гитара"), private=True, chat=1)
+    confirm = await send(button(card, "Удалить роль"), private=True, chat=1)
     async with PostgresUnitOfWork(engine) as uow:
         assert (await uow.store.get(GigInvitation, identifier)).status == "confirmed"
     await send(button(confirm, "Подтвердить"), private=True, chat=1)
@@ -180,8 +196,9 @@ async def test_large_lineup_and_invitation_lists_stay_within_telegram_limits(eng
     send = messenger(engine)
     first = await send(f"sf_lineup {world.concert.id.hex}", private=True, chat=1)
     assert len(first.text) < 4096 and len(first.buttons) < 100
-    assert "ещё 2" in first.text
-    all_invites = await send(button(first, "Все приглашения"), private=True, chat=1)
+    assert "ещё 4" in first.text
+    card = await send(button(first, "1. ГГ"), private=True, chat=1)
+    all_invites = await send(button(card, "Все приглашения"), private=True, chat=1)
     assert len([data for _, data in all_invites.buttons if data.startswith("sf_view ")]) == 5
     second = await send(button(first, "▶"), private=True, chat=1)
     assert "\n9." in second.text and "\n1." not in second.text

@@ -115,6 +115,8 @@ class Concert(Entity):
     performance_type: str = ""
     city: str = ""
     extra_info: str = ""
+    lineup_name: str = ""
+    lineup_version: int = 0
     metadata_version: int = 0
     deleted_at: datetime | None = None
     lifecycle_version: int = 0
@@ -415,6 +417,7 @@ class GigSlot(Entity):
     position: int
     preferred_user_id: UUID | None = None
     required: bool = True
+    removed: bool = False
     version: int = 1
 
 
@@ -430,6 +433,8 @@ class GigInvitation(Entity):
     status: str = "pending"
     version: int = 1
     replacement_id: UUID | None = None
+    notified_at: datetime | None = None
+    last_reminded_at: datetime | None = None
     worked: bool = False
     created_at: datetime = field(default_factory=now)
 

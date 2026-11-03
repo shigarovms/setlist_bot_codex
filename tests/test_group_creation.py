@@ -91,7 +91,12 @@ async def test_reply_dialog_creates_using_existing_membership_and_ignores_unrela
         membership = (await uow.store.find(Membership, group_id=group.id))[0]
         assert membership.user_id == world.admin.id and membership.role == "admin"
         assert membership.status == "active"
-        assert not await uow.store.find(Confirmation, chat_id=-300)
+        import json
+
+        sessions = await uow.store.find(Confirmation, chat_id=-300)
+        assert sessions and all(
+            json.loads(row.command).get("kind") == "staff_action" for row in sessions
+        )
     assert "устарел" in (await send(button(preview, "group_create_yes"), callback=True)).text
 
 
@@ -261,19 +266,22 @@ async def test_new_group_offers_all_catalog_methods_with_search_first(
         preview = await send("/new_band Новый коллектив")
         created = await send(button(preview, "group_create_yes"), callback=True)
     group = await bound_group(engine)
-    assert [action for _, action in created.buttons] == [
+    assert len(created.buttons) == 2
+    assert created.deliveries[0][0] == -300
+    catalog = created.deliveries[0][1]
+    assert [action for _, action in catalog.buttons] == [
         f"mi_open {group.id.hex}",
         "mi_help manual",
         "mi_help sheets",
         "mi_help telegram",
     ]
-    assert created.buttons[0][0] == (
+    assert catalog.buttons[0][0] == (
         "🌐 Найти песни в интернете" if language == "ru" else "🌐 Find songs online"
     )
     assert "Новый коллектив" in created.text
-    search = await send(created.buttons[0][1], callback=True)
+    search = await send(catalog.buttons[0][1], callback=True)
     assert "Новый коллектив" in search.text
     assert len(search.buttons) == 3
-    for _, action in created.buttons[1:]:
+    for _, action in catalog.buttons[1:]:
         guide = await send(action, callback=True)
         assert "/add_new_songs" in guide.text

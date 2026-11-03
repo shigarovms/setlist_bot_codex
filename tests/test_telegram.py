@@ -136,14 +136,9 @@ async def test_aiogram_end_to_end_with_fake_telegram_and_real_postgres(engine, t
 
         registration = await send("/new_band@setlist_test_bot Репетиционная группа")
         assert session.admin_requests == 1
-        assert (
-            "Создан"
-            in (
-                await send(
-                    registration.reply_markup.inline_keyboard[0][0].callback_data, callback=True
-                )
-            ).text
-        )
+        await send(registration.reply_markup.inline_keyboard[0][0].callback_data, callback=True)
+        assert "Создан" in session.sent[-2].text
+        assert "каталог" in session.sent[-1].text
         assert "ожидает" in (await send("/register гитарист", actor=2)).text
         pending = await send("/members")
         assert "гитарист" in pending.text
@@ -457,7 +452,8 @@ async def test_group_creation_force_reply_binding_and_fresh_admin_checks_through
         renamed = await send("Атмосфера", reply=renamed_prompt)
         create_new = session.sent[-1].reply_markup.inline_keyboard[0][0].callback_data
         created = await send(create_new, callback=renamed)
-        assert "Атмосфера" in created.text and session.admin_requests == 4
+        assert "Атмосфера" in session.sent[-2].text and session.admin_requests == 4
+        assert "каталог" in created.text
         duplicate = await send(create_new, callback=renamed)
         assert "устарел" in duplicate.text
         bound = await send("/group")

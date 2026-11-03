@@ -214,6 +214,8 @@ table(
     col("performance_type", String(200), server_default=""),
     col("city", String(200), server_default=""),
     col("extra_info", Text, server_default=""),
+    col("lineup_name", String(100), server_default=""),
+    col("lineup_version", Integer, server_default="0"),
     col("metadata_version", Integer, server_default="0"),
     CheckConstraint(
         "performance_duration_seconds > 0 AND performance_duration_seconds <= 86400",
@@ -596,6 +598,7 @@ table(
     col("position", Integer),
     col("preferred_user_id", Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
     col("required", Boolean),
+    col("removed", Boolean, server_default="false"),
     col("version", Integer),
     ForeignKeyConstraint(
         ["group_id", "concert_id"], ["concerts.group_id", "concerts.id"], ondelete="CASCADE"
@@ -627,6 +630,8 @@ table(
         ),
         nullable=True,
     ),
+    col("notified_at", DateTime(timezone=True), nullable=True),
+    col("last_reminded_at", DateTime(timezone=True), nullable=True),
     col("worked", Boolean),
     col("created_at", DateTime(timezone=True)),
     ForeignKeyConstraint(

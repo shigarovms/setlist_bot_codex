@@ -29,6 +29,9 @@ from setlist_bot.domain.entities import (
 )
 from setlist_bot.domain.rules import normalize, require
 
+INVITATION_DELAY = timedelta(seconds=42)
+REMINDER_COOLDOWN = timedelta(minutes=1)
+
 OPEN = {"pending", "conditional", "reconfirm", "accepted"}
 
 
@@ -101,8 +104,91 @@ class Staffing:
         record_activity(self.store, self.user, "lineup_template", row.id)
         return row
 
+    async def edit_template(
+        self,
+        identifier: UUID,
+        expected: int,
+        *,
+        name: str | None = None,
+        values: list[dict[str, Any]] | None = None,
+        delete: bool = False,
+    ) -> LineupTemplate:
+        row = await self.store.get(LineupTemplate, identifier)
+        await self.groups.access(row.group_id, admin=True)
+        row = await self.store.get(LineupTemplate, identifier, lock=True)
+        require(row.version == expected, "input_expired")
+        if delete:
+            await self.store.delete(row)
+        else:
+            if name is not None:
+                require(0 < len(name.strip()) <= 100, "input")
+                others = await self.store.find(
+                    LineupTemplate, group_id=row.group_id, name_key=normalize(name)
+                )
+                require(not others or others[0].id == row.id, "input")
+                row.name, row.name_key = name.strip(), normalize(name)
+            if values is not None:
+                require(len(values) <= 40, "input")
+                for item in values:
+                    role = await self.store.get(StaffRole, UUID(item["role_id"]))
+                    require(role.group_id == row.group_id, "forbidden")
+                    if item.get("user_id"):
+                        await self.contact(row.group_id, role.id, UUID(item["user_id"]))
+                row.slots = [dict(item) for item in values]
+            row.version += 1
+        record_activity(self.store, self.user, "lineup_edited", row.id, deleted=delete)
+        return row
+
+    async def remove_slot(self, identifier: UUID, expected: int) -> GigSlot:
+        slot = await self.store.get(GigSlot, identifier)
+        event = await self.event(slot.concert_id)
+        slot = await self.store.get(GigSlot, identifier, lock=True)
+        require(not slot.removed and slot.version == expected, "input_expired")
+        # RU: Не удаляем историю приглашений; исключаем роль из действующего состава.
+        # EN: Soft removal preserves consent and substitution history for support/audit.
+        await self.needed(slot.id, expected, False)
+        slot.removed = True
+        event.lineup_version += 1
+        record_activity(self.store, self.user, "lineup_role_removed", slot.id)
+        return slot
+
+    async def cancel_invitation(self, identifier: UUID, expected: int) -> GigInvitation:
+        row = await self.store.get(GigInvitation, identifier)
+        event = await self.event(row.concert_id)
+        row = await self.store.get(GigInvitation, identifier, lock=True)
+        require(row.status in OPEN | {"confirmed"} and row.version == expected, "input_expired")
+        row.status, row.version = "cancelled", row.version + 1
+        await self.cancel_replacements(row.id)
+        await self.notify(row.user_id, "cancelled", row)
+        event.lineup_version += 1
+        return row
+
+    async def remind(self, identifier: UUID, expected: int) -> GigInvitation:
+        row = await self.store.get(GigInvitation, identifier)
+        event = await self.event(row.concert_id)
+        row = await self.store.get(GigInvitation, identifier, lock=True)
+        require(
+            row.status in ("pending", "reconfirm", "conditional")
+            and row.version == expected
+            and self.valid(row, event, await self.store.get(Group, row.group_id)),
+            "input_expired",
+        )
+        if row.last_reminded_at and row.last_reminded_at + REMINDER_COOLDOWN > now():
+            return row
+        # RU: Повторное нажатие не обходит задержку и не плодит неотправленные письма.
+        # EN: Retry shares the durable delayed outbox; no per-invitation asyncio timers.
+        row.last_reminded_at = now()
+        await self.notify(row.user_id, "invitation", row)
+        return row
+
     async def apply_template(
-        self, event_id: UUID, template_id: UUID, expected: int
+        self,
+        event_id: UUID,
+        template_id: UUID,
+        expected: int,
+        *,
+        replace: bool = False,
+        event_version: int | None = None,
     ) -> list[GigSlot]:
         event = await self.event(event_id)
         template = await self.store.get(LineupTemplate, template_id)
@@ -110,7 +196,14 @@ class Staffing:
             template.group_id == event.group_id and template.version == expected, "input_expired"
         )
         old = await self.store.find(GigSlot, group_id=event.group_id, concert_id=event.id)
-        require(not old, "staff_lineup_exists")
+        require(not any(not s.removed for s in old) or replace, "staff_lineup_exists")
+        require(event_version is None or event.lineup_version == event_version, "input_expired")
+        for slot in old:
+            if not slot.removed:
+                await self.remove_slot(slot.id, slot.version)
+        event.lineup_name = template.name
+        event.lineup_version += 1
+        start = max((s.position for s in old), default=0)
         rows = []
         for position, item in enumerate(template.slots, 1):
             row = GigSlot(
@@ -118,7 +211,7 @@ class Staffing:
                 concert_id=event.id,
                 role_id=UUID(item["role_id"]),
                 preferred_user_id=UUID(item["user_id"]) if item.get("user_id") else None,
-                position=position,
+                position=start + position,
             )
             self.store.add(row)
             rows.append(row)
@@ -131,7 +224,8 @@ class Staffing:
         role = await self.store.get(StaffRole, role_id)
         require(role.group_id == event.group_id, "forbidden")
         slots = await self.store.find(GigSlot, concert_id=event.id)
-        require(len(slots) < 40, "input")
+        require(sum(not s.removed for s in slots) < 40, "input")
+        event.lineup_version += 1
         row = GigSlot(
             group_id=event.group_id,
             concert_id=event.id,
@@ -145,7 +239,7 @@ class Staffing:
         slot = await self.store.get(GigSlot, slot_id)
         event = await self.event(slot.concert_id)
         slot = await self.store.get(GigSlot, slot_id, lock=True)
-        require(slot.version == expected, "input_expired")
+        require(not slot.removed and slot.version == expected, "input_expired")
         slot.required, slot.version = value, slot.version + 1
         if not value:
             for invite in await self.store.find(GigInvitation, slot_id=slot.id):
@@ -154,6 +248,7 @@ class Staffing:
                     await self.notify(invite.user_id, "cancelled", invite)
                     await self.cancel_replacements(invite.id)
         event.metadata_version += 1
+        event.lineup_version += 1
         return slot
 
     async def conflicts(
@@ -188,7 +283,11 @@ class Staffing:
         event = await self.event(slot.concert_id)
         slot = await self.store.get(GigSlot, slot_id, lock=True)
         require(
-            slot.required and slot.version == expected and event.date >= today(), "input_expired"
+            not slot.removed
+            and slot.required
+            and slot.version == expected
+            and event.date >= today(),
+            "input_expired",
         )
         person = await self.store.get(User, user_id)
         contacts = await self.store.find(
@@ -239,6 +338,7 @@ class Staffing:
             replacement_id=replacement_id,
         )
         self.store.add(row)
+        event.lineup_version += 1
         await self.contact(event.group_id, slot.role_id, person.id)
         await self.notify(person.id, "invitation", row)
         record_activity(self.store, self.user, "staff_invited", row.id)
@@ -310,6 +410,7 @@ class Staffing:
                     "staff_filled",
                 )
         require(not replacing or action != "conditional", "input")
+        row.notified_at = row.notified_at or now()
         row.status, row.version = target, row.version + 1
         if target == "confirmed":
             for other in await self.store.find(GigInvitation, slot_id=row.slot_id):
@@ -317,21 +418,28 @@ class Staffing:
                     other.status, other.version = "cancelled", other.version + 1
                     await self.notify(other.user_id, "cancelled", other)
         event.metadata_version += 1
+        event.lineup_version += 1
         await self.admin_notice(row, "reply")
         record_activity(self.store, self.user, "staff_response", row.id, status=target)
         return row
 
     async def request_replacement(
-        self, source_id: UUID, target_id: UUID | None = None
+        self, source_id: UUID, target_id: UUID | None = None, *, by_admin: bool = False
     ) -> StaffReplacement:
-        await self.store.lock_people({self.user.id})
         source = await self.store.get(GigInvitation, source_id)
+        await self.store.lock_people({source.user_id})
+        if by_admin:
+            await self.event(source.concert_id)
         group = await self.store.get(Group, source.group_id, lock=True)
         source = await self.store.get(GigInvitation, source_id, lock=True)
         event = await self.store.get(Concert, source.concert_id)
-        require(source.user_id == self.user.id and source.status == "confirmed", "forbidden")
+        require(
+            (by_admin or source.user_id == self.user.id) and source.status == "confirmed",
+            "forbidden",
+        )
         require(self.valid(source, event, group) and event.date >= today(), "input_expired")
         if target_id:
+            require(not by_admin, "forbidden")
             target = await self.store.get(GigInvitation, target_id)
             target_event = await self.store.get(Concert, target.concert_id)
             target_group = await self.store.get(Group, target.group_id)
@@ -393,6 +501,7 @@ class Staffing:
         candidate.status, candidate.version = "confirmed", candidate.version + 1
         request.status, request.version = "approved", request.version + 1
         event.metadata_version += 1
+        event.lineup_version += 1
         for other in await self.store.find(GigInvitation, replacement_id=request.id):
             if other.id != candidate.id and other.status in OPEN:
                 other.status, other.version = "cancelled", other.version + 1
@@ -428,6 +537,7 @@ class Staffing:
     async def candidates(self, slot_id: UUID) -> list[tuple[StaffContact, User, int, int]]:
         slot = await self.store.get(GigSlot, slot_id)
         event = await self.event(slot.concert_id)
+        require(not slot.removed, "input_expired")
         contacts = await self.store.find(StaffContact, group_id=slot.group_id, role_id=slot.role_id)
         visible = [contact for contact in contacts if contact.preference != "hidden"]
         people = {p.id: p for p in await self.store.get_many(User, {c.user_id for c in visible})}
@@ -499,6 +609,20 @@ class Staffing:
     async def notify(
         self, user_id: UUID, kind: str, invite: GigInvitation, *, target_id: UUID | None = None
     ) -> None:
+        if kind in ("cancelled", "released"):
+            for pending in await self.store.find(
+                Outbox,
+                group_id=invite.group_id,
+                concert_id=invite.concert_id,
+                support_kind="staffing",
+                sent=False,
+            ):
+                if pending.payload.get("invite_id") == str(invite.id) and not pending.payload.get(
+                    "admin"
+                ):
+                    pending.sent, pending.discarded_at = True, now()
+            if invite.notified_at is None:
+                return
         person = await self.store.get(User, user_id)
         payload = {
             "kind": kind,
@@ -525,6 +649,9 @@ class Staffing:
                 group_id=invite.group_id,
                 concert_id=invite.concert_id,
                 payload=payload,
+                next_attempt_at=now() + INVITATION_DELAY
+                if kind in ("invitation", "date_changed")
+                else now(),
             )
         )
 
@@ -555,6 +682,11 @@ class Staffing:
 
 async def invalidate_staffing(store: Store, event: Concert, *, deleted: bool = False) -> None:
     """RU: Под блокировкой коллектива, только снятие броней. EN: No person-lock inversion."""
+    event.lineup_version += 1
+    # RU: Старый выбор кандидата нельзя применять к уже другой дате.
+    # EN: Invalidate pre-change invite/defaults callbacks as well as recipient replies.
+    for slot in await store.find(GigSlot, concert_id=event.id, removed=False):
+        slot.version += 1
     for row in await store.find(GigInvitation, group_id=event.group_id, concert_id=event.id):
         if row.status not in OPEN | {"confirmed"}:
             continue

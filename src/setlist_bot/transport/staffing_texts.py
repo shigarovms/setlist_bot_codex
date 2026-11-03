@@ -7,9 +7,9 @@ TEXTS = {
         "staff_invite_defaults": "Пригласить основной состав",
         "staff_team": "👥 Команда и составы",
         "staff_lineup": "👥 Состав выступления",
-        "staff_templates": "Шаблоны составов",
+        "staff_templates": "Составы",
         "staff_contacts": "Знакомые исполнители",
-        "staff_add_template": "＋ Создать / изменить шаблон",
+        "staff_add_template": "＋ Создать состав",
         "staff_add_contact": "＋ Добавить исполнителя",
         "staff_add_role": "＋ Добавить роль",
         "staff_roles": "Роли и инструменты",
@@ -17,13 +17,14 @@ TEXTS = {
             "Введите название роли: например, Гитара, Вокал, Звукорежиссёр.\n/cancel — отмена."
         ),
         "staff_contact_prompt": (
-            "Введите роль и известный боту @ник или Telegram ID через два пробела. "
+            "Введите роль и известный боту @ник или Telegram ID через пробел, дефис или двоеточие. "
             "Например:\nГитара  @musician\nЧеловек должен предварительно открыть "
             "бота и отправить /start.\n/cancel — отмена."
         ),
         "staff_template_prompt": (
             "Первая строка — название состава. Далее по одной роли на строку. "
-            "Через два пробела можно указать основного исполнителя:\nБольшой\nВокал  "
+            "Через пробел, дефис или двоеточие можно указать основного исполнителя:\n"
+            "Большой\nВокал  "
             "@singer\nГитара\nБас\n\nПриглашения отправляются отдельно после выбора "
             "состава.\n/cancel — отмена."
         ),
@@ -118,9 +119,9 @@ TEXTS = {
         "staff_invite_defaults": "Invite default performers",
         "staff_team": "👥 Team and lineups",
         "staff_lineup": "👥 Performance lineup",
-        "staff_templates": "Lineup templates",
+        "staff_templates": "Lineups",
         "staff_contacts": "Known performers",
-        "staff_add_template": "＋ Create / update template",
+        "staff_add_template": "＋ Create lineup",
         "staff_add_contact": "＋ Add performer",
         "staff_add_role": "＋ Add role",
         "staff_roles": "Roles and instruments",
@@ -128,13 +129,13 @@ TEXTS = {
             "Enter a role, for example Guitar, Vocals or Sound engineer.\n/cancel — cancel."
         ),
         "staff_contact_prompt": (
-            "Enter a role and a known @username or Telegram ID, separated by two "
-            "spaces:\nGuitar  @musician\nThe person must first send /start to the "
+            "Enter a role and a known @username or Telegram ID, separated by a space, "
+            "dash or colon:\nGuitar  @musician\nThe person must first send /start to the "
             "bot.\n/cancel — cancel."
         ),
         "staff_template_prompt": (
             "First line: lineup name. Then one role per line; optionally add a "
-            "default performer after two spaces:\nFull band\nVocals  "
+            "default performer after a space, dash or colon:\nFull band\nVocals  "
             "@singer\nGuitar\nBass\nInvitations are sent separately.\n/cancel — cancel."
         ),
         "staff_busy_prompt": (
@@ -223,3 +224,203 @@ TEXTS = {
         "staff_personal_calendar": "My confirmed performances",
     },
 }
+
+TEXTS["ru"].update(
+    {
+        "staff_main_name": "Основной",
+        "staff_onboarding": (
+            "Настройте основной состав: роли и основных исполнителей. При создании "
+            "выступления единственный состав подставится автоматически, а из "
+            "нескольких можно будет выбрать. Перед отправкой приглашений бот покажет "
+            "занятость участников."
+        ),
+        "staff_setup_main": "Настроить основной состав",
+        "staff_later": "Позже",
+        "staff_main_prompt": (
+            "Введите роли основного состава, по одной на строку. Можно добавить @ник "
+            "или Telegram ID через пробел, дефис или двоеточие:\nВокал @singer\nБас-"
+            "гитара: @bassist\nЗвукорежиссёр\n/cancel — отмена."
+        ),
+        "staff_unknown_person": (
+            "Не удалось найти исполнителя: попросите его открыть бота и отправить "
+            "/start. Перешлите приглашение ниже, затем повторите сохранение. Ваш ввод"
+            " сохранён."
+        ),
+        "staff_forward_invite": (
+            "Привет! Коллектив «{name}» использует setListBot для организации "
+            "выступлений и подготовки сет-листов. Открой бота {link} и нажми /start, "
+            "чтобы получать приглашения на выступления и подтверждать участие."
+        ),
+        "staff_selected": "Выбран состав: {name}",
+        "staff_no_lineup": "Состав не выбран",
+        "staff_change_lineup": "Изменить {name} состав",
+        "staff_choose_lineup": "Выбрать состав",
+        "staff_change_person": "поменять {name}",
+        "staff_wait_person": "ждём {name}",
+        "staff_invite_person": "пригласить",
+        "staff_add_participant": "+ участник",
+        "staff_check_send": "Проверить занятость и пригласить",
+        "staff_group_lineups": "Составы {name}",
+        "staff_rename": "Изменить название",
+        "staff_copy": "Копировать состав",
+        "staff_delete_lineup": "Удалить состав",
+        "staff_role_options": "Основной исполнитель и роль в составе",
+        "staff_change_default": "Изменить исполнителя",
+        "staff_remove_role": "Удалить роль",
+        "staff_delete_check": "Удалить этот состав? Составы уже созданных выступлений сохранятся.",
+        "staff_replace_check": (
+            "Заменить состав выступления? Текущие приглашения и участия будут "
+            "отменены. Новый состав можно проверить перед отправкой приглашений."
+        ),
+        "staff_remove_check": (
+            "Удалить роль из выступления? Приглашения и подтверждённое участие по "
+            "этой роли будут отменены."
+        ),
+        "staff_remind": "Отправить напоминание в личку",
+        "staff_invite_other": "Пригласить другого",
+        "staff_slot_explanation": (
+            "Здесь можно напомнить об ответе, пригласить другого исполнителя или "
+            "убрать роль. При подмене подтверждённый участник остаётся в составе до "
+            "согласования замены."
+        ),
+        "staff_reminder_queued": (
+            "Отправка поставлена в очередь. Повторные нажатия не создают несколько напоминаний."
+        ),
+        "staff_event_role_prompt": (
+            "Введите роль и, если хотите, основного исполнителя: Гитара @musician. "
+            "Приглашение отправляется отдельно.\n/cancel — отмена."
+        ),
+        "staff_invite_person_prompt": (
+            "Введите известный боту @ник или Telegram ID исполнителя.\n/cancel — отмена."
+        ),
+        "staff_template_add_prompt": (
+            "Введите роль и, при необходимости, @ник исполнителя: Бэк-вокал: @singer."
+            "\n/cancel — отмена."
+        ),
+        "staff_template_person_prompt": (
+            "Введите @ник или Telegram ID нового основного исполнителя. Чтобы "
+            "оставить роль свободной, введите дефис (-).\n/cancel — отмена."
+        ),
+        "staff_template_rename_prompt": "Введите новое название состава.\n/cancel — отмена.",
+        "staff_template_copy_prompt": "Введите название копии состава.\n/cancel — отмена.",
+        "staff_choose_invite": "Пригласить {name}? Перед отправкой проверим занятость.",
+        "staff_creation_choose": (
+            "Выберите состав для нового выступления. Перед созданием покажем все "
+            "данные для подтверждения."
+        ),
+        "staff_without_lineup": "Продолжить без состава",
+        "staff_creation_selected": "Состав: {name}",
+        "staff_creation_none": (
+            "Состав пока не настроен. Его можно задать сейчас или после создания выступления."
+        ),
+        "staff_creation_check": (
+            "Состав выбран. Проверьте занятость участников перед отправкой "
+            "приглашений. После отправки у вас будет 42 секунды на исправление."
+        ),
+    }
+)
+
+TEXTS["en"].update(
+    {
+        "staff_main_name": "Main",
+        "staff_onboarding": (
+            "Set up the main lineup with roles and default performers. A single "
+            "lineup is applied automatically; choose between multiple lineups. Review"
+            " availability before sending invitations."
+        ),
+        "staff_setup_main": "Set up main lineup",
+        "staff_later": "Later",
+        "staff_main_prompt": (
+            "Enter main lineup roles, one per line. Optionally add @username or "
+            "Telegram ID after a space, dash or colon:\nVocals @singer\nBass: @bassist\n"
+            "Sound engineer\n/cancel — cancel."
+        ),
+        "staff_unknown_person": (
+            "Performer not found. Ask them to open the bot and send /start. Forward "
+            "the invitation below, then retry. Your input is saved."
+        ),
+        "staff_forward_invite": (
+            "Hi! The band “{name}” uses setListBot to organize performances and "
+            "prepare setlists. Open the bot {link} and send /start to receive "
+            "performance invitations and confirm attendance."
+        ),
+        "staff_selected": "Selected lineup: {name}",
+        "staff_no_lineup": "No lineup selected",
+        "staff_change_lineup": "Change {name} lineup",
+        "staff_choose_lineup": "Choose lineup",
+        "staff_change_person": "replace {name}",
+        "staff_wait_person": "waiting for {name}",
+        "staff_invite_person": "invite",
+        "staff_add_participant": "+ participant",
+        "staff_check_send": "Check availability and invite",
+        "staff_group_lineups": "Lineups · {name}",
+        "staff_rename": "Rename",
+        "staff_copy": "Copy lineup",
+        "staff_delete_lineup": "Delete lineup",
+        "staff_role_options": "Default performer and role",
+        "staff_change_default": "Change performer",
+        "staff_remove_role": "Remove role",
+        "staff_delete_check": (
+            "Delete this lineup? Existing performance lineups will remain unchanged."
+        ),
+        "staff_replace_check": (
+            "Replace the performance lineup? Current invitations and assignments will"
+            " be cancelled. Review the new lineup before inviting."
+        ),
+        "staff_remove_check": (
+            "Remove this role? Its pending invitations and confirmed participation "
+            "will be cancelled."
+        ),
+        "staff_remind": "Send a private reminder",
+        "staff_invite_other": "Invite someone else",
+        "staff_slot_explanation": (
+            "Send a reminder, choose another performer, or remove the role. A "
+            "confirmed performer remains committed until a substitution is approved."
+        ),
+        "staff_reminder_queued": (
+            "Delivery queued. Repeated clicks do not create duplicate reminders."
+        ),
+        "staff_event_role_prompt": (
+            "Enter a role and optionally a performer: Guitar @musician. Invitations "
+            "are sent separately.\n/cancel — cancel."
+        ),
+        "staff_invite_person_prompt": "Enter a known @username or Telegram ID.\n/cancel — cancel.",
+        "staff_template_add_prompt": (
+            "Enter a role and optionally its performer: Backing vocals: @singer.\n/cancel — cancel."
+        ),
+        "staff_template_person_prompt": (
+            "Enter @username or Telegram ID of the new default performer. Enter - to "
+            "leave the role vacant.\n/cancel — cancel."
+        ),
+        "staff_template_rename_prompt": "Enter a new lineup name.\n/cancel — cancel.",
+        "staff_template_copy_prompt": "Enter a name for the lineup copy.\n/cancel — cancel.",
+        "staff_choose_invite": "Invite {name}? Availability will be checked before sending.",
+        "staff_creation_choose": (
+            "Choose a lineup. Review all details before creating the performance."
+        ),
+        "staff_without_lineup": "Continue without a lineup",
+        "staff_creation_selected": "Lineup: {name}",
+        "staff_creation_none": "No lineups yet. Set one up now or after creating the performance.",
+        "staff_creation_check": (
+            "Review participant availability before sending invitations. You will "
+            "have 42 seconds to correct mistakes after sending."
+        ),
+    }
+)
+
+TEXTS["ru"].update(
+    {
+        "staff_edit_role_name": "Изменить название роли",
+        "staff_template_role_name_prompt": (
+            "Введите новое название роли в этом составе.\n/cancel — отмена."
+        ),
+    }
+)
+TEXTS["en"].update(
+    {
+        "staff_edit_role_name": "Change role name",
+        "staff_template_role_name_prompt": (
+            "Enter the new role name for this lineup.\n/cancel — cancel."
+        ),
+    }
+)

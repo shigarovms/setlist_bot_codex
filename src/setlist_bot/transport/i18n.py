@@ -834,16 +834,16 @@ MESSAGES["en"]["help"] += (
 
 
 MESSAGES["ru"]["help"] += (
-    "\n\nСоставы: /team — роли, шаблоны и знакомые исполнители (администратор); "
+    "\n\nСоставы: /team — роли, составы и знакомые исполнители (администратор); "
     "/lineup — состав выбранного выступления. Приглашения принимаются в личке. "
-    "/my_gigs — ваши участия, приглашения и запросы подмены; /busy — личная занятость. "
+    "/my_gigs — ваши участия, приглашения и запросы подмены; /set_no_concert_days — личная занятость. "
     "В /calendar есть отдельная подписка на подтверждённые участия. "
     "Совпадение дат — возможное пересечение; бот не читает внешние календари."
 )
 MESSAGES["en"]["help"] += (
-    "\n\nStaffing: /team — roles, templates and known performers (administrator); "
+    "\n\nStaffing: /team — roles, lineups and known performers (administrator); "
     "/lineup — selected performance lineup. Reply to invitations in private. "
-    "/my_gigs — assignments, invitations and substitution requests; /busy — private busy periods. "
+    "/my_gigs — assignments, invitations and substitution requests; /set_no_concert_days — private busy periods. "
     "/calendar offers a separate confirmed-assignment subscription. "
     "Same-day bookings are possible conflicts; external calendars are not read."
 )
