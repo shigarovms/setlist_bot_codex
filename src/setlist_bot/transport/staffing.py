@@ -20,8 +20,6 @@ from setlist_bot.domain.entities import (
     Group,
     LineupTemplate,
     Membership,
-    Revision,
-    Setlist,
     StaffContact,
     StaffReplacement,
     StaffRole,
@@ -262,7 +260,9 @@ async def lineup_view(c: Controller, event_id: UUID, page: int = 0) -> Response:
     return await event_lineup(c, event_id, page)
 
 
-async def invitation_view(c: Controller, identifier: UUID) -> Response:
+async def invitation_view(
+    c: Controller, identifier: UUID, *, admin_notice: bool = False
+) -> Response:
     require(c.private, "private_only")
     row = await c.store.get(GigInvitation, identifier)
     event = await c.store.get(Concert, row.concert_id)
@@ -277,6 +277,7 @@ async def invitation_view(c: Controller, identifier: UUID) -> Response:
             Membership, group_id=group.id, user_id=c.user.id, role="admin", status="active"
         )
     )
+    require(not admin_notice or admin, "forbidden")
     replacing = (
         row.replacement_id is not None
         and (await c.store.get(StaffReplacement, row.replacement_id)).status == "pending"
@@ -293,7 +294,7 @@ async def invitation_view(c: Controller, identifier: UUID) -> Response:
     if event.extra_info:
         text += "\n\n" + event.extra_info
     buttons = []
-    if own:
+    if own and not admin_notice:
         if row.status == "accepted":
             buttons.append(
                 (
@@ -327,7 +328,6 @@ async def invitation_view(c: Controller, identifier: UUID) -> Response:
             buttons += [
                 (c.t("staff_request"), action(c, "request", source_id=str(row.id))),
                 (c.t("staff_guest_list"), f"sf_guest {row.id.hex}"),
-                (c.t("staff_guest_pdf"), f"sf_pdf {row.id.hex}"),
             ]
             for request in await c.store.find(StaffReplacement, source_id=row.id, status="pending"):
                 buttons.append(
@@ -354,7 +354,7 @@ async def invitation_view(c: Controller, identifier: UUID) -> Response:
                         )
                     )
         buttons.append((c.t("menu_back"), "my_gigs"))
-    if admin:
+    if admin and not admin_notice:
         if row.status in OPEN | {"confirmed"}:
             buttons.append(
                 (
@@ -400,7 +400,29 @@ async def invitation_view(c: Controller, identifier: UUID) -> Response:
                     ),
                 )
             )
-        buttons.append((c.t("menu_back"), f"sf_lineup {event.id.hex}"))
+        buttons.append((c.t("staff_open_lineup"), f"sf_lineup {event.id.hex}"))
+    if admin_notice:
+        # RU: В служебных уведомлениях нет личных кнопок участника и экспорта.
+        # EN: Keep notification actions contextual, even when actor and invitee coincide.
+        buttons = [(c.t("staff_open_lineup"), f"sf_lineup {event.id.hex}")]
+        for request in await c.store.find(StaffReplacement, source_id=row.id, status="pending"):
+            buttons.insert(
+                0,
+                (
+                    c.t("staff_find"),
+                    action(
+                        c, "candidates", slot_id=str(row.slot_id), replacement_id=str(request.id)
+                    ),
+                ),
+            )
+        if row.status == "accepted" and row.replacement_id:
+            buttons.insert(
+                0,
+                (
+                    c.t("staff_approve_swap"),
+                    action(c, "swap", invitation_id=str(row.id), version=row.version),
+                ),
+            )
     return Response(text, buttons)
 
 
@@ -535,30 +557,34 @@ async def handle(c: Controller, command: str, args: str) -> Response:
             and service.valid(row, event, group),
             "forbidden",
         )
-        lists = await c.store.find(Setlist, group_id=group.id, concert_id=event.id, approved=True)
-        require(bool(lists) and lists[0].approved_revision_id is not None, "export_approved_only")
-        assert lists[0].approved_revision_id is not None
-        revision = await c.store.get(Revision, lists[0].approved_revision_id)
+        snapshot, version, approved = await service.guest_setlist(row.id)
+        if command != "sf_guest":
+            require(approved, "export_approved_only")
         text = (
             group.name
+            + (f" ({event.performance_type})" if event.performance_type else "")
             + "\n"
-            + render_setlist(revision.snapshot, event, c.language, revision.number, approved=True)
+            + render_setlist(snapshot, event, c.language, version, approved=approved)
         )
-        response = Response(text, [(c.t("menu_back"), f"sf_view {row.id.hex}")], monospace=True)
+        buttons = [(c.t("menu_back"), f"sf_view {row.id.hex}")]
+        if approved:
+            buttons.insert(0, (c.t("export_button"), f"sf_pdf {row.id.hex}"))
+        response = Response(text, buttons, monospace=True, monospace_body=text)
+        if command == "sf_guest":
+            return await c._style_setlist(response, snapshot, event, version, approved=approved)
         if command == "sf_pdf":
             return Response(
                 c.t("export_choose"),
                 [
                     (c.t("export_musicians"), f"sf_pdf_m {row.id.hex}"),
                     (c.t("export_lights"), f"sf_pdf_l {row.id.hex}"),
-                    (c.t("menu_back"), f"sf_view {row.id.hex}"),
+                    (c.t("menu_back"), f"sf_guest {row.id.hex}"),
                 ],
             )
         if command in ("sf_pdf_m", "sf_pdf_l"):
             from setlist_bot.application.exports import Exports
             from setlist_bot.infrastructure.pdf import PdfDocuments
 
-            snapshot = revision.snapshot
             if command == "sf_pdf_l":
                 snapshot = await Exports(c.store, c.user, c.chat_id)._lighting_snapshot(
                     group.id, snapshot
@@ -568,7 +594,7 @@ async def handle(c: Controller, command: str, args: str) -> Response:
                 "concert_date": event.date.isoformat(),
                 "concert_title": event.title,
                 "city": event.city,
-                "version": revision.number,
+                "version": version,
                 "approved": True,
                 "snapshot": snapshot,
                 "settings": c.user.export_settings,

@@ -1,6 +1,4 @@
-"""Lineup lifecycle and delayed consent; only synthetic users and the *_test database."""
-
-from datetime import timedelta
+"""Lineup lifecycle and performer consent; only synthetic users and the *_test database."""
 
 import pytest
 from aiogram import Bot
@@ -72,7 +70,7 @@ async def test_removed_role_cancels_unsent_invite_without_cancellation_dm(engine
     async with PostgresUnitOfWork(engine) as uow:
         row = await uow.store.get(GigInvitation, identifier)
         queued = (await uow.store.find(Outbox, support_kind="staffing", sent=False))[0]
-        assert timedelta(seconds=39) < queued.next_attempt_at - now() <= timedelta(seconds=42)
+        assert queued.next_attempt_at <= now()
         await Staffing(uow.store, world.admin).remove_slot(slot, 1)
         assert row.status == "cancelled" and (await uow.store.get(GigSlot, slot)).removed
         assert not await uow.store.find(Outbox, support_kind="staffing", sent=False)
@@ -85,14 +83,11 @@ async def test_removed_role_cancels_unsent_invite_without_cancellation_dm(engine
         await reply(engine, world.member, identifier)
 
 
-async def test_invite_delay_survives_transaction_and_cancel_after_delivery_notifies(engine, world):
+async def test_invite_is_due_immediately_and_cancel_after_delivery_notifies(engine, world):
     slot, _ = await setup_slots(engine, world)
     identifier = await invite(engine, world.admin, slot, world.member.id)
     session = FakeTelegram()
     async with Bot("123456:TEST", session=session) as bot:
-        assert not await deliver_one_outbox(bot, engine)
-        assert not session.sent
-        await make_staffing_due(engine)
         assert await deliver_one_outbox(bot, engine)
         async with PostgresUnitOfWork(engine) as uow:
             row = await uow.store.get(GigInvitation, identifier)
@@ -102,7 +97,7 @@ async def test_invite_delay_survives_transaction_and_cancel_after_delivery_notif
     assert len(session.sent) == 2 and "Участие отменено" in session.sent[-1].text
 
 
-async def test_repeated_reminders_do_not_bypass_delay_or_duplicate_messages(engine, world):
+async def test_repeated_reminders_do_not_duplicate_messages(engine, world):
     slot, _ = await setup_slots(engine, world)
     identifier = await invite(engine, world.admin, slot, world.member.id)
     async with PostgresUnitOfWork(engine) as uow:
@@ -110,7 +105,7 @@ async def test_repeated_reminders_do_not_bypass_delay_or_duplicate_messages(engi
         for _ in range(3):
             await service.remind(identifier, 1)
         rows = await uow.store.find(Outbox, support_kind="staffing", sent=False)
-        assert len(rows) == 1 and rows[0].next_attempt_at > now()
+        assert len(rows) == 1 and rows[0].next_attempt_at <= now()
     await make_staffing_due(engine)
     async with Bot("123456:TEST", session=FakeTelegram()) as bot:
         assert await deliver_one_outbox(bot, engine)
@@ -175,7 +170,9 @@ async def test_creation_one_lineup_auto_applied_but_not_invited(engine, world):
     created = await send(
         next(a for _, a in preview.buttons if a.startswith("confirm ")), chat=-100, callback=True
     )
-    assert created.deliveries and "42 секунды" in created.deliveries[0][1].text
+    assert created.deliveries and created.deliveries[0][1].text == (
+        "Сейчас проверю занятость участников перед отправкой приглашений."
+    )
     async with PostgresUnitOfWork(engine) as uow:
         event = (await uow.store.find(Concert, title="Клуб Космос"))[0]
         assert event.lineup_name == "Малый"

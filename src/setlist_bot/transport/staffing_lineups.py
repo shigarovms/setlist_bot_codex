@@ -9,7 +9,6 @@ from uuid import UUID
 
 from setlist_bot.application.staffing import OPEN, Staffing
 from setlist_bot.application.user_lookup import known_user
-from setlist_bot.domain.concerts import button_date
 from setlist_bot.domain.entities import (
     GigInvitation,
     GigSlot,
@@ -43,22 +42,7 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
         await c.store.find(GigSlot, concert_id=event.id, removed=False), key=lambda s: s.position
     )
     require(page >= 0, "input")
-    text = f"{group.name} · {button_date(event.date)} · {event.title}\n\n{c.t('staff_lineup')}\n"
-    text += (
-        c.t("staff_selected", name=event.lineup_name)
-        if event.lineup_name
-        else c.t("staff_no_lineup")
-    )
     buttons = []
-    if admin:
-        buttons.append(
-            (
-                c.t("staff_change_lineup", name=event.lineup_name)
-                if event.lineup_name
-                else c.t("staff_choose_lineup"),
-                action(c, "templates", group_id=str(group.id), event_id=str(event.id)),
-            )
-        )
     invites = [
         r
         for r in await c.store.find(GigInvitation, concert_id=event.id)
@@ -66,7 +50,13 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
     ]
     people = {p.id: p for p in await c.store.get_many(User, {r.user_id for r in invites})}
     roles = {r.id: r for r in await c.store.get_many(StaffRole, {s.role_id for s in slots})}
-    for number, slot in enumerate(slots[page * 8 : (page + 1) * 8], page * 8 + 1):
+    names = {
+        member.user_id: member.musical_role
+        for member in await c.store.find(Membership, group_id=group.id, status="active")
+        if member.musical_role
+    }
+    lines = []
+    for number, slot in enumerate(slots, 1):
         active = sorted(
             (r for r in invites if r.slot_id == slot.id),
             key=lambda r: (r.status != "confirmed", r.created_at, r.id),
@@ -81,10 +71,12 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
             else c.t("staff_invite_person")
         )
         label = f"{'✅ ' if confirmed else ''}{number}. {roles[slot.role_id].name[:64]}: {label}"
-        text += "\n" + label
-        if len(active) > 1:
-            text += " · " + c.t("staff_more", count=len(active) - 1)
-        if admin:
+        line = f"{number}. {roles[slot.role_id].name}"
+        if confirmed and person:
+            line += " — " + names.get(person.id, person.display_name or str(person.telegram_id))
+            line = "✅ " + line
+        lines.append(line)
+        if admin and page * 8 <= number - 1 < (page + 1) * 8:
             buttons.append((label, action(c, "slot", slot_id=str(slot.id), version=slot.version)))
     if page:
         buttons.append(("◀", f"sf_lineup {event.id.hex} {page - 1}"))
@@ -109,11 +101,11 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
         buttons.append(
             (
                 c.t("staff_group_lineups", name=group.name),
-                action(c, "templates", group_id=str(group.id)),
+                action(c, "templates", group_id=str(group.id), event_id=str(event.id)),
             )
         )
     buttons.append((c.t("menu_back"), f"use_concert {event.id}"))
-    return Response(text, buttons)
+    return Response("\n".join(lines) or c.t("staff_empty_lineup"), buttons)
 
 
 async def template_view(

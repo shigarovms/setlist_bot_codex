@@ -66,7 +66,7 @@ async def test_force_reply_template_contact_and_invitation_flow_without_group_me
             world.concert.id, template.id, template.version
         )
     lineup = await send("/lineup", private=True, chat=1)
-    assert "пригласить" in lineup.text
+    assert lineup.text == "1. Вокал\n2. DJ"
     role_card = await send(button(lineup, "1. Вокал"), private=True, chat=1)
     candidates = await send(button(role_card, "Выбрать исполнителя"), private=True, chat=1)
     await send(
@@ -154,7 +154,7 @@ async def test_admin_can_perform_and_record_own_past_participation_once(engine, 
         row.date = event.date = today() - timedelta(days=1)
     send = messenger(engine)
     view = await send(f"sf_view {identifier.hex}", private=True, chat=1)
-    assert any("Посмотреть утверждённый" in label for label, _ in view.buttons)
+    assert any("Открыть сет-лист" in label for label, _ in view.buttons)
     record = button(view, "Отметить: участвовал")
     assert "Готово" in (await send(record, private=True, chat=1)).text
     assert "Готово" in (await send(record, private=True, chat=1)).text
@@ -195,14 +195,14 @@ async def test_large_lineup_and_invitation_lists_stay_within_telegram_limits(eng
                 )
     send = messenger(engine)
     first = await send(f"sf_lineup {world.concert.id.hex}", private=True, chat=1)
-    assert len(first.text) < 4096 and len(first.buttons) < 100
-    assert "ещё 4" in first.text
+    assert len(first.text.splitlines()) == 40 and len(first.buttons) < 100
+    assert first.text.splitlines()[-1].startswith("40.")
     card = await send(button(first, "1. ГГ"), private=True, chat=1)
     all_invites = await send(button(card, "Все приглашения"), private=True, chat=1)
     assert len([data for _, data in all_invites.buttons if data.startswith("sf_view ")]) == 5
     second = await send(button(first, "▶"), private=True, chat=1)
-    assert "\n9." in second.text and "\n1." not in second.text
-    assert len(second.text) < 4096 and len(second.buttons) < 100
+    assert second.text == first.text
+    assert second.buttons[0][0].startswith("9.")
 
 
 async def test_replacement_expiry_and_reconfirmation_after_approval(engine, world):

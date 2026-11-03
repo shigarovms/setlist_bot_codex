@@ -103,7 +103,7 @@ TEXTS = {
         ),
         "staff_cancel_invite": "Отменить участие / приглашение",
         "staff_cancel_check": "Отменить участие или приглашение этого человека?",
-        "staff_guest_list": "Посмотреть утверждённый сет-лист",
+        "staff_guest_list": "Открыть сет-лист",
         "staff_guest_pdf": "PDF для печати",
         "staff_delivery_failed": (
             "Не удалось доставить приглашение. Попросите человека открыть бота, "
@@ -214,7 +214,7 @@ TEXTS = {
         ),
         "staff_cancel_invite": "Cancel participation / invitation",
         "staff_cancel_check": "Cancel this person's participation or invitation?",
-        "staff_guest_list": "View approved setlist",
+        "staff_guest_list": "Open setlist",
         "staff_guest_pdf": "Printable PDF",
         "staff_delivery_failed": (
             "Could not deliver the invitation. Ask the person to send /start and "
@@ -313,10 +313,7 @@ TEXTS["ru"].update(
         "staff_creation_none": (
             "Состав пока не настроен. Его можно задать сейчас или после создания выступления."
         ),
-        "staff_creation_check": (
-            "Состав выбран. Проверьте занятость участников перед отправкой "
-            "приглашений. После отправки у вас будет 42 секунды на исправление."
-        ),
+        "staff_creation_check": "Сейчас проверю занятость участников перед отправкой приглашений.",
     }
 )
 
@@ -401,10 +398,7 @@ TEXTS["en"].update(
         "staff_without_lineup": "Continue without a lineup",
         "staff_creation_selected": "Lineup: {name}",
         "staff_creation_none": "No lineups yet. Set one up now or after creating the performance.",
-        "staff_creation_check": (
-            "Review participant availability before sending invitations. You will "
-            "have 42 seconds to correct mistakes after sending."
-        ),
+        "staff_creation_check": "I will check participant availability before sending invitations.",
     }
 )
 
@@ -422,5 +416,18 @@ TEXTS["en"].update(
         "staff_template_role_name_prompt": (
             "Enter the new role name for this lineup.\n/cancel — cancel."
         ),
+    }
+)
+
+TEXTS["ru"].update(
+    {
+        "staff_open_lineup": "Открыть состав выступления",
+        "staff_empty_lineup": "В составе пока нет ролей.",
+    }
+)
+TEXTS["en"].update(
+    {
+        "staff_open_lineup": "Open performance lineup",
+        "staff_empty_lineup": "There are no roles in this lineup yet.",
     }
 )

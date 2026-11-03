@@ -36,7 +36,17 @@ async def deliver_staffing(bot: Bot, uow: PostgresUnitOfWork, event: Outbox) -> 
         if event.payload.get("admin"):
             await service.groups.access(row.group_id, admin=True)
             require(not concert.deleted_at, "input_expired")
-            body = await invitation_view(c, row.id)
+            body = await invitation_view(c, row.id, admin_notice=True)
+            if kind == "delivery_failed" and row.status in ("pending", "reconfirm"):
+                from setlist_bot.transport.staffing import action
+
+                body.buttons.insert(
+                    0,
+                    (
+                        tr(person.language, "staff_retry"),
+                        action(c, "retry", invitation_id=str(row.id), version=row.version),
+                    ),
+                )
         else:
             require(
                 row.user_id == person.id and row.version == event.payload["version"],

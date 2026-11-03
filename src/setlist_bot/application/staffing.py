@@ -29,7 +29,6 @@ from setlist_bot.domain.entities import (
 )
 from setlist_bot.domain.rules import normalize, require
 
-INVITATION_DELAY = timedelta(seconds=42)
 REMINDER_COOLDOWN = timedelta(minutes=1)
 
 OPEN = {"pending", "conditional", "reconfirm", "accepted"}
@@ -52,6 +51,9 @@ class Staffing:
         key = normalize(name)
         found = await self.store.find(StaffRole, group_id=group_id, name_key=key)
         if found:
+            # RU: Ключ нужен для поиска, а введённый регистр — для отображения.
+            # EN: Reusing a normalized role must not discard the administrator's spelling.
+            found[0].name = name.strip()
             return found[0]
         row = StaffRole(group_id=group_id, name=name.strip(), name_key=key)
         self.store.add(row)
@@ -175,8 +177,8 @@ class Staffing:
         )
         if row.last_reminded_at and row.last_reminded_at + REMINDER_COOLDOWN > now():
             return row
-        # RU: Повторное нажатие не обходит задержку и не плодит неотправленные письма.
-        # EN: Retry shares the durable delayed outbox; no per-invitation asyncio timers.
+        # RU: Повторное нажатие не плодит неотправленные письма.
+        # EN: Retry shares the durable outbox; repeated clicks do not duplicate pending delivery.
         row.last_reminded_at = now()
         await self.notify(row.user_id, "invitation", row)
         return row
@@ -308,10 +310,10 @@ class Staffing:
                 "input_expired",
             )
         else:
-            require(
-                not await self.store.find(GigInvitation, slot_id=slot.id, status="confirmed"),
-                "staff_filled",
-            )
+            filled = await self.store.find(GigInvitation, slot_id=slot.id, status="confirmed")
+            if filled and user_id == self.user.id and filled[0].user_id == user_id:
+                return filled[0]
+            require(not filled, "staff_filled")
         for old in await self.store.find(
             GigInvitation, slot_id=slot.id, user_id=user_id, replacement_id=replacement_id
         ):
@@ -321,6 +323,14 @@ class Staffing:
                 and old.date == event.date
                 and old.concert_epoch == event.lifecycle_version
             ):
+                if user_id == self.user.id and old.status in (
+                    "pending",
+                    "reconfirm",
+                    "conditional",
+                ):
+                    return await self.respond(
+                        old.id, old.version, "yes", force=force, notify_admins=False
+                    )
                 return old
         busy, _ = await self.conflicts(user_id, event.date, exclude=event.id)
         require(force or not busy, "staff_busy")
@@ -340,8 +350,14 @@ class Staffing:
         self.store.add(row)
         event.lineup_version += 1
         await self.contact(event.group_id, slot.role_id, person.id)
-        await self.notify(person.id, "invitation", row)
         record_activity(self.store, self.user, "staff_invited", row.id)
+        if user_id == self.user.id:
+            # RU: Назначая себя, администратор уже выразил согласие. Проверки занятости
+            # и процедура подмены остаются теми же, повторное личное приглашение не нужно.
+            # EN: Self-assignment is consent; reuse transitions without another DM.
+            await self.store.flush()
+            return await self.respond(row.id, row.version, "yes", force=force, notify_admins=False)
+        await self.notify(person.id, "invitation", row)
         return row
 
     async def invite_defaults(
@@ -359,7 +375,13 @@ class Staffing:
             await self.invite(slot.id, slot.preferred_user_id, versions[str(slot.id)], force=force)
 
     async def respond(
-        self, identifier: UUID, expected: int, action: str, *, force: bool = False
+        self,
+        identifier: UUID,
+        expected: int,
+        action: str,
+        *,
+        force: bool = False,
+        notify_admins: bool = True,
     ) -> GigInvitation:
         await self.store.lock_people({self.user.id})
         row = await self.store.get(GigInvitation, identifier)
@@ -419,7 +441,8 @@ class Staffing:
                     await self.notify(other.user_id, "cancelled", other)
         event.metadata_version += 1
         event.lineup_version += 1
-        await self.admin_notice(row, "reply")
+        if notify_admins:
+            await self.admin_notice(row, "reply")
         record_activity(self.store, self.user, "staff_response", row.id, status=target)
         return row
 
@@ -579,6 +602,22 @@ class Staffing:
             row.worked = True
             contact.worked_count += 1
 
+    async def guest_setlist(self, identifier: UUID) -> tuple[dict[str, Any], int, bool]:
+        from setlist_bot.application.setlists import Setlists
+        from setlist_bot.domain.entities import Setlist
+
+        row = await self.store.get(GigInvitation, identifier)
+        require(row.user_id == self.user.id, "forbidden")
+        group = await self.store.get(Group, row.group_id, lock=True)
+        row = await self.store.get(GigInvitation, identifier, lock=True)
+        event = await self.store.get(Concert, row.concert_id)
+        require(row.status == "confirmed" and self.valid(row, event, group), "forbidden")
+        lists = await self.store.find(Setlist, group_id=group.id, concert_id=event.id)
+        require(bool(lists), "not_found")
+        # RU: Только общий список своего подтверждённого выступления, без членства
+        # и доступа к чужим черновикам. EN: Invitation access is strictly read-only.
+        return await Setlists(self.store, self.user)._read_shared(lists[0])
+
     async def busy(self, starts: date, ends: date) -> BusyPeriod:
         await self.store.lock_people({self.user.id})
         require(today() <= starts <= ends and (ends - starts).days <= 366, "input")
@@ -649,9 +688,7 @@ class Staffing:
                 group_id=invite.group_id,
                 concert_id=invite.concert_id,
                 payload=payload,
-                next_attempt_at=now() + INVITATION_DELAY
-                if kind in ("invitation", "date_changed")
-                else now(),
+                next_attempt_at=now(),
             )
         )
 

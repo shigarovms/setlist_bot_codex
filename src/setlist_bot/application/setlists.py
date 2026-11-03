@@ -178,11 +178,19 @@ class Setlists:
         if private:
             draft = await self._draft(setlist)
             return await self._snapshot(group_id, draft.content), draft.version, False
+        return await self._read_shared(setlist)
+
+    async def _read_shared(self, setlist: Setlist) -> tuple[Document, int, bool]:
+        """RU/EN: Caller authorizes access first; this path never creates a personal draft."""
         if setlist.approved:
             assert setlist.approved_revision_id is not None
             revision = await self.store.get(Revision, setlist.approved_revision_id)
             return flat_content(revision.snapshot), setlist.version, True
-        return await self._snapshot(group_id, await self._working(setlist)), setlist.version, False
+        return (
+            await self._snapshot(setlist.group_id, await self._working(setlist)),
+            setlist.version,
+            False,
+        )
 
     async def edit(
         self,
