@@ -759,8 +759,15 @@ class Controller:
                         )
                     ],
                 )
-            page = int(args) if args else 0
-            performances, more = await PersonalPerformances(self.store, self.user).page(page)
+            fields = args.split()
+            past = bool(fields and fields[0] == "past")
+            if past:
+                fields = fields[1:]
+            require(len(fields) <= 1, "input")
+            page = int(fields[0]) if fields else 0
+            overview = PersonalPerformances(self.store, self.user)
+            performances, more = await overview.page(page, past=past)
+            performance_prefix = "all_my_concerts past" if past else "all_my_concerts"
             buttons = [
                 (
                     " ".join(part for part in (button_date(c.date), g.name, c.title) if part),
@@ -768,14 +775,23 @@ class Controller:
                 )
                 for c, g in performances
             ]
+            if not past and await overview.has_past():
+                buttons.insert(0, (self.t("past_concerts"), "all_my_concerts past"))
             if page:
-                buttons.append((self.t("music_prev"), f"all_my_concerts {page - 1}"))
+                buttons.append((self.t("music_prev"), f"{performance_prefix} {page - 1}"))
             if more:
-                buttons.append((self.t("music_next"), f"all_my_concerts {page + 1}"))
+                buttons.append((self.t("music_next"), f"{performance_prefix} {page + 1}"))
+            if past:
+                buttons.append((self.t("back_concerts"), "all_my_concerts"))
             if self.calendar_public_base_url:
                 buttons.append((self.t("calendar_entry"), "calendar"))
             return Response(
-                self.t("all_my_concerts_title") if performances else self.t("empty"), buttons
+                self.t("past_concerts")
+                if past
+                else self.t("all_my_concerts_title")
+                if performances
+                else self.t("empty"),
+                buttons,
             )
         if command == "my_concert":
             require(self.private, "private_only")
@@ -1329,7 +1345,6 @@ class Controller:
             values = json.loads(args)
             from setlist_bot.application.staffing import Staffing
             from setlist_bot.domain.entities import LineupTemplate
-            from setlist_bot.transport.staffing import action as staff_action
 
             template_id = values.pop("_lineup_id", None)
             template_version = values.pop("_lineup_version", None)
@@ -1352,27 +1367,9 @@ class Controller:
                     concert.id, template.id, template.version
                 )
             response = self._concert_settings(concert, created=True)
-            if template and any(slot.get("user_id") for slot in template.slots):
-                response.deliveries.append(
-                    (
-                        self.chat_id,
-                        Response(
-                            self.t("staff_creation_check"),
-                            [
-                                (
-                                    self.t("staff_check_send"),
-                                    staff_action(
-                                        self,
-                                        "defaults_preview",
-                                        event_id=str(concert.id),
-                                        group_id=str(group_id),
-                                    ),
-                                ),
-                                (self.t("staff_lineup"), f"sf_lineup {concert.id.hex}"),
-                            ],
-                        ),
-                    )
-                )
+            from setlist_bot.transport.staffing_preparation import start_preparation
+
+            response.deliveries.append((self.chat_id, await start_preparation(self, concert.id)))
             return response
         if command == "create_concert":
             require(confirmed, "confirmation")

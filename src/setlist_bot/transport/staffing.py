@@ -64,6 +64,8 @@ async def prompt(
     event_id: UUID | None = None,
     **extra: Any,
 ) -> Response:
+    if operation == "template":
+        operation = "template_name"
     if group_id:
         await c.groups.access(group_id, admin=True)
     row = Confirmation(
@@ -82,7 +84,7 @@ async def prompt(
     )
     c.store.add(row)
     return Response(
-        c.t("staff_main_prompt" if extra.get("main") else "staff_" + operation + "_prompt"),
+        c.t("staff_" + operation + "_prompt", name=extra.get("name", "")),
         force_reply=True,
         workflow_id=row.id,
     )
@@ -151,10 +153,34 @@ async def _input_reply(c: Controller, row: Confirmation, value: str) -> Response
                 "input_expired",
             )
         from setlist_bot.transport.staffing_lineups import lineup_input
+        from setlist_bot.transport.staffing_preparation import preparation_input
 
-        special = await lineup_input(c, data, value)
+        special = await preparation_input(c, data, value)
+        if special is None:
+            special = await lineup_input(c, data, value)
         if special is not None:
             response = special
+        elif operation == "template_name":
+            require(
+                0 < len(value.strip()) <= 100 and not any(ord(ch) < 32 for ch in value), "input"
+            )
+            require(
+                not await c.store.find(
+                    LineupTemplate, group_id=group_id, name_key=normalize(value)
+                ),
+                "input",
+            )
+            response = await prompt(
+                c,
+                "template_members",
+                group_id=group_id,
+                **{
+                    k: v
+                    for k, v in data.items()
+                    if k not in ("kind", "operation", "group_id", "event_id", "message_ids")
+                },
+                name=value.strip(),
+            )
         elif operation == "role":
             role = await service.role(group_id, value)
             if data.get("event_id"):
@@ -169,9 +195,11 @@ async def _input_reply(c: Controller, row: Confirmation, value: str) -> Response
             await service.contact(group_id, role.id, person.id)
             response = await contacts_view(c, group_id)
         else:
-            require(operation == "template", "input")
+            require(operation in ("template", "template_members"), "input")
             lines = [s.strip() for s in value.strip().splitlines() if s.strip()]
-            if data.get("main"):
+            if operation == "template_members":
+                lines.insert(0, data["name"])
+            elif data.get("main"):
                 lines.insert(0, c.t("staff_main_name"))
             require(2 <= len(lines) <= 41, "input")
             parsed = [role_person(line) for line in lines[1:]]
@@ -193,7 +221,7 @@ async def _input_reply(c: Controller, row: Confirmation, value: str) -> Response
             await service.template(group_id, lines[0], slots)
             response = await team_view(c, group_id)
     await c.store.delete(row)
-    if data.get("resume_creation"):
+    if data.get("resume_creation") and operation != "template_name":
         from setlist_bot.transport.staffing_creation import prepare
 
         assert group_id is not None
@@ -206,17 +234,14 @@ async def team_view(c: Controller, group_id: UUID) -> Response:
     return Response(
         group.name + "\n\n" + c.t("staff_team"),
         [
-            (
-                c.t("staff_add_template"),
-                action(c, "prompt", field="template", group_id=str(group_id)),
-            ),
             (c.t("staff_templates"), action(c, "templates", group_id=str(group_id))),
             (c.t("staff_contacts"), action(c, "contacts", group_id=str(group_id))),
             (
-                c.t("staff_add_contact"),
-                action(c, "prompt", field="contact", group_id=str(group_id)),
+                c.t("menu_back"),
+                f"use_group {group_id}"
+                if c.private
+                else action(c, "band_menu", group_id=str(group_id)),
             ),
-            (c.t("staff_add_role"), action(c, "prompt", field="role", group_id=str(group_id))),
         ],
     )
 
@@ -481,11 +506,7 @@ async def handle(c: Controller, command: str, args: str) -> Response:
                 bool(await c.store.find(ChatBinding, group_id=UUID(args), chat_id=c.chat_id)),
                 "forbidden",
             )
-        from setlist_bot.transport.staffing_lineups import lineup_action
-
-        result = await lineup_action(c, "templates", {"group_id": args})
-        assert result is not None
-        return result
+        return await team_view(c, UUID(args))
     if command == "team":
         return await team_view(c, (await context(c)).group_id)
     if command in ("lineup", "sf_lineup"):
@@ -642,8 +663,11 @@ async def handle(c: Controller, command: str, args: str) -> Response:
             "forbidden",
         )
     from setlist_bot.transport.staffing_lineups import lineup_action
+    from setlist_bot.transport.staffing_preparation import preparation_action
 
-    special = await lineup_action(c, op, data)
+    special = await preparation_action(c, op, data)
+    if special is None:
+        special = await lineup_action(c, op, data)
     if special is not None:
         return special
     if op == "creation_page":
@@ -670,6 +694,15 @@ async def handle(c: Controller, command: str, args: str) -> Response:
                 for k, v in data.items()
                 if k not in ("kind", "operation", "owner", "field", "group_id", "event_id")
             },
+        )
+    if op == "band_menu":
+        group = await c.groups.access(UUID(data["group_id"]), admin=True)
+        return Response(
+            c.t("selected", name=group.name),
+            [
+                (c.t("group_events", name=group.name), "concerts"),
+                (c.t("staff_group_lineups", name=group.name), f"sf_team {group.id.hex}"),
+            ],
         )
     if op == "team":
         return await team_view(c, UUID(data["group_id"]))
@@ -708,6 +741,21 @@ async def handle(c: Controller, command: str, args: str) -> Response:
         return Response(c.t("staff_all_invites"), buttons)
     if op in ("defaults_preview", "defaults_send"):
         if op == "defaults_send":
+            if data.get("preview_id"):
+                # RU: Не отправляем по старой кнопке после возврата к редактированию.
+                # EN: Lock the complete person set before validating the tenant-bound session.
+                targets = await c.store.find(GigSlot, concert_id=UUID(data["event_id"]))
+                await c.store.lock_people(
+                    {
+                        slot.preferred_user_id
+                        for slot in targets
+                        if str(slot.id) in data["versions"] and slot.preferred_user_id
+                    }
+                )
+                from setlist_bot.transport.staffing_preparation import load as load_preparation
+
+                _, preparation, _ = await load_preparation(c, data)
+                require(preparation["stage"] == "review", "input_expired")
             await service.invite_defaults(
                 UUID(data["event_id"]), data["versions"], force=data.get("force", False)
             )
@@ -758,10 +806,11 @@ async def handle(c: Controller, command: str, args: str) -> Response:
                         event_id=str(event.id),
                         group_id=str(event.group_id),
                         versions=versions,
+                        **{k: data[k] for k in ("preview_id", "preview_version") if k in data},
                         force=busy_any,
                     ),
                 ),
-                (c.t("cancel_button"), f"sf_lineup {event.id.hex}"),
+                (c.t("cancel_button"), data.get("back") or f"sf_lineup {event.id.hex}"),
             ],
         )
     if op in ("contacts", "contact", "preference"):

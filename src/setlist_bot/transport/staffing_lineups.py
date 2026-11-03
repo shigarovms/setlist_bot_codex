@@ -81,7 +81,7 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
                 if confirmed and person
                 else c.t("staff_wait_person", name=person_name(person)[:48])
                 if person
-                else c.t("staff_invite_person")
+                else c.t("staff_invite_or_remove")
             )
             label = (
                 f"{'✅ ' if confirmed else ''}{number}. {roles[slot.role_id].name[:64]}: {label}"
@@ -349,9 +349,7 @@ async def lineup_action(c: Controller, op: str, data: dict[str, Any]) -> Respons
                 c.t("menu_back"),
                 f"sf_lineup {UUID(data['event_id']).hex}"
                 if data.get("event_id")
-                else f"use_group {group.id}"
-                if c.private
-                else "concerts",
+                else action(c, "team", group_id=str(group.id)),
             )
         )
         return Response(c.t("staff_group_lineups", name=group.name), buttons)
@@ -408,7 +406,7 @@ async def lineup_action(c: Controller, op: str, data: dict[str, Any]) -> Respons
                         ),
                     ),
                     (
-                        c.t("staff_remove_role"),
+                        c.t("staff_remove_template_role"),
                         action(
                             c,
                             "template_remove_role",
@@ -594,7 +592,7 @@ async def lineup_action(c: Controller, op: str, data: dict[str, Any]) -> Respons
         )
         buttons.append(
             (
-                c.t("staff_remove_role"),
+                c.t("staff_remove_event_role"),
                 action(c, "slot_remove_preview", slot_id=str(slot.id), version=slot.version),
             )
         )

@@ -21,7 +21,6 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
-    case,
     or_,
     select,
     text,
@@ -740,11 +739,11 @@ class PostgresStore:
         return list((await self.session.scalars(query)).all())
 
     async def concerts_for_user(
-        self, user_id: UUID, current: date, *, offset: int, limit: int
+        self, user_id: UUID, current: date, *, offset: int, limit: int, past: bool = False
     ) -> list[tuple[e.Concert, e.Group]]:
         """RU: Одна страница одним запросом. EN: Never scan another user's groups.
 
-        Предстоящие идут по возрастанию даты, затем прошедшие от новых к старым.
+        Предстоящие и прошедшие разделяются в SQL до пагинации.
         Filter membership and trash in SQL before pagination, without tenant-row locks.
         """
         concerts, groups, members = (
@@ -761,11 +760,10 @@ class PostgresStore:
                 members.c.status == "active",
                 groups.c.deleted_at.is_(None),
                 concerts.c.deleted_at.is_(None),
+                ~upcoming if past else upcoming,
             )
             .order_by(
-                case((upcoming, 0), else_=1),
-                case((upcoming, concerts.c.date)).asc(),
-                case((~upcoming, concerts.c.date)).desc(),
+                concerts.c.date.desc() if past else concerts.c.date.asc(),
                 groups.c.name,
                 concerts.c.id,
             )

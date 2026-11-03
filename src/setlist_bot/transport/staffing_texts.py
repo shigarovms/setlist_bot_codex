@@ -308,7 +308,7 @@ TEXTS["ru"].update(
             "Выберите состав для нового выступления. Перед созданием покажем все "
             "данные для подтверждения."
         ),
-        "staff_without_lineup": "Продолжить без состава",
+        "staff_without_lineup": "Выбрать состав позже",
         "staff_creation_selected": "Состав: {name}",
         "staff_creation_none": (
             "Состав пока не настроен. Его можно задать сейчас или после создания выступления."
@@ -395,7 +395,7 @@ TEXTS["en"].update(
         "staff_creation_choose": (
             "Choose a lineup. Review all details before creating the performance."
         ),
-        "staff_without_lineup": "Continue without a lineup",
+        "staff_without_lineup": "Choose lineup later",
         "staff_creation_selected": "Lineup: {name}",
         "staff_creation_none": "No lineups yet. Set one up now or after creating the performance.",
         "staff_creation_check": "I will check participant availability before sending invitations.",
@@ -429,5 +429,64 @@ TEXTS["en"].update(
     {
         "staff_open_lineup": "Open performance lineup",
         "staff_empty_lineup": "There are no roles in this lineup yet.",
+    }
+)
+
+TEXTS["ru"].update(
+    {
+        "staff_template_name_prompt": (
+            "Как назовём состав? Название поможет выбрать нужных участников при создании "
+            "выступления. Например: Основной, Малый, DJ set или С танцорами.\n/cancel — отмена."
+        ),
+        "staff_template_members_prompt": (
+            "Состав «{name}». Введите роли — по одной на строку. При желании укажите "
+            "исполнителя через пробел, дефис или двоеточие:\nВокал @singer\nГитара: @guitarist"
+            "\nЗвукорежиссёр\n/cancel — отмена."
+        ),
+        "staff_remove_template_role": "Удалить роль из состава",
+        "staff_remove_event_role": "Удалить роль из выступления",
+        "staff_invite_or_remove": "пригласить/удалить",
+        "staff_edit_preparation": "Изменить состав выступления",
+        "staff_confirm_preparation": "Подтвердить состав",
+        "staff_choose_later": "Выбрать состав позже",
+        "staff_no_candidates": (
+            "Пока не указаны исполнители. Измените состав и выберите кандидатов."
+        ),
+        "staff_enter_person": "Ввести @ник или Telegram ID",
+        "staff_prep_add_prompt": (
+            "Введите роль и при желании исполнителя: Гитара @musician.\n/cancel — отмена."
+        ),
+        "staff_prep_person_prompt": (
+            "Введите известный боту @ник или Telegram ID. Дефис (-) убирает "
+            "кандидата.\n/cancel — отмена."
+        ),
+    }
+)
+TEXTS["en"].update(
+    {
+        "staff_template_name_prompt": (
+            "What shall we call this lineup? A name helps select performers when creating "
+            "a performance. For example: Main, Small, DJ set or With dancers.\n/cancel — cancel."
+        ),
+        "staff_template_members_prompt": (
+            "Lineup “{name}”. Enter roles, one per line. Optionally add a performer after "
+            "a space, dash or colon:\nVocals @singer\nGuitar: @guitarist\n"
+            "Sound engineer\n/cancel — cancel."
+        ),
+        "staff_remove_template_role": "Remove role from saved lineup",
+        "staff_remove_event_role": "Remove role from performance",
+        "staff_invite_or_remove": "invite/remove",
+        "staff_edit_preparation": "Edit performance lineup",
+        "staff_confirm_preparation": "Confirm lineup",
+        "staff_choose_later": "Choose lineup later",
+        "staff_no_candidates": "No performers selected yet. Edit the lineup and choose candidates.",
+        "staff_enter_person": "Enter @username or Telegram ID",
+        "staff_prep_add_prompt": (
+            "Enter a role and optionally its performer: Guitar @musician.\n/cancel — cancel."
+        ),
+        "staff_prep_person_prompt": (
+            "Enter a known @username or Telegram ID. Enter - to clear the "
+            "candidate.\n/cancel — cancel."
+        ),
     }
 )

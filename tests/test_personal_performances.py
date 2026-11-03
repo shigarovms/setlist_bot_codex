@@ -126,7 +126,42 @@ async def test_pagination_is_stable_and_past_events_follow_upcoming(engine, worl
     second = await send(following, private=True)
     first_ids = {action for _, action in first.buttons if action.startswith("my_concert ")}
     second_ids = {action for _, action in second.buttons if action.startswith("my_concert ")}
-    assert len(first_ids) == 20 and len(second_ids) == 5 and first_ids.isdisjoint(second_ids)
-    assert second.buttons[-2][0].startswith("13.03.2002 Коллектив Б")
+    assert len(first_ids) == 20 and len(second_ids) == 4 and first_ids.isdisjoint(second_ids)
+    assert not any("13.03.2002" in label for label, _ in second.buttons)
+    past = await send(
+        next(action for label, action in first.buttons if label == "Прошедшие"), private=True
+    )
+    assert past.buttons[0][0].startswith("13.03.2002 Коллектив Б")
+    assert past.buttons[-1][1] == "all_my_concerts"
     assert (await send("all_my_concerts 0", private=True)).buttons == first.buttons
     assert not (await send("/all_my_concerts -1", private=True)).buttons
+
+
+async def test_archive_has_its_own_pagination_and_checks_membership_each_time(engine, world):
+    async with PostgresUnitOfWork(engine) as uow:
+        for index in range(23):
+            uow.store.add(
+                Concert(
+                    group_id=world.other.id,
+                    date=date(2026, 10, 29) - timedelta(days=index),
+                    title=f"Прошедшее {index}",
+                )
+            )
+        uow.store.add(Concert(group_id=world.group.id, date=date(2026, 10, 30), title="Сегодня"))
+    send = sender(engine)
+    upcoming = await send("/all_my_concerts", private=True)
+    assert upcoming.buttons[0] == ("Прошедшие", "all_my_concerts past")
+    assert any("Сегодня" in label for label, _ in upcoming.buttons)
+    assert not any("Прошедшее" in label for label, _ in upcoming.buttons)
+    archive = await send("all_my_concerts past", private=True)
+    assert len([action for _, action in archive.buttons if action.startswith("my_concert ")]) == 20
+    assert archive.buttons[0][0].endswith("Прошедшее 0")
+    second = await send("all_my_concerts past 1", private=True)
+    assert len([action for _, action in second.buttons if action.startswith("my_concert ")]) == 3
+    assert not any("Сегодня" in label for label, _ in second.buttons)
+    async with PostgresUnitOfWork(engine) as uow:
+        (await uow.store.find(Membership, group_id=world.other.id, user_id=world.admin.id))[
+            0
+        ].status = "pending"
+    denied = await send("all_my_concerts past", private=True)
+    assert not any(action.startswith("my_concert ") for _, action in denied.buttons)

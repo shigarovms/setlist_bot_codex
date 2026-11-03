@@ -11,7 +11,7 @@ async def test_selected_group_opens_its_performances_before_optional_transfer(en
     send = sender(engine)
     selected = await send(f"/use_group {world.other.id}", private=True)
     assert selected.buttons[0] == (
-        "Мероприятия Коллектив Б",
+        "Выступления Коллектив Б",
         f"group_concerts {world.other.id.hex}",
     )
     assert selected.buttons[1] == ("Составы Коллектив Б", f"sf_team {world.other.id.hex}")
@@ -19,7 +19,7 @@ async def test_selected_group_opens_its_performances_before_optional_transfer(en
     opened = await send(selected.buttons[0][1], private=True)
     assert any(str(world.other_concert.id) in action for _, action in opened.buttons)
     member = await send(f"/use_group {world.group.id}", actor=2, private=True)
-    assert len(member.buttons) == 1 and member.buttons[0][0] == "Мероприятия Коллектив А"
+    assert len(member.buttons) == 1 and member.buttons[0][0] == "Выступления Коллектив А"
 
 
 async def test_deletion_retires_shared_and_private_setlist_buttons_without_resending_text(

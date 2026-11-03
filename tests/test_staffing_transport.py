@@ -55,10 +55,12 @@ async def test_force_reply_template_contact_and_invitation_flow_without_group_me
     await send(f"/use_group {world.group.id}", private=True, chat=1)
     await send(f"/use_concert {world.concert.id}", private=True, chat=1)
     team = await send("/team", private=True, chat=1)
-    prompt = await send(button(team, "Создать состав"), private=True, chat=1, remember=100)
+    lineups = await send(button(team, "Составы"), private=True, chat=1)
+    await send(button(lineups, "Создать состав"), private=True, chat=1, remember=99)
+    prompt = await send("Малый", private=True, chat=1, reply=99, remember=100)
     assert prompt.force_reply
     assert await send("Постороннее сообщение", actor=2, private=True, chat=1, reply=100) is None
-    await send("Малый\nВокал  3\nDJ", private=True, chat=1, reply=100)
+    await send("Вокал  3\nDJ", private=True, chat=1, reply=100)
     async with PostgresUnitOfWork(engine) as uow:
         template = (await uow.store.find(LineupTemplate, group_id=world.group.id))[0]
         assert len(template.slots) == 2

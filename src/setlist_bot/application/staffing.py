@@ -183,6 +183,67 @@ class Staffing:
         await self.notify(row.user_id, "invitation", row)
         return row
 
+    async def replace_uninvited_lineup(
+        self, event_id: UUID, expected: int, name: str, values: list[dict[str, Any]]
+    ) -> Concert:
+        """RU: Принимаем подготовленный состав без приглашений. EN: Atomic pre-invite save."""
+        event = await self.event(event_id)
+        require(
+            event.lineup_version == expected and len(values) <= 40 and len(name) <= 100,
+            "input_expired",
+        )
+        require(
+            not any(
+                row.status in OPEN | {"confirmed"}
+                for row in await self.store.find(GigInvitation, concert_id=event.id)
+            ),
+            "input_expired",
+        )
+        # RU: Сначала проверяем все ссылки; временный ввод не меняет живой состав.
+        # EN: Validate the whole plan before mutation. No notification is generated here.
+        for item in values:
+            if item.get("role_id"):
+                role = await self.store.get(StaffRole, UUID(item["role_id"]))
+                require(role.group_id == event.group_id, "forbidden")
+            else:
+                text = item.get("role_name", "")
+                require(
+                    0 < len(text.strip()) <= 100 and not any(ord(ch) < 32 for ch in text), "input"
+                )
+            if item.get("user_id"):
+                await self.store.get(User, UUID(item["user_id"]))
+        previous = sorted(
+            await self.store.find(GigSlot, concert_id=event.id, removed=False),
+            key=lambda slot: slot.position,
+        )
+        unchanged = [
+            {
+                "role_id": str(slot.role_id),
+                "user_id": str(slot.preferred_user_id) if slot.preferred_user_id else None,
+            }
+            for slot in previous
+        ]
+        if event.lineup_name == name and values == unchanged:
+            return event
+        for slot in previous:
+            await self.remove_slot(slot.id, slot.version)
+        await self.store.flush()
+        for item in values:
+            role = (
+                await self.store.get(StaffRole, UUID(item["role_id"]))
+                if item.get("role_id")
+                else await self.role(event.group_id, item["role_name"])
+            )
+            slot = await self.add_slot(event.id, role.id)
+            if item.get("user_id"):
+                slot.preferred_user_id = UUID(item["user_id"])
+                await self.contact(event.group_id, role.id, slot.preferred_user_id)
+        event.lineup_name = name
+        event.lineup_version += 1
+        record_activity(self.store, self.user, "lineup_prepared", event.id)
+        await self.store.flush()
+        return event
+
     async def apply_template(
         self,
         event_id: UUID,
