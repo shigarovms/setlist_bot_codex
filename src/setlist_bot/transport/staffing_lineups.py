@@ -115,25 +115,38 @@ async def template_view(
     buttons = []
     text = row.name
     require(page >= 0, "input")
-    for index, slot in enumerate(row.slots[page * 8 : (page + 1) * 8], page * 8):
-        role = await c.store.get(StaffRole, UUID(slot["role_id"]))
+    roles = {
+        role.id: role
+        for role in await c.store.get_many(StaffRole, {UUID(slot["role_id"]) for slot in row.slots})
+    }
+    people = {
+        person.id: person
+        for person in await c.store.get_many(
+            User, {UUID(slot["user_id"]) for slot in row.slots if slot.get("user_id")}
+        )
+    }
+    # RU: Полный текст состава не зависит от страницы; переключаются лишь кнопки.
+    # EN: Batch-load the full lineup and paginate only the role actions.
+    for index, slot in enumerate(row.slots):
+        role = roles[UUID(slot["role_id"])]
         label = f"{index + 1}. {role.name[:64]}"
         if slot.get("user_id"):
-            label += ": " + person_name(await c.store.get(User, UUID(slot["user_id"])))[:48]
+            label += ": " + person_name(people[UUID(slot["user_id"])])[:48]
         text += "\n" + label
-        buttons.append(
-            (
-                label,
-                action(
-                    c,
-                    "template_role",
-                    group_id=str(row.group_id),
-                    template_id=str(row.id),
-                    version=row.version,
-                    index=index,
-                ),
+        if page * 8 <= index < (page + 1) * 8:
+            buttons.append(
+                (
+                    label,
+                    action(
+                        c,
+                        "template_role",
+                        group_id=str(row.group_id),
+                        template_id=str(row.id),
+                        version=row.version,
+                        index=index,
+                    ),
+                )
             )
-        )
     for delta, symbol in ((-1, "◀"), (1, "▶")):
         if page + delta >= 0 and (delta < 0 or (page + 1) * 8 < len(row.slots)):
             buttons.append(

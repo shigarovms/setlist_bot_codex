@@ -368,6 +368,16 @@ async def test_large_saved_lineups_and_creation_choices_are_paginated(engine, wo
     menu = await send(f"sf_team {world.group.id.hex}", private=True, chat=1)
     card = await send(button(menu, "Состав 00"), private=True, chat=1)
     assert len(card.text) < 4096
+    assert len(card.text.splitlines()) == 41 and card.text.splitlines()[-1].startswith("40.")
     assert sum(label[:1].isdigit() for label, _ in card.buttons) == 8
-    second = await send(button(card, "▶"), private=True, chat=1)
-    assert "\n9." in second.text and "\n1." not in second.text
+    current = card
+    for page in range(1, 5):
+        current = await send(button(current, "▶"), private=True, chat=1)
+        assert current.text == card.text
+        role_labels = [label for label, _ in current.buttons if label[:1].isdigit()]
+        assert [int(label.partition(".")[0]) for label in role_labels] == list(
+            range(page * 8 + 1, page * 8 + 9)
+        )
+    previous = await send(button(current, "◀"), private=True, chat=1)
+    assert previous.text == card.text
+    assert next(label for label, _ in previous.buttons if label[:1].isdigit()).startswith("25.")
