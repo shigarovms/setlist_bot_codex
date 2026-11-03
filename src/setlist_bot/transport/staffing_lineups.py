@@ -12,6 +12,7 @@ from setlist_bot.application.user_lookup import known_user
 from setlist_bot.domain.entities import (
     GigInvitation,
     GigSlot,
+    Group,
     LineupTemplate,
     Membership,
     StaffRole,
@@ -32,12 +33,12 @@ def person_name(person: User) -> str:
 async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Response:
     service = Staffing(c.store, c.user)
     event = await service.event(identifier, admin=False)
-    group = await service.groups.access(event.group_id)
-    admin = bool(
-        await c.store.find(
-            Membership, group_id=group.id, user_id=c.user.id, role="admin", status="active"
-        )
-    )
+    # RU: event() уже проверил членство и заблокировал коллектив. Повторно читаем
+    # только данные для экрана; каждое действие всё равно проверяет права в сервисе.
+    # EN: Authorization has completed under the tenant lock; never cache permissions.
+    group = await c.store.get(Group, event.group_id)
+    members = await c.store.find(Membership, group_id=group.id, status="active")
+    admin = any(member.user_id == c.user.id and member.role == "admin" for member in members)
     slots = sorted(
         await c.store.find(GigSlot, concert_id=event.id, removed=False), key=lambda s: s.position
     )
@@ -50,33 +51,41 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
     ]
     people = {p.id: p for p in await c.store.get_many(User, {r.user_id for r in invites})}
     roles = {r.id: r for r in await c.store.get_many(StaffRole, {s.role_id for s in slots})}
-    names = {
-        member.user_id: member.musical_role
-        for member in await c.store.find(Membership, group_id=group.id, status="active")
-        if member.musical_role
-    }
+    names = {member.user_id: member.musical_role for member in members if member.musical_role}
+    # RU: Один проход по приглашениям вместо полного перебора для каждой роли.
+    # EN: Group once, then inspect only the invitations belonging to each slot.
+    by_slot: dict[UUID, list[GigInvitation]] = {}
+    for invitation in invites:
+        by_slot.setdefault(invitation.slot_id, []).append(invitation)
+    for slot_invites in by_slot.values():
+        slot_invites.sort(
+            key=lambda invitation: (
+                invitation.status != "confirmed",
+                invitation.created_at,
+                invitation.id,
+            )
+        )
     lines = []
     for number, slot in enumerate(slots, 1):
-        active = sorted(
-            (r for r in invites if r.slot_id == slot.id),
-            key=lambda r: (r.status != "confirmed", r.created_at, r.id),
-        )
+        active = by_slot.get(slot.id, [])
         person = people[active[0].user_id] if active else None
         confirmed = bool(active and active[0].status == "confirmed")
-        label = (
-            c.t("staff_change_person", name=person_name(person)[:48])
-            if confirmed and person
-            else c.t("staff_wait_person", name=person_name(person)[:48])
-            if person
-            else c.t("staff_invite_person")
-        )
-        label = f"{'✅ ' if confirmed else ''}{number}. {roles[slot.role_id].name[:64]}: {label}"
         line = f"{number}. {roles[slot.role_id].name}"
         if confirmed and person:
             line += " — " + names.get(person.id, person.display_name or str(person.telegram_id))
             line = "✅ " + line
         lines.append(line)
         if admin and page * 8 <= number - 1 < (page + 1) * 8:
+            label = (
+                c.t("staff_change_person", name=person_name(person)[:48])
+                if confirmed and person
+                else c.t("staff_wait_person", name=person_name(person)[:48])
+                if person
+                else c.t("staff_invite_person")
+            )
+            label = (
+                f"{'✅ ' if confirmed else ''}{number}. {roles[slot.role_id].name[:64]}: {label}"
+            )
             buttons.append((label, action(c, "slot", slot_id=str(slot.id), version=slot.version)))
     if page:
         buttons.append(("◀", f"sf_lineup {event.id.hex} {page - 1}"))
@@ -91,7 +100,7 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
                 ),
             )
         )
-        if any(s.preferred_user_id and not any(r.slot_id == s.id for r in invites) for s in slots):
+        if any(s.preferred_user_id and s.id not in by_slot for s in slots):
             buttons.append(
                 (
                     c.t("staff_check_send"),
