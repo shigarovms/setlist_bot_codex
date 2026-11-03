@@ -25,7 +25,7 @@
       <p id="status" role="status" aria-live="polite">Загрузка…</p>
       <button id="access-request" hidden>Запросить права у владельца</button>
       <nav id="history" aria-label="Версии и прошлые выступления">
-        <button id="older" aria-label="Предыдущий сет-лист">←</button
+        <button id="older" aria-label="Предыдущий сет-лист">← прошлые</button
         ><span id="history-label"></span
         ><button id="newer" aria-label="Следующий сет-лист" disabled>
           →
@@ -41,7 +41,7 @@
         <section aria-label="Ваш сет-лист">
           <ol id="setlist"></ol>
           <p id="empty" hidden></p>
-          <div id="remove-zone" data-remove="true">Убрать из сет-листа</div>
+          <button id="add-pause-bottom" type="button" disabled>+ пауза</button>
         </section>
         <section id="catalog">
           <h2 id="catalog-heading">Репертуар</h2>
@@ -50,6 +50,7 @@
             id="search"
             type="search"
             autocomplete="off"
+            enterkeyhint="done"
             placeholder="Название песни"
           />
           <div id="catalog-list"></div>

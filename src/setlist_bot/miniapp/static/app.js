@@ -21,8 +21,9 @@ const words = {
     back: "Вернуться к боту",
     pause: "пауза",
     addPause: "＋ Пауза",
+    addPauseBottom: "+ пауза",
+    older: "← прошлые",
     undo: "↶ Отменить",
-    remove: "Убрать из сет-листа",
     empty:
       "Добавьте песни из репертуара ниже или возьмите прошлый сет-лист за основу.",
     use: "Взять за основу",
@@ -76,8 +77,9 @@ const words = {
     back: "Back to bot",
     pause: "pause",
     addPause: "＋ Pause",
+    addPauseBottom: "+ pause",
+    older: "← past",
     undo: "↶ Undo",
-    remove: "Remove from setlist",
     empty: "Add songs below or use a previous performance as a starting point.",
     use: "Use as starting point",
     replace:
@@ -329,10 +331,11 @@ function render() {
   $("catalog").hidden = !!preview;
   $("undo").disabled = !undos.length || !!preview || busy;
   $("add-pause").disabled = !!preview || busy;
+  $("add-pause-bottom").disabled = !!preview || busy;
+  $("add-pause-bottom").hidden = !!preview;
   $("save").disabled = !!preview || !dirty() || busy;
   $("publish").disabled =
     !!preview || !current.length || busy || !!saver?.blocked;
-  $("remove-zone").hidden = !!preview;
   dirty()
     ? tg?.enableClosingConfirmation?.()
     : tg?.disableClosingConfirmation?.();
@@ -412,10 +415,6 @@ function startDrag(event, source) {
           ? "drop-after"
           : "drop-before",
       );
-    $("remove-zone").classList.toggle(
-      "active",
-      !!target?.closest("[data-remove]"),
-    );
   };
   const auto = () => {
     if (!drag) return;
@@ -429,9 +428,7 @@ function startDrag(event, source) {
     const target = document.elementFromPoint(e.clientX, e.clientY),
       row = target?.closest("#setlist .entry");
     if (drag.moved) {
-      if (target?.closest("[data-remove]") && drag.index !== undefined)
-        change(current.filter((_, i) => i !== drag.index));
-      else if (
+      if (
         row ||
         target?.closest("#setlist") ||
         target?.closest("#empty")
@@ -455,7 +452,6 @@ function startDrag(event, source) {
     ghost.remove();
     drag = null;
     cancelAnimationFrame(scrollFrame);
-    $("remove-zone").classList.remove("active");
     document
       .querySelectorAll(".drop-before, .drop-after")
       .forEach((n) => n.classList.remove("drop-before", "drop-after"));
@@ -469,7 +465,6 @@ function startDrag(event, source) {
       drag = null;
       cancelAnimationFrame(scrollFrame);
     }
-    $("remove-zone").classList.remove("active");
     handle.removeEventListener("pointermove", update);
     handle.removeEventListener("pointerup", finish);
     handle.removeEventListener("pointercancel", cancel);
@@ -542,6 +537,65 @@ $("search").addEventListener("input", () => {
   catalogPage = 0;
   renderCatalog();
 });
+let searchScrollFrame = 0,
+  pointerInProgress = false;
+function alignSearch() {
+  cancelAnimationFrame(searchScrollFrame);
+  searchScrollFrame = requestAnimationFrame(() => {
+    const search = $("search");
+    if (document.activeElement !== search) return;
+    // RU: iOS может сдвинуть видимую область при открытии клавиатуры.
+    // EN: Re-align after keyboard/viewport changes, not just before its animation.
+    const visibleTop = window.visualViewport?.offsetTop ?? 0;
+    const offset = search.getBoundingClientRect().top - visibleTop;
+    if (Math.abs(offset) > 1)
+      window.scrollTo({ top: window.scrollY + offset, behavior: "instant" });
+  });
+}
+function settleSearchLayout() {
+  requestAnimationFrame(() => {
+    // RU: Не меняем размеры страницы посреди тапа или перетаскивания.
+    // EN: Keep the clicked target in place until pointerup/click handlers finish.
+    if (document.activeElement !== $("search") && !pointerInProgress)
+      document.body.classList.remove("search-active");
+  });
+}
+function leaveSearch(event) {
+  if (event.target instanceof Element && event.target.closest("#search, label[for='search']"))
+    return;
+  if (document.activeElement === $("search")) $("search").blur();
+  settleSearchLayout();
+}
+$("search").addEventListener("focus", () => {
+  // RU: Новый вход в поиск начинает новый запрос; редактирование текущего не очищаем.
+  // EN: Clear only on re-entry, never on input, autosave or cursor movement.
+  $("search").value = "";
+  catalogPage = 0;
+  renderCatalog();
+  document.body.classList.add("search-active");
+  alignSearch();
+});
+$("search").addEventListener("blur", settleSearchLayout);
+$("search").addEventListener("keydown", (event) => {
+  if (!event.isComposing && ["Enter", "Escape"].includes(event.key)) {
+    event.preventDefault();
+    $("search").blur();
+  }
+});
+document.addEventListener("pointerdown", (event) => {
+  pointerInProgress = true;
+  leaveSearch(event);
+}, true);
+for (const name of ["pointerup", "pointercancel"])
+  document.addEventListener(name, () => {
+    pointerInProgress = false;
+    settleSearchLayout();
+  }, true);
+// RU/EN: Also handle keyboard activation and synthetic clicks without pointer events.
+document.addEventListener("click", leaveSearch, true);
+window.addEventListener("resize", alignSearch);
+window.visualViewport?.addEventListener("resize", alignSearch);
+window.visualViewport?.addEventListener("scroll", alignSearch);
 $("page-prev").addEventListener("click", () => {
   catalogPage--;
   renderCatalog();
@@ -550,12 +604,15 @@ $("page-next").addEventListener("click", () => {
   catalogPage++;
   renderCatalog();
 });
-$("add-pause").addEventListener("click", () => {
+function openPause() {
+  if (!state || preview || busy) return;
   $("pause-error").textContent = "";
   $("pause-value").value = "";
   $("pause-dialog").showModal();
   $("pause-value").focus();
-});
+}
+$("add-pause").addEventListener("click", openPause);
+$("add-pause-bottom").addEventListener("click", openPause);
 $("pause-cancel").addEventListener("click", () => $("pause-dialog").close());
 $("average-pause").addEventListener("click", () => {
   if (!state || busy || preview) return;
@@ -737,8 +794,9 @@ function labels() {
     publish: "publish",
     "back-bot": "back",
     "add-pause": "addPause",
+    "add-pause-bottom": "addPauseBottom",
+    older: "older",
     undo: "undo",
-    "remove-zone": "remove",
     "use-history": "use",
     "load-latest": "loadLatest",
     "copy-own": "copy",

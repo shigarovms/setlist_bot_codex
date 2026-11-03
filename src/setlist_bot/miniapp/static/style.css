@@ -8,6 +8,7 @@
   --button-text: #fff;
   --line: #dce2e8;
   --danger: #ba333b;
+  --pause-bg: #e0e3e7;
   --radius: 14px;
   font:
     16px/1.4 system-ui,
@@ -26,6 +27,7 @@
   --button-text: #10212e;
   --line: #425164;
   --danger: #ff9098;
+  --pause-bg: #1d2632;
 }
 * {
   box-sizing: border-box;
@@ -143,6 +145,9 @@ nav span {
 #history {
   margin: 14px 0 8px;
 }
+#older {
+  white-space: nowrap;
+}
 #use-history {
   width: 100%;
   background: var(--button);
@@ -229,11 +234,16 @@ ol {
 }
 .entry.pause {
   border-style: dashed;
+  background: var(--pause-bg);
+  background: color-mix(in srgb, var(--panel) 86%, #000);
 }
 .entry.unavailable .song-name {
   color: var(--danger);
 }
-#remove-zone {
+#add-pause-bottom {
+  display: block;
+  width: 100%;
+  background: transparent;
   border: 2px dashed var(--line);
   padding: 16px;
   text-align: center;
@@ -242,9 +252,13 @@ ol {
   color: var(--hint);
   margin: 14px 0;
 }
-#remove-zone.active {
-  color: var(--danger);
-  border-color: var(--danger);
+/* RU: Запас прокрутки нужен даже при коротком каталоге и открытой клавиатуре.
+   EN: Let search reach the viewport top without hiding the setlist or moving the input. */
+body.search-active #catalog::after {
+  content: "";
+  display: block;
+  height: 100vh;
+  height: 100dvh;
 }
 .drop-before {
   box-shadow: 0 -4px 0 var(--button);

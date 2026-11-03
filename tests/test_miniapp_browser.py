@@ -74,6 +74,15 @@ class Browser:
             await asyncio.sleep(0.05)
         raise AssertionError("Browser condition failed: " + expression)
 
+    async def tap(self, selector):
+        point = await self.js(
+            f"(()=>{{const r=document.querySelector({json.dumps(selector)})"
+            ".getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}})()"
+        )
+        await self.call("Emulation.setTouchEmulationEnabled", {"enabled": True})
+        await self.call("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [point]})
+        await self.call("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+
     async def drag(self, source, target, touch=False):
         start = await self.js(
             f"(()=>{{const r=document.querySelector({json.dumps(source)})"
@@ -116,7 +125,12 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
     from datetime import date
 
     async with PostgresUnitOfWork(engine) as uow:
+        from setlist_bot.application.catalog import Catalog
+
         uow.store.add(DeploymentIdentity(bot_id=1110437563, environment="sandbox"))
+        await Catalog(uow.store, world.admin).save(
+            world.group.id, {"title": "Меланхолия", "duration_seconds": 246}
+        )
         lists = Setlists(uow.store, world.admin)
         past = await lists.create(world.group.id, date(2025, 12, 1), "Прошлое выступление")
         _, version, _ = await lists.read(world.group.id, past.id)
@@ -203,7 +217,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     + ("" if public_launch else "#session=" + str(identifier)),
                 },
             )
-            await browser.wait("document.querySelectorAll('.catalog-entry').length===1")
+            await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
             assert await browser.js(
                 "Array.from(document.querySelectorAll('#average-pause')).length===1 && "
                 "document.getElementById('undo').nextElementSibling.id==='average-pause' && "
@@ -213,20 +227,96 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.js("document.getElementById('average-pause').textContent")
                 == "Сред. пауза"
             )
-            await browser.js(
-                "document.querySelector('.add').click(); document.querySelector('.add').click()"
+            assert await browser.js("document.getElementById('older').textContent") == "← прошлые"
+            assert not await browser.js("!!document.querySelector('#remove-zone, [data-remove]')")
+            assert (
+                await browser.js("document.getElementById('add-pause-bottom').textContent")
+                == "+ пауза"
             )
+            assert await browser.js(
+                "(()=>{const s=getComputedStyle(document.getElementById('add-pause-bottom'));"
+                "return s.borderTopStyle==='dashed' && s.backgroundColor==='rgba(0, 0, 0, 0)'})()"
+            )
+            # RU/EN: Native touch must still add a song while closing the search keyboard.
+            await browser.js("document.getElementById('search').focus()")
+            await browser.call("Input.insertText", {"text": "Ком"})
+            await browser.wait("document.querySelectorAll('.catalog-entry').length===1")
+            search_at_top = (
+                "Math.abs(document.getElementById('search').getBoundingClientRect().top"
+                "-(visualViewport?.offsetTop ?? 0))<2"
+            )
+            await browser.wait(search_at_top)
+            await browser.js("document.getElementById('search').click()")
+            assert await browser.js("document.getElementById('search').value") == "Ком"
+            await browser.call(
+                "Emulation.setDeviceMetricsOverride",
+                {
+                    "width": 390,
+                    "height": 600,
+                    "deviceScaleFactor": 1,
+                    "mobile": True,
+                },
+            )
+            await browser.wait(search_at_top)
+            await browser.tap(".catalog-entry .add")
+            await browser.wait("document.querySelectorAll('#setlist li').length===1")
+            assert await browser.js("document.activeElement.id!=='search'")
+            assert await browser.js("document.getElementById('search').value") == "Ком"
+            await browser.js("document.getElementById('search').focus()")
+            assert await browser.js("document.getElementById('search').value") == ""
+            await browser.call("Input.insertText", {"text": "Мел"})
+            await browser.wait(
+                "document.getElementById('status').textContent.includes('Сохранено')"
+            )
+            assert await browser.js("document.getElementById('search').value") == "Мел"
+            await browser.call(
+                "Input.dispatchKeyEvent",
+                {"type": "keyDown", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13},
+            )
+            await browser.call(
+                "Input.dispatchKeyEvent",
+                {"type": "keyUp", "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13},
+            )
+            assert await browser.js("document.activeElement.id!=='search'")
+            await browser.js("document.getElementById('search').focus()")
+            assert await browser.js("document.getElementById('search').value") == ""
+            await browser.call("Input.insertText", {"text": "Ком"})
+            await browser.js("document.querySelector('.add').click()")
+            assert await browser.js("document.activeElement.id!=='search'")
+            await browser.call(
+                "Emulation.setDeviceMetricsOverride",
+                {
+                    "width": 390,
+                    "height": 900,
+                    "deviceScaleFactor": 1,
+                    "mobile": True,
+                },
+            )
+            await browser.js("window.scrollTo(0,0)")
             # No manual Save: exercise the debounce and real HTTP autosave.
             await browser.wait(
                 "document.getElementById('status').textContent.includes('Сохранено')"
             )
             await browser.js(
-                "document.getElementById('add-pause').click(); "
+                "document.getElementById('add-pause-bottom').click(); "
                 "document.getElementById('pause-value').value='3'; "
                 "document.getElementById('pause-form').requestSubmit()"
             )
             await browser.wait("document.querySelectorAll('#setlist li').length===3")
             assert await browser.js("document.getElementById('total').textContent") == "10:21"
+            # RU/EN: Compare rendered colors, including color-mix(), in both live themes.
+            darker_pause = """(()=>{
+                const color = selector => {
+                    const canvas=document.createElement('canvas'); canvas.width=canvas.height=1;
+                    const context=canvas.getContext('2d');
+                    context.fillStyle=getComputedStyle(document.querySelector(selector)).backgroundColor;
+                    context.fillRect(0,0,1,1);
+                    const [r,g,b]=context.getImageData(0,0,1,1).data;
+                    return 0.2126*r+0.7152*g+0.0722*b;
+                };
+                return color('#setlist .pause') < color('#setlist .entry:not(.pause)');
+            })()"""
+            assert await browser.js(darker_pause)
             await browser.js(
                 "document.getElementById('average-pause').click(); "
                 "document.getElementById('average-value').value='30'; "
@@ -247,6 +337,8 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             # Theme changes must not lose the in-progress list.
             await browser.js("window.Telegram.WebApp.colorScheme='dark'; window.themeChange()")
             assert await browser.js("document.documentElement.dataset.theme") == "dark"
+            assert await browser.js(darker_pause)
+            await browser.js("window.scrollTo(0,0)")
             screenshot = await browser.call("Page.captureScreenshot", {"format": "png"})
             (tmp_path / "miniapp-dark.png").write_bytes(base64.b64decode(screenshot["data"]))
             await browser.js("document.getElementById('older').click()")
@@ -255,7 +347,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             await browser.js("document.getElementById('newer').click()")
             await browser.wait("document.getElementById('use-history').hidden")
             assert await browser.js("document.querySelectorAll('#setlist li').length") == 3
-            await browser.drag("#setlist li:first-child .handle", "#remove-zone")
+            await browser.js("document.querySelector('#setlist li:first-child .remove').click()")
             assert await browser.js("document.querySelectorAll('#setlist li').length") == 2
             await browser.js("document.getElementById('undo').click()")
             await browser.js("document.getElementById('save').click()")
