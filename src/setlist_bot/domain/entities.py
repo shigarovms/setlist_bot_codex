@@ -148,6 +148,7 @@ class Item(Entity):
     position: int
     pause_before: int | None = None
     pause_duration_seconds: int | None = None
+    pause_label: str | None = None
 
 
 @dataclass(kw_only=True)

@@ -182,7 +182,12 @@ class PdfDocuments:
             title = " ".join(title_text(item["title"], transliterate).split())
             if is_pause(item):
                 title = (
-                    pause_title(language, transliterate) + "  " + clock(item["duration_seconds"])
+                    title_text(
+                        pause_title(language, transliterate, label=item.get("pause_label")),
+                        transliterate,
+                    )
+                    + "  "
+                    + clock(item["duration_seconds"])
                 )
             number = numbers[position - 1]
             story.append(
@@ -224,7 +229,10 @@ class PdfDocuments:
             for position, item in enumerate(block["items"], 1):
                 prefix = numbers[position - 1]
                 title = (
-                    pause_title(language, transliterate)
+                    title_text(
+                        pause_title(language, transliterate, label=item.get("pause_label")),
+                        transliterate,
+                    )
                     if is_pause(item)
                     else title_text(item["title"], transliterate)
                 )

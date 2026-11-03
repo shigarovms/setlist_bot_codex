@@ -6,6 +6,7 @@ import {
   move,
   wire,
   clock,
+  asText,
 } from "../src/setlist_bot/miniapp/static/model.js";
 
 test("timing preserves explicit pauses, first lead-in and zero overrides", () => {
@@ -66,4 +67,18 @@ test("moving does not merge repeated songs or discard lead-ins; wire exposes onl
     version: 1,
     pause_before: 3,
   });
+});
+
+test("pause labels keep empty separate from default and survive move and wire", () => {
+  const list = [
+    {kind:"pause",duration_seconds:30,pause_label:"Крабы уносят микрофон"},
+    {kind:"pause",duration_seconds:40,pause_label:""},
+    {kind:"pause",duration_seconds:50},
+  ];
+  const saved = wire(move(list, 0, 2));
+  assert.equal(saved[0].pause_label, "");
+  assert.equal("pause_label" in saved[1], false);
+  assert.equal(saved[2].pause_label, list[0].pause_label);
+  assert.equal(total(saved, 5), 120);
+  assert.equal(asText(list), "00:30  Крабы уносят микрофон\n00:40\n00:50");
 });

@@ -27,7 +27,9 @@ def setlist_articles(heading: str, snapshot: dict[str, Any], language: str) -> l
         *[
             [
                 "" if is_pause(item) else label,
-                pause_title(language) if is_pause(item) else item["title"],
+                pause_title(language, label=item.get("pause_label"))
+                if is_pause(item)
+                else item["title"],
                 clock(item["duration_seconds"]),
             ]
             for label, item in zip(labels, items, strict=True)

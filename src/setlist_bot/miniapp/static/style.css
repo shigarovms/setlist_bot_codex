@@ -8,7 +8,6 @@
   --button-text: #fff;
   --line: #dce2e8;
   --danger: #ba333b;
-  --pause-bg: #e0e3e7;
   --radius: 14px;
   font:
     16px/1.4 system-ui,
@@ -27,7 +26,6 @@
   --button-text: #10212e;
   --line: #425164;
   --danger: #ff9098;
-  --pause-bg: #1d2632;
 }
 * {
   box-sizing: border-box;
@@ -143,10 +141,19 @@ nav span {
   font-size: 14px;
 }
 #history {
+  display: grid;
+  grid-template-columns: minmax(108px, 1fr) minmax(0, 2fr) minmax(108px, 1fr);
   margin: 14px 0 8px;
 }
-#older {
+#older,
+#newer {
+  font-size: 14px;
+  padding-inline: 8px;
   white-space: nowrap;
+}
+#history-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 #use-history {
   width: 100%;
@@ -234,8 +241,36 @@ ol {
 }
 .entry.pause {
   border-style: dashed;
-  background: var(--pause-bg);
-  background: color-mix(in srgb, var(--panel) 86%, #000);
+  background: transparent;
+}
+.pause-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.pause-label .song-name {
+  white-space: pre-wrap;
+}
+.edit-mark {
+  font-size: 14px;
+  color: var(--hint);
+}
+textarea {
+  font: inherit;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--bg);
+  color: var(--text);
+  resize: vertical;
+  min-height: 80px;
 }
 .entry.unavailable .song-name {
   color: var(--danger);

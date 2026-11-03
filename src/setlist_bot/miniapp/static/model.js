@@ -29,7 +29,8 @@ export function numbered(entries) {
 export function wire(entries) {
   return entries.map((item) =>
     item.kind === "pause"
-      ? { kind: "pause", duration_seconds: item.duration_seconds }
+      ? { kind: "pause", duration_seconds: item.duration_seconds,
+          ...(item.pause_label != null ? {pause_label: item.pause_label} : {}) }
       : {
           kind: "song",
           song_id: item.song_id,
@@ -47,7 +48,9 @@ export function move(entries, from, to) {
 export function asText(entries) {
   return entries
     .map((item) =>
-      item.kind === "pause" ? clock(item.duration_seconds) : item.title,
+      item.kind === "pause"
+        ? clock(item.duration_seconds) + (item.pause_label ? `  ${item.pause_label}` : "")
+        : item.title,
     )
     .join("\n");
 }

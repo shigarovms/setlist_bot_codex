@@ -48,6 +48,9 @@ const words = {
     cancel: "Отмена",
     add: "Добавить",
     pauseTitle: "Длительность паузы",
+    editPause: "Изменить паузу",
+    pauseText: "Текст паузы — можно оставить пустым",
+    pauseChanged: "Пауза изменилась. Закройте окно и откройте её заново.",
     pauseHint: "Без единиц — минуты",
     average: "Средняя пауза",
     averageShort: "Сред. пауза",
@@ -102,6 +105,9 @@ const words = {
     cancel: "Cancel",
     add: "Add",
     pauseTitle: "Pause duration",
+    editPause: "Edit pause",
+    pauseText: "Pause text — may be empty",
+    pauseChanged: "This pause changed. Close the dialog and reopen it.",
     pauseHint: "Numbers without units mean minutes",
     average: "Average pause",
     averageShort: "Avg. pause",
@@ -126,7 +132,9 @@ let lang = "ru",
   busy = false,
   latest = null,
   saver = null,
-  publishAttempt = null;
+  publishAttempt = null,
+  editingPause = null,
+  pauseDialogSerial = 0;
 const t = (key) => words[lang][key] ?? key;
 let session = new URLSearchParams(location.hash.slice(1)).get("session");
 function status(text, error = false) {
@@ -289,16 +297,17 @@ function render() {
         ].querySelector(".handle")
         .focus();
     });
-    row.append(
-      handle,
-      node("span", numbers[index], "number"),
-      node(
-        "span",
-        item.kind === "pause" ? t("pause") : item.title,
-        "song-name",
-      ),
-      node("span", clock(item.duration_seconds), "song-time"),
-    );
+    row.append(handle, node("span", numbers[index], "number"));
+    if (item.kind === "pause") {
+      const edit = button("", t("editPause"), () => openPause(index), "pause-label");
+      edit.disabled = !!preview;
+      edit.append(node("span", item.pause_label ?? t("pause"), "song-name"));
+      const mark = node("span", "✎", "edit-mark");
+      mark.setAttribute("aria-hidden", "true");
+      edit.append(mark);
+      row.append(edit);
+    } else row.append(node("span", item.title, "song-name"));
+    row.append(node("span", clock(item.duration_seconds), "song-time"));
     if (
       item.kind === "song" &&
       !state.catalog.some((song) => song.id === item.song_id)
@@ -391,7 +400,7 @@ function startDrag(event, source) {
     "div",
     source.song?.title ??
       (current[source.index].kind === "pause"
-        ? t("pause")
+        ? (current[source.index].pause_label ?? t("pause"))
         : current[source.index].title),
     "ghost",
   );
@@ -604,16 +613,28 @@ $("page-next").addEventListener("click", () => {
   catalogPage++;
   renderCatalog();
 });
-function openPause() {
+function openPause(index = null) {
   if (!state || preview || busy) return;
+  const item = index === null ? null : current[index];
+  if (index !== null && item?.kind !== "pause") return;
+  pauseDialogSerial++;
+  $("pause-submit").disabled = false;
+  editingPause = item ? { index, original: JSON.stringify(wire([item])) } : null;
   $("pause-error").textContent = "";
-  $("pause-value").value = "";
+  $("pause-title").textContent = t(item ? "editPause" : "pauseTitle");
+  $("pause-submit").textContent = t(item ? "apply" : "add");
+  $("pause-text").value = item?.pause_label ?? t("pause");
+  $("pause-value").value = item ? clock(item.duration_seconds) : "";
   $("pause-dialog").showModal();
   $("pause-value").focus();
 }
-$("add-pause").addEventListener("click", openPause);
-$("add-pause-bottom").addEventListener("click", openPause);
-$("pause-cancel").addEventListener("click", () => $("pause-dialog").close());
+$("add-pause").addEventListener("click", () => openPause());
+$("add-pause-bottom").addEventListener("click", () => openPause());
+$("pause-cancel").addEventListener("click", () => {
+  pauseDialogSerial++;
+  $("pause-dialog").close();
+});
+$("pause-dialog").addEventListener("cancel", () => { pauseDialogSerial++; });
 $("average-pause").addEventListener("click", () => {
   if (!state || busy || preview) return;
   $("average-value").value = defaultPause;
@@ -632,21 +653,31 @@ $("average-form").addEventListener("submit", (event) => {
 $("pause-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("pause-submit").disabled = true;
+  const serial = pauseDialogSerial;
   try {
+    // RU/EN: Capture before awaiting the duration request; autosave can replace local keys.
+    const edit = editingPause;
+    const label = $("pause-text").value;
     const value = await api("pause", { value: $("pause-value").value }, "POST");
-    change([
-      ...current,
-      {
+    if (serial !== pauseDialogSerial || !$("pause-dialog").open) return;
+    const item = {
         kind: "pause",
         duration_seconds: value.seconds,
+        ...(label !== t("pause") ? { pause_label: label } : {}),
         key: crypto.randomUUID(),
-      },
-    ]);
+      };
+    if (edit) {
+      if (!current[edit.index] || JSON.stringify(wire([current[edit.index]])) !== edit.original)
+        throw new Error(t("pauseChanged"));
+      const updated = clone(current);
+      updated[edit.index] = item;
+      change(updated);
+    } else change([...current, item]);
     $("pause-dialog").close();
   } catch (error) {
-    $("pause-error").textContent = error.message;
+    if (serial === pauseDialogSerial) $("pause-error").textContent = error.message;
   } finally {
-    $("pause-submit").disabled = false;
+    if (serial === pauseDialogSerial) $("pause-submit").disabled = false;
   }
 });
 function saveError(error) {
@@ -805,6 +836,7 @@ function labels() {
     "pause-submit": "add",
     "pause-title": "pauseTitle",
     "pause-label": "pauseHint",
+    "pause-text-label": "pauseText",
     "average-title": "averageTitle",
     "average-label": "averageHint",
     "average-cancel": "cancel",

@@ -85,7 +85,11 @@ def render_setlist(
     numbers = entry_labels(items)
     labels = []
     for pos, item in enumerate(items, 1):
-        title = pause_title(language) if is_pause(item) else item["title"]
+        title = (
+            pause_title(language, label=item.get("pause_label"))
+            if is_pause(item)
+            else item["title"]
+        )
         prefix = numbers[pos - 1] + ("  " if is_pause(item) else ". ")
         labels.append(prefix + " ".join(title.split()))
     total_label = tr(language, "timing_total", time="").rstrip()
@@ -102,7 +106,11 @@ def render_setlist(
     for pos, item in enumerate(items, 1):
         number = numbers[pos - 1]
         indent = " " * (len(number) + 2)
-        title = pause_title(language) if is_pause(item) else item["title"]
+        title = (
+            pause_title(language, label=item.get("pause_label"))
+            if is_pause(item)
+            else item["title"]
+        )
         title_lines = wrap(" ".join(title.split()), width=max(1, width - len(indent))) or [""]
         label = number + ("  " if is_pause(item) else ". ") + title_lines[0]
         lines.append(f"{label:<{width}}  {clock(item['duration_seconds']):>{time_width}}")

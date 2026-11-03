@@ -8,6 +8,22 @@ const song = (id) => ({
   version: 1,
   pause_before: null,
 });
+
+test("a label-only change is saved including an intentional blank", async () => {
+  const calls=[];
+  const pause={kind:"pause",duration_seconds:60,pause_label:"Крабы"};
+  const saver=new DraftPersistence(0,[pause],async payload=>{
+    calls.push(payload);
+    return {version:payload.version+1,entries:payload.entries};
+  },()=>{},()=>{});
+  saver.pause();
+  saver.setEntries([{...pause,pause_label:""}]);
+  assert.equal(saver.dirty(),true);
+  await saver.flush();
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].entries[0].pause_label,"");
+  assert.equal(saver.dirty(),false);
+});
 const deferred = () => {
   let resolve, reject;
   const promise = new Promise((ok, no) => {

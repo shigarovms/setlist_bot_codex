@@ -75,7 +75,9 @@ def position_label(position: int, count: int) -> str:
     return str(position).zfill(2) if count >= 10 else str(position)
 
 
-def pause_title(language: str, transliterate: bool = False) -> str:
+def pause_title(language: str, transliterate: bool = False, *, label: str | None = None) -> str:
+    if label is not None:
+        return label
     return "pause" if language == "en" or transliterate else "пауза"
 
 

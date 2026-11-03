@@ -228,6 +228,12 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 == "Сред. пауза"
             )
             assert await browser.js("document.getElementById('older').textContent") == "← прошлые"
+            assert await browser.js("""(()=>{
+                const o=document.getElementById('older'), n=document.getElementById('newer');
+                const label=document.getElementById('history-label');
+                return Math.abs(o.getBoundingClientRect().width-n.getBoundingClientRect().width)<1
+                  && getComputedStyle(o).fontSize===getComputedStyle(label).fontSize;
+            })()""")
             assert not await browser.js("!!document.querySelector('#remove-zone, [data-remove]')")
             assert (
                 await browser.js("document.getElementById('add-pause-bottom').textContent")
@@ -304,19 +310,60 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             )
             await browser.wait("document.querySelectorAll('#setlist li').length===3")
             assert await browser.js("document.getElementById('total').textContent") == "10:21"
-            # RU/EN: Compare rendered colors, including color-mix(), in both live themes.
-            darker_pause = """(()=>{
-                const color = selector => {
-                    const canvas=document.createElement('canvas'); canvas.width=canvas.height=1;
-                    const context=canvas.getContext('2d');
-                    context.fillStyle=getComputedStyle(document.querySelector(selector)).backgroundColor;
-                    context.fillRect(0,0,1,1);
-                    const [r,g,b]=context.getImageData(0,0,1,1).data;
-                    return 0.2126*r+0.7152*g+0.0722*b;
-                };
-                return color('#setlist .pause') < color('#setlist .entry:not(.pause)');
+            transparent_pause = """(()=>{
+                const style=getComputedStyle(document.querySelector('#setlist .pause'));
+                return style.backgroundColor==='rgba(0, 0, 0, 0)'
+                  && style.borderTopStyle==='dashed';
             })()"""
-            assert await browser.js(darker_pause)
+            assert await browser.js(transparent_pause)
+            # RU/EN: An autosave acknowledgement during editing must not change the target row.
+            await browser.js(
+                "document.querySelector('#setlist .pause-label').click();"
+                "document.getElementById('pause-text').value='Крабы уносят микрофонную стойку';"
+                "document.getElementById('pause-form').requestSubmit()"
+            )
+            await browser.wait(
+                "document.querySelector('#setlist .pause .song-name').textContent.includes('Крабы')"
+            )
+            await browser.js("document.querySelector('#setlist .pause-label').click()")
+            await browser.wait(
+                "document.getElementById('status').textContent.includes('Сохранено')"
+            )
+            await browser.js(
+                "document.getElementById('pause-text').value='';"
+                "document.getElementById('pause-form').requestSubmit()"
+            )
+            await browser.wait(
+                "document.querySelector('#setlist .pause .song-name').textContent===''"
+            )
+            assert await browser.js("document.getElementById('total').textContent") == "10:21"
+            await browser.js(
+                "document.querySelector('#setlist .pause-label').click();"
+                "document.getElementById('pause-text').value='Не сохранять';"
+                "document.getElementById('pause-cancel').click()"
+            )
+            assert (
+                await browser.js("document.querySelector('#setlist .pause .song-name').textContent")
+                == ""
+            )
+            # A late duration reply must not apply an already cancelled pause.
+            await browser.js("""(()=>{
+                window.originalFetch=window.fetch;
+                window.fetch=(...args)=>String(args[0]).includes('/api/pause')
+                  ? new Promise(resolve=>{window.resumePause=()=>resolve(new Response(
+                    JSON.stringify({seconds:999}),{status:200}));})
+                  : window.originalFetch(...args);
+                document.getElementById('add-pause-bottom').click();
+                document.getElementById('pause-value').value='3';
+                document.getElementById('pause-form').requestSubmit();
+            })()""")
+            await browser.wait("typeof window.resumePause==='function'")
+            await browser.js("""(async()=>{
+                document.getElementById('pause-cancel').click();
+                window.resumePause(); await new Promise(requestAnimationFrame);
+                window.fetch=window.originalFetch;
+            })()""")
+            assert await browser.js("document.querySelectorAll('#setlist li').length") == 3
             await browser.js(
                 "document.getElementById('average-pause').click(); "
                 "document.getElementById('average-value').value='30'; "
@@ -337,7 +384,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             # Theme changes must not lose the in-progress list.
             await browser.js("window.Telegram.WebApp.colorScheme='dark'; window.themeChange()")
             assert await browser.js("document.documentElement.dataset.theme") == "dark"
-            assert await browser.js(darker_pause)
+            assert await browser.js(transparent_pause)
             await browser.js("window.scrollTo(0,0)")
             screenshot = await browser.call("Page.captureScreenshot", {"format": "png"})
             (tmp_path / "miniapp-dark.png").write_bytes(base64.b64decode(screenshot["data"]))
@@ -365,6 +412,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     world.group.id, world.concert.id, private=True
                 )
                 assert len(saved["blocks"][0]["items"]) == 3
+                assert saved["blocks"][0]["items"][0]["pause_label"] == ""
                 assert not (
                     await Setlists(uow.store, world.admin).read(world.group.id, world.concert.id)
                 )[0]["blocks"][0]["items"]

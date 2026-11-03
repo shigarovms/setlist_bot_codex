@@ -33,7 +33,13 @@ def entries(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     for block in flat_content(snapshot)["blocks"]:
         for item in block["items"]:
             if is_pause(item):
-                result.append({"kind": "pause", "duration_seconds": item["duration_seconds"]})
+                result.append(
+                    {
+                        "kind": "pause",
+                        "duration_seconds": item["duration_seconds"],
+                        **({"pause_label": item["pause_label"]} if "pause_label" in item else {}),
+                    }
+                )
             else:
                 result.append(
                     {
@@ -343,9 +349,11 @@ class MiniDrafts:
         group_id = UUID(data["group_id"])
         ordered: list[UUID | int] = []
         before: list[int | None] = []
+        labels: list[str | None] = []
         ids = {UUID(item["song_id"]) for item in values if item.get("kind") == "song"}
         songs = {song.id: song for song in await self.store.get_many(Song, ids)}
         for item in values:
+            labels.append(item.get("pause_label") if item.get("kind") == "pause" else None)
             if item.get("kind") == "pause":
                 seconds = item["duration_seconds"]
                 require(type(seconds) is int and 0 < seconds <= 86400, "pause_duration")
@@ -376,6 +384,7 @@ class MiniDrafts:
             private=True,
             ordered=ordered,
             pauses_before=before,
+            pause_labels=labels,
             default_pause_seconds=default_pause_seconds,
         )
         if (

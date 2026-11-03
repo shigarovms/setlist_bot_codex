@@ -114,7 +114,7 @@ class Setlists:
                     "break_seconds": block.break_seconds,
                     "items": [
                         (
-                            pause_item(item.pause_duration_seconds)
+                            pause_item(item.pause_duration_seconds, item.pause_label)
                             if item.pause_duration_seconds is not None
                             else {"song_id": str(item.song_id), "pause_before": item.pause_before}
                         )
@@ -284,6 +284,7 @@ class Setlists:
                         block_id=block.id,
                         song_id=song.id if song else None,
                         pause_duration_seconds=item["duration_seconds"] if is_pause(item) else None,
+                        pause_label=item.get("pause_label") if is_pause(item) else None,
                         position=position,
                         pause_before=item["pause_before"],
                     )
@@ -303,6 +304,7 @@ class Setlists:
         song_ids: list[UUID] | None = None,
         ordered: list[UUID | int] | None = None,
         pauses_before: list[int | None] | None = None,
+        pause_labels: list[str | None] | None = None,
         default_pause_seconds: int | None = None,
     ) -> None:
         """Resolve every input before writing a single atomic setlist revision."""
@@ -359,6 +361,12 @@ class Setlists:
                     song = await catalog.song(group_id, entry)
                     require(not song.archived, "selection_catalog_changed")
                     items.append({"song_id": str(song.id), "pause_before": None})
+        if pause_labels is not None:
+            require(private and len(pause_labels) == len(items), "input")
+            for index, (item, label) in enumerate(zip(items, pause_labels, strict=True)):
+                require(is_pause(item) or label is None, "input")
+                if is_pause(item):
+                    items[index] = pause_item(item["duration_seconds"], label)
         if pauses_before is not None:
             require(private and len(pauses_before) == len(items), "input")
             for item, lead in zip(items, pauses_before, strict=True):

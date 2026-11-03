@@ -224,7 +224,8 @@ def create_app(settings: MiniAppSettings, engine: AsyncEngine | None = None) -> 
         pool_pre_ping=True,
         connect_args={"timeout": 5, "command_timeout": 10},
     )
-    app = web.Application(middlewares=[errors], client_max_size=100 * 1024)
+    # RU/EN: Up to 200 labels of 1000 Unicode characters, with a bounded request body.
+    app = web.Application(middlewares=[errors], client_max_size=1024 * 1024)
     app[ENGINE], app[SETTINGS], app[GATE] = engine, settings, asyncio.Semaphore(4)
     app.router.add_get("/miniapp/", asset)
     app.router.add_get("/miniapp/{asset}", asset)

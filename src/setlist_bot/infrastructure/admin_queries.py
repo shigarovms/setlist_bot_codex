@@ -260,7 +260,7 @@ class AdminQueries:
             )
             return dict(row["snapshot"])
         rows = await self.rows(
-            """SELECT i.pause_duration_seconds,i.pause_before,s.id AS song_id,s.title,
+            """SELECT i.pause_duration_seconds,i.pause_label,i.pause_before,s.id AS song_id,s.title,
             s.duration_seconds,s.bpm,s.lights,s.comment FROM items i
             JOIN blocks b ON b.id=i.block_id LEFT JOIN songs s ON s.id=i.song_id
             WHERE b.setlist_id=:id ORDER BY b.position,i.position""",
@@ -273,7 +273,7 @@ class AdminQueries:
             "blocks": [
                 {
                     "items": [
-                        pause_item(row["pause_duration_seconds"])
+                        pause_item(row["pause_duration_seconds"], row["pause_label"])
                         if row["pause_duration_seconds"] is not None
                         else {**row, "song_id": str(row["song_id"])}
                         for row in rows

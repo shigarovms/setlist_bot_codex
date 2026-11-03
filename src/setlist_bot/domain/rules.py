@@ -102,7 +102,10 @@ def editable_content(snapshot: dict[str, Any]) -> dict[str, Any]:
     return {
         "default_pause_seconds": flat["default_pause_seconds"],
         "entries": [
-            {"pause": item["duration_seconds"]}
+            {
+                "pause": item["duration_seconds"],
+                **({"pause_label": item["pause_label"]} if "pause_label" in item else {}),
+            }
             if is_pause(item)
             else {"song_id": item["song_id"], "pause_before": item.get("pause_before")}
             for item in flat["blocks"][0]["items"]
@@ -110,12 +113,22 @@ def editable_content(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def pause_item(seconds: int) -> dict[str, Any]:
+def pause_item(seconds: int, label: str | None = None) -> dict[str, Any]:
     require(0 < seconds <= 86400, "pause_duration")
+    # RU: None — обычная переводимая пауза; пустая строка — намеренно пустая подпись.
+    # EN: Preserve this distinction through every snapshot adapter and export.
+    require(
+        label is None
+        or isinstance(label, str)
+        and len(label) <= 1000
+        and all(ord(char) >= 32 or char in "\n\t" for char in label),
+        "pause_label",
+    )
     return {
         "kind": "pause",
         "song_id": None,
-        "title": "пауза",
+        "title": "пауза" if label is None else label,
+        **({"pause_label": label} if label is not None else {}),
         "duration_seconds": seconds,
         "pause_before": 0,
         "bpm": None,
@@ -157,7 +170,7 @@ def flat_content(content: dict[str, Any]) -> dict[str, Any]:
     for number, block in enumerate(blocks):
         for position, entry in enumerate(block["items"]):
             if is_pause(entry):
-                items.append(pause_item(int(entry["duration_seconds"])))
+                items.append(pause_item(int(entry["duration_seconds"]), entry.get("pause_label")))
                 continue
             lead = entry.get("pause_before")
             if lead:

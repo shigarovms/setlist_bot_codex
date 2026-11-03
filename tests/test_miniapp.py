@@ -290,7 +290,10 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
             payload = {
                 **query,
                 "version": initial["version"],
-                "entries": [song(world)],
+                "entries": [
+                    song(world),
+                    {"kind": "pause", "duration_seconds": 60, "pause_label": "Крабы"},
+                ],
                 "request_id": str(uuid4()),
                 "default_pause_seconds": 30,
             }
@@ -303,7 +306,9 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
             ).status == 401
             response = await client.post("/miniapp/api/save", json=payload, headers=headers)
             assert response.status == 200, await response.text()
-            assert (await response.json())["default_pause_seconds"] == 30
+            saved = await response.json()
+            assert saved["default_pause_seconds"] == 30
+            assert saved["entries"][1]["pause_label"] == "Крабы"
             assert (
                 await client.post("/miniapp/api/save", json=payload, headers=headers)
             ).status == 200
