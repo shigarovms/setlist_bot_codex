@@ -62,6 +62,17 @@ const words = {
     apply: "Применить",
     requestAccess: "Запросить права у владельца",
     reload: "Обновите редактор, чтобы получить актуальный каталог.",
+    editSong: "Редактировать песню", addSong: "＋ Добавить песню",
+    songTitle: "Название *", songDuration: "Длительность ММ:СС *",
+    songLights: "Цвета / свет", songComment: "Комментарий",
+    songAliases: "Альтернативные названия — по одному на строку",
+    songScope: "Изменения относятся к репертуару коллектива. Правки участника требуют одобрения администратора.",
+    songSave: "Сохранить", songPending: "Запрос сохраняется ботом…",
+    songQueued: "Запрос в очереди. Проверьте сохранение перед новым изменением песни.",
+    close: "Закрыть",
+    songCheck: "Проверить сохранение", songSaved: "Репертуар обновлён.",
+    songProposed: "Изменения предложены администратору. До одобрения репертуар не изменится.",
+    songReload: "Загрузить актуальную",
   },
   en: {
     heading: "Private draft",
@@ -119,6 +130,17 @@ const words = {
     apply: "Apply",
     requestAccess: "Request administrator access",
     reload: "Reopen the editor to refresh the catalog.",
+    editSong: "Edit song", addSong: "＋ Add song",
+    songTitle: "Title *", songDuration: "Duration MM:SS *",
+    songLights: "Colors / lighting", songComment: "Comment",
+    songAliases: "Alternative titles — one per line",
+    songScope: "Changes apply to the group repertoire. Member edits require administrator approval.",
+    songSave: "Save", songPending: "The bot is saving your request…",
+    songQueued: "Request queued. Check its result before editing another song.",
+    close: "Close",
+    songCheck: "Check save", songSaved: "Repertoire updated.",
+    songProposed: "Changes proposed to an administrator. The repertoire stays unchanged until approval.",
+    songReload: "Load current song",
   },
 };
 let lang = "ru",
@@ -306,7 +328,11 @@ function render() {
       mark.setAttribute("aria-hidden", "true");
       edit.append(mark);
       row.append(edit);
-    } else row.append(node("span", item.title, "song-name"));
+    } else {
+      row.append(node("span", item.title, "song-name"));
+      if (!preview && state.catalog.some(song => song.id === item.song_id))
+        row.append(button("✎", `${t("editSong")}: ${item.title}`, () => openSong(item.song_id), "song-edit"));
+    }
     row.append(node("span", clock(item.duration_seconds), "song-time"));
     if (
       item.kind === "song" &&
@@ -352,6 +378,13 @@ function render() {
 }
 function renderCatalog() {
   if (!state) return;
+  $("add-song").textContent = t("addSong");
+  for (const [id, word] of Object.entries({
+    "song-title-label": "songTitle", "song-duration-label": "songDuration",
+    "song-lights-label": "songLights", "song-comment-label": "songComment",
+    "song-aliases-label": "songAliases", "song-scope": "songScope",
+    "song-cancel": catalogAttempt ? "close" : "cancel", "song-reload": "songReload",
+  })) $(id).textContent = t(word);
   const query = $("search").value.toLocaleLowerCase().replaceAll("ё", "е");
   const songs = state.catalog.filter((song) =>
     song.title.toLocaleLowerCase().replaceAll("ё", "е").includes(query),
@@ -367,6 +400,7 @@ function renderCatalog() {
         () => {},
         "handle",
       );
+    row.dataset.songId = song.id;
     handle.addEventListener("pointerdown", (event) =>
       startDrag(event, { song }),
     );
@@ -374,6 +408,7 @@ function renderCatalog() {
       handle,
       node("span", clock(song.duration_seconds), "song-time"),
       node("span", song.title, "song-name"),
+      button("✎", `${t("editSong")}: ${song.title}`, () => openSong(song.id), "song-edit"),
       button(
         "+",
         lang === "ru" ? "Добавить песню" : "Add song",
@@ -387,6 +422,7 @@ function renderCatalog() {
   $("page-prev").disabled = catalogPage === 0;
   $("page-next").disabled = catalogPage + 1 >= pages;
 }
+let suppressPauseClickUntil = 0;
 let drag = null,
   scrollFrame = 0;
 function startDrag(event, source) {
@@ -418,6 +454,7 @@ function startDrag(event, source) {
       .forEach((n) => n.classList.remove("drop-before", "drop-after"));
     const target = document.elementFromPoint(e.clientX, e.clientY);
     const row = target?.closest("#setlist .entry");
+    target?.closest("#add-pause-bottom")?.classList.add("drop-after");
     if (row)
       row.classList.add(
         e.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2
@@ -437,10 +474,12 @@ function startDrag(event, source) {
     const target = document.elementFromPoint(e.clientX, e.clientY),
       row = target?.closest("#setlist .entry");
     if (drag.moved) {
+      suppressPauseClickUntil = performance.now() + 500;
       if (
         row ||
         target?.closest("#setlist") ||
-        target?.closest("#empty")
+        target?.closest("#empty") ||
+        target?.closest("#add-pause-bottom")
       ) {
         let at = row ? Number(row.dataset.index) : current.length;
         if (
@@ -473,6 +512,8 @@ function startDrag(event, source) {
       ghost.remove();
       drag = null;
       cancelAnimationFrame(scrollFrame);
+      document.querySelectorAll(".drop-before, .drop-after")
+        .forEach(n => n.classList.remove("drop-before", "drop-after"));
     }
     handle.removeEventListener("pointermove", update);
     handle.removeEventListener("pointerup", finish);
@@ -613,6 +654,138 @@ $("page-next").addEventListener("click", () => {
   catalogPage++;
   renderCatalog();
 });
+let editingSong = null, catalogAttempt = null, catalogRequest = null, songSubmitting = false;
+function fillSong(song) {
+  $("song-title").value = song?.title ?? "";
+  $("song-duration").value = song?.duration ?? "";
+  $("song-bpm").value = song?.bpm ?? "";
+  $("song-lights").value = song?.lights ?? "";
+  $("song-comment").value = song?.comment ?? "";
+  $("song-aliases").value = (song?.aliases ?? []).join("\n");
+}
+function lockSongFields(locked) {
+  for (const element of $("song-form").querySelectorAll("input, textarea")) element.disabled = locked;
+}
+async function openSong(id = null) {
+  if (!state || busy || preview) return;
+  if (catalogAttempt) {
+    // RU: Потерянный ответ повторяется с прежним ID, а не создаёт новую песню.
+    // EN: Resume an unresolved operation before accepting another catalog mutation.
+    $("song-dialog").showModal();
+    $("song-error").textContent = t("songQueued");
+    return;
+  }
+  busy = true;
+  render();
+  try {
+    editingSong = id ? await api("song", { song_id: id }) : null;
+    fillSong(editingSong);
+    lockSongFields(false);
+    $("song-error").textContent = "";
+    $("song-dialog-title").textContent = t(id ? "editSong" : "addSong");
+    $("song-submit").textContent = t("songSave");
+    $("song-reload").hidden = true;
+    $("song-dialog").showModal();
+  } catch (error) { status(error.message, true); }
+  finally { busy = false; render(); }
+}
+$("add-song").addEventListener("click", () => openSong());
+$("song-cancel").addEventListener("click", () => {
+  if (!songSubmitting) $("song-dialog").close();
+});
+$("song-dialog").addEventListener("cancel", event => {
+  if (songSubmitting) event.preventDefault();
+});
+$("song-reload").addEventListener("click", async () => {
+  if (!editingSong || songSubmitting) return;
+  try {
+    editingSong = await api("song", { song_id: editingSong.id });
+    fillSong(editingSong);
+    $("song-error").textContent = "";
+    $("song-reload").hidden = true;
+  } catch (error) { $("song-error").textContent = error.message; }
+});
+async function refreshRepertoire() {
+  const updated = await api("state");
+  state.catalog = updated.catalog;
+  const catalog = new Map(updated.catalog.map(song => [song.id, song]));
+  const refresh = items => items.map(item => {
+    const song = item.kind === "song" && catalog.get(item.song_id);
+    return song ? { ...item, title: song.title, duration_seconds: song.duration_seconds, version: song.version } : item;
+  });
+  // RU: Порядок/повторы/паузы неизменны. Отмена порядка не отменяет правку репертуара.
+  // EN: Refresh all occurrences, including Undo, without replacing the user's draft.
+  current = refresh(current);
+  undos = undos.map(item => ({ ...item, entries: refresh(item.entries) }));
+  saver.setDraft(current, defaultPause);
+  render();
+}
+$("song-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (songSubmitting || !saver) return;
+  songSubmitting = true;
+  busy = true;
+  $("song-submit").disabled = true;
+  $("song-cancel").disabled = true;
+  $("song-reload").disabled = true;
+  saver.pause();
+  render();
+  try {
+    if (!catalogAttempt) {
+      await saver.flush();
+      catalogAttempt = {
+        request_id: crypto.randomUUID(), song_id: editingSong?.id ?? null,
+        expected: editingSong?.version ?? null,
+        fields: {
+          title: $("song-title").value.trim(), duration_seconds: $("song-duration").value.trim(),
+          bpm: $("song-bpm").value ? Number($("song-bpm").value) : null,
+          lights: $("song-lights").value, comment: $("song-comment").value,
+          aliases: $("song-aliases").value.split("\n").map(v => v.trim()).filter(Boolean),
+        },
+      };
+    }
+    lockSongFields(true);
+    $("song-error").textContent = t("songPending");
+    let result = catalogRequest
+      ? await api("catalog_status", { request: catalogRequest })
+      : await api("catalog_save", catalogAttempt, "POST");
+    catalogRequest = result.request;
+    for (let i = 0; result.status === "pending" && i < 30; i++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      result = await api("catalog_status", { request: catalogRequest });
+    }
+    if (result.status === "pending") {
+      $("song-error").textContent = t("songQueued");
+      $("song-submit").textContent = t("songCheck");
+      return;
+    }
+    if (result.status === "failed") {
+      catalogAttempt = catalogRequest = null;
+      const error = new Error(result.message);
+      error.data = result;
+      throw error;
+    }
+    // Keep the receipt until catalog refresh succeeds; retry must not save twice.
+    await refreshRepertoire();
+    catalogAttempt = catalogRequest = null;
+    $("song-dialog").close();
+    status(t(result.proposed ? "songProposed" : "songSaved"));
+  } catch (error) {
+    // Explicit validation rejection means nothing was queued. Network failures stay retryable.
+    if (!catalogRequest && error.data) catalogAttempt = null;
+    $("song-error").textContent = error.message;
+    if (!catalogAttempt) lockSongFields(false);
+    $("song-reload").hidden = !editingSong || error.data?.error !== "conflict";
+    $("song-submit").textContent = t(catalogAttempt ? "songCheck" : "songSave");
+  } finally {
+    songSubmitting = busy = false;
+    $("song-submit").disabled = false;
+    $("song-cancel").disabled = false;
+    $("song-reload").disabled = false;
+    saver.resume();
+    render();
+  }
+});
 function openPause(index = null) {
   if (!state || preview || busy) return;
   const item = index === null ? null : current[index];
@@ -629,7 +802,9 @@ function openPause(index = null) {
   $("pause-value").focus();
 }
 $("add-pause").addEventListener("click", () => openPause());
-$("add-pause-bottom").addEventListener("click", () => openPause());
+$("add-pause-bottom").addEventListener("click", () => {
+  if (performance.now() >= suppressPauseClickUntil) openPause();
+});
 $("pause-cancel").addEventListener("click", () => {
   pauseDialogSerial++;
   $("pause-dialog").close();

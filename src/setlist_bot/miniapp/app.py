@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from setlist_bot.application.miniapp import MiniDrafts
+from setlist_bot.application.miniapp_catalog import MiniCatalog
 from setlist_bot.domain.entities import Confirmation, User
 from setlist_bot.domain.miniapp_auth import verify_init_data
 from setlist_bot.domain.rules import AppError
@@ -144,6 +145,14 @@ async def api(request: web.Request) -> web.Response:
                 result["bot_url"] = (
                     f"https://t.me/{settings.bot_username}?start=performance_{result['concert_id']}"
                 )
+            elif request.method == "GET" and operation == "song":
+                result = await MiniCatalog(service).read(identifier, UUID(payload["song_id"]))
+            elif request.method == "POST" and operation == "catalog_save":
+                result = await MiniCatalog(service).queue(identifier, payload)
+            elif request.method == "GET" and operation == "catalog_status":
+                result = await MiniCatalog(service).status(identifier, UUID(payload["request"]))
+                if result.get("error"):
+                    result["message"] = tr(user.language, result["error"])
             elif request.method == "GET" and operation == "history":
                 result = await service.history(identifier, int(payload["index"]))
             elif request.method == "POST" and operation == "pause":

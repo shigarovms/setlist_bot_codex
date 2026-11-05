@@ -387,3 +387,17 @@ pre {
       opacity 0.12s;
   }
 }
+
+/* RU: Компактный карандаш не отнимает место у названия. EN: Keep a 44px touch target. */
+.song-edit {
+  border: 0;
+  background: transparent;
+  color: var(--button);
+  flex-shrink: 0;
+  width: 32px;
+  padding: 4px;
+}
+#add-song { width: 100%; margin-top: 8px; }
+#add-pause-bottom.drop-after { border-color: var(--button); background: var(--panel); }
+#song-error { color: var(--danger); white-space: pre-wrap; }
+#song-scope { color: var(--hint); font-size: 13px; }

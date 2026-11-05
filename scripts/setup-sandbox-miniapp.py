@@ -31,6 +31,7 @@ READ_TABLES = (
     "items",
     "revisions",
     "songs",
+    "song_aliases",
     "personal_drafts",
     "confirmations",
     "alembic_version",

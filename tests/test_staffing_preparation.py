@@ -279,7 +279,8 @@ async def test_team_back_in_group_opens_same_band_menu(engine, world):
     parent = await send(button(team, "Назад"), chat=-100)
     assert "Коллектив А" in parent.text
     assert parent.buttons[0] == ("Выступления Коллектив А", "concerts")
-    assert parent.buttons[1][0] == "Составы Коллектив А"
+    assert parent.buttons[1][0] == "Репертуар Коллектив А"
+    assert parent.buttons[2][0] == "Составы Коллектив А"
     assert "Коллектив Б" not in parent.text
 
 

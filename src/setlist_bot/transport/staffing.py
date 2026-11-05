@@ -701,6 +701,7 @@ async def handle(c: Controller, command: str, args: str) -> Response:
             c.t("selected", name=group.name),
             [
                 (c.t("group_events", name=group.name), "concerts"),
+                (c.t("group_repertoire", name=group.name), f"group_catalog {group.id.hex}"),
                 (c.t("staff_group_lineups", name=group.name), f"sf_team {group.id.hex}"),
             ],
         )

@@ -810,7 +810,10 @@ class Controller:
             context.selected_song_id = None
             return Response(
                 self.t("selected", name=group.name),
-                [(self.t("group_events", name=group.name), f"group_concerts {group.id.hex}")]
+                [
+                    (self.t("group_events", name=group.name), f"group_concerts {group.id.hex}"),
+                    (self.t("group_repertoire", name=group.name), f"group_catalog {group.id.hex}"),
+                ]
                 + (
                     [(self.t("staff_group_lineups", name=group.name), f"sf_team {group.id.hex}")]
                     if await self.store.find(
@@ -828,6 +831,35 @@ class Controller:
                     else []
                 ),
             )
+        if command in ("group_catalog", "catalog_edit"):
+            # RU: Старая кнопка каталога относится к исходному коллективу, не к /groups.
+            # EN: Resolve the explicit target and recheck access before changing context.
+            target_group = (
+                UUID(args)
+                if command == "group_catalog"
+                else (await self.store.get(Song, UUID(args))).group_id
+            )
+            await self.groups.access(target_group)
+            if not self.private:
+                require(
+                    bool(
+                        await self.store.find(
+                            ChatBinding, group_id=target_group, chat_id=self.chat_id
+                        )
+                    ),
+                    "not_found",
+                )
+            if context.group_id != target_group:
+                context.concert_id, context.observed_version, context.selected_song_id = (
+                    None,
+                    None,
+                    None,
+                )
+            context.group_id = target_group
+            if command == "catalog_edit":
+                command = "song_edit_menu"
+            else:
+                command, args = "catalog", ""
         require(context.group_id is not None, "select_group")
         group_id = context.group_id
         assert group_id is not None
@@ -1101,7 +1133,16 @@ class Controller:
                 + ("\n\n".join(self._song_card(s) for s in songs) or self.t("empty")),
                 [(self.t("song_open", name=s.title), f"show_song {s.id}") for s in songs],
             )
-            response.articles = catalog_articles(group.name, songs, response.buttons, self.language)
+            response.articles = catalog_articles(
+                group.name,
+                songs,
+                response.buttons,
+                self.language,
+                edit_buttons=[
+                    (self.t("song_row_edit") + ": " + song.title, f"catalog_edit {song.id.hex}")
+                    for song in songs
+                ],
+            )
             memberships = await self.store.find(Membership, group_id=group_id, user_id=self.user.id)
             if command == "catalog" and memberships and memberships[0].role == "admin":
                 action = f"mi_open {group_id.hex}"
@@ -1156,6 +1197,7 @@ class Controller:
                     ]
                     + [
                         (self.t("song_edit_title_duration"), f"edit_full_hint {selected.id}"),
+                        (self.t("song_alias"), f"alias_hint {selected.id}"),
                         (self.t("menu_back"), f"show_song {selected.id}"),
                     ],
                     navigation_slot="song",
@@ -1304,6 +1346,11 @@ class Controller:
             lines, buttons = [], []
             for proposal in proposals:
                 preview = proposal.payload.get("alias") or self._song_card(proposal.payload)
+                if "aliases" in proposal.payload:
+                    preview += "\n" + self.t(
+                        "song_aliases_preview",
+                        aliases=", ".join(proposal.payload["aliases"]) or "—",
+                    )
                 author = await self.store.get(User, proposal.author_id)
                 lines.append(f"{await self.groups.name(group_id, author.id)}\n{preview}")
                 for action, key in (("yes", "approve_button"), ("no", "reject_button")):

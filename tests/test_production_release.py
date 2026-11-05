@@ -140,5 +140,8 @@ def test_existing_public_writers_stop_before_final_backup_and_keep_their_overrid
     )
     args = operations[grant]
     assert args[args.index("-d") + 1] == "setlist"
-    assert args[-1] == "GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp;"
+    assert args[-1] == (
+        "GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp; "
+        "GRANT SELECT ON song_aliases TO setlist_miniapp;"
+    )
     assert final_dump < grant < next(i for i, args in enumerate(operations) if "up" in args)

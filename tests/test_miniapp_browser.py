@@ -423,10 +423,87 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             from setlist_bot.domain.entities import Outbox
             from setlist_bot.main import deliver_one_outbox
 
+            async def catalog_acknowledgement():
+                for _ in range(100):
+                    async with PostgresUnitOfWork(engine) as uow:
+                        pending_catalog = await uow.store.find(
+                            Outbox, support_kind="catalog", sent=False
+                        )
+                    if pending_catalog:
+                        break
+                    await asyncio.sleep(0.05)
+                else:
+                    raise AssertionError("Catalog operation was not queued")
+                async with Bot("123456:TEST", session=FakeTelegram()) as worker:
+                    assert await deliver_one_outbox(worker, engine)
+                await browser.wait("!document.getElementById('song-dialog').open")
+
+            # RU/EN: Creating repertoire entries never inserts them into the current draft.
+            await browser.js("document.getElementById('add-song').click()")
+            await browser.wait("document.getElementById('song-dialog').open")
+            await browser.js("""
+                document.getElementById('song-title').value='Звёздный ветер';
+                document.getElementById('song-duration').value='02:30';
+                document.getElementById('song-bpm').value='140';
+                document.getElementById('song-lights').value='белый';
+                document.getElementById('song-comment').value='Вступление';
+                document.getElementById('song-aliases').value='Ветер';
+                document.getElementById('song-form').requestSubmit();
+            """)
+            await catalog_acknowledgement()
+            assert await browser.js("document.querySelectorAll('#setlist li').length") == 3
+            # Every occurrence is refreshed; order and blank pause are preserved.
+            await browser.js("document.querySelector('#setlist .song-edit').click()")
+            await browser.wait("document.getElementById('song-dialog').open")
+            await browser.js("""
+                document.getElementById('song-title').value='Комета обновлённая';
+                document.getElementById('song-duration').value='04:00';
+                document.getElementById('song-bpm').value='150';
+                document.getElementById('song-aliases').value='Ком';
+                document.getElementById('song-form').requestSubmit();
+            """)
+            await catalog_acknowledgement()
+            assert await browser.js("""Array.from(
+                document.querySelectorAll('#setlist li:not(.pause) .song-name'))
+                .every(n=>n.textContent==='Комета обновлённая')""")
+            assert (
+                await browser.js("document.querySelector('#setlist .pause .song-name').textContent")
+                == ""
+            )
+            # A catalogue drag onto the WHOLE footer button appends, for mouse and touch.
+            await browser.js("""
+                document.getElementById('search').value='Звёздный';
+                document.getElementById('search').dispatchEvent(new Event('input'));
+                document.getElementById('add-pause-bottom').scrollIntoView({block:'center'});
+            """)
+            await browser.drag(".catalog-entry .handle", "#add-pause-bottom", touch=public_launch)
+            assert await browser.js("document.querySelectorAll('#setlist li').length") == 4
+            assert (
+                await browser.js(
+                    "document.querySelector('#setlist li:last-child .song-name').textContent"
+                )
+                == "Звёздный ветер"
+            )
+            assert not await browser.js("document.getElementById('pause-dialog').open")
+            await browser.wait(
+                "document.getElementById('status').textContent.includes('Сохранено')"
+            )
+            async with PostgresUnitOfWork(engine) as uow:
+                saved, _, _ = await Setlists(uow.store, world.admin).read(
+                    world.group.id, world.concert.id, private=True
+                )
+                assert [
+                    item["title"] for item in saved["blocks"][0]["items"] if item.get("song_id")
+                ] == ["Комета обновлённая", "Комета обновлённая", "Звёздный ветер"]
+            # The ordinary click is still a pause dialog, independent of drag behavior.
+            await asyncio.sleep(0.55)
+            await browser.js("document.getElementById('add-pause-bottom').click()")
+            assert await browser.js("document.getElementById('pause-dialog').open")
+            await browser.js("document.getElementById('pause-cancel').click()")
             await browser.js("document.getElementById('publish').click()")
             for _ in range(50):
                 async with PostgresUnitOfWork(engine) as uow:
-                    pending = await uow.store.find(Outbox)
+                    pending = await uow.store.find(Outbox, sent=False)
                 if pending:
                     break
                 await asyncio.sleep(0.05)
