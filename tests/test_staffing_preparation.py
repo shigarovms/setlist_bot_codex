@@ -68,7 +68,12 @@ async def test_team_menu_has_only_sections_and_back_to_selected_group(engine, wo
     selected = await send(f"/use_group {world.group.id}", private=True, chat=1)
     assert selected.buttons[0][0] == "Выступления Коллектив А"
     team = await send(button(selected, "Составы "), private=True, chat=1)
-    assert [label for label, _ in team.buttons] == ["Составы", "Знакомые исполнители", "◀️ Назад"]
+    assert [label for label, _ in team.buttons] == [
+        "Участники коллектива",
+        "Знакомые исполнители",
+        "Составы",
+        "◀️ Назад",
+    ]
     back = await send(button(team, "Назад"), private=True, chat=1, callback=True)
     assert back.buttons == selected.buttons
     lineups = await send(button(team, "Составы"), private=True, chat=1)

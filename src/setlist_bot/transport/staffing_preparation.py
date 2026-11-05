@@ -18,7 +18,6 @@ from setlist_bot.domain.entities import (
     GigInvitation,
     GigSlot,
     LineupTemplate,
-    StaffContact,
     StaffRole,
     User,
     now,
@@ -198,7 +197,7 @@ async def choices(
     require(page >= 0, "input")
     rows = sorted(
         await c.store.find(LineupTemplate, group_id=UUID(data["group_id"])),
-        key=lambda t: (t.name_key, t.id),
+        key=lambda t: (t.created_at, t.id),
     )
     buttons = [
         (
@@ -344,10 +343,16 @@ async def preparation_action(c: Controller, op: str, args: dict[str, Any]) -> Re
         person = await c.store.get(User, UUID(args["person_id"]))
         role_id = UUID(item["role_id"]) if item.get("role_id") else None
         require(role_id is not None, "input_expired")
-        contacts = await c.store.find(
-            StaffContact, group_id=event.group_id, role_id=role_id, user_id=person.id
+        assert role_id is not None
+        require(
+            any(
+                candidate.id == person.id
+                for _, candidate, _, _ in await Staffing(c.store, c.user).role_candidates(
+                    event, role_id
+                )
+            ),
+            "input_expired",
         )
-        require(any(contact.preference != "hidden" for contact in contacts), "input_expired")
         item["user_id"] = str(person.id)
         write(row, data)
         return await edit_view(c, row, data)
@@ -361,16 +366,13 @@ async def preparation_action(c: Controller, op: str, args: dict[str, Any]) -> Re
             index=index,
         )
     require(operation == "slot", "input")
-    contacts = (
-        await c.store.find(StaffContact, group_id=event.group_id, role_id=UUID(item["role_id"]))
+    candidates = (
+        await Staffing(c.store, c.user).role_candidates(event, UUID(item["role_id"]))
         if item.get("role_id")
         else []
     )
-    contacts = sorted(
-        (p for p in contacts if p.preference != "hidden"),
-        key=lambda p: (p.preference != "preferred", -p.worked_count, p.user_id),
-    )
-    people = {p.id: p for p in await c.store.get_many(User, {r.user_id for r in contacts})}
+    contacts = [contact for contact, _, _, _ in candidates]
+    people = {person.id: person for _, person, _, _ in candidates}
     from setlist_bot.transport.staffing_lineups import person_name
 
     page = int(args.get("page", 0))

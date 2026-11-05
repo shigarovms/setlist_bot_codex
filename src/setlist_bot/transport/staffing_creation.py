@@ -64,7 +64,7 @@ async def prepare(c: Controller, group_id: UUID, value: str) -> Response:
     await c.groups.access(group_id, admin=True)
     lineups = sorted(
         await c.store.find(LineupTemplate, group_id=group_id),
-        key=lambda row: (row.name_key, row.id),
+        key=lambda row: (row.created_at, row.id),
     )
     when, remainder = parse_concert(value)
     selected = None
@@ -126,7 +126,7 @@ async def choices(
     require(page >= 0, "input")
     lineups = sorted(
         await c.store.find(LineupTemplate, group_id=group_id),
-        key=lambda row: (row.name_key, row.id),
+        key=lambda row: (row.created_at, row.id),
     )
     buttons = [
         (

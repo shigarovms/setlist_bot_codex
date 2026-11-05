@@ -588,7 +588,9 @@ $("search").addEventListener("input", () => {
   renderCatalog();
 });
 let searchScrollFrame = 0,
-  pointerInProgress = false;
+  pointerInProgress = false,
+  searchPointer = false,
+  searchClick = false;
 function alignSearch() {
   cancelAnimationFrame(searchScrollFrame);
   searchScrollFrame = requestAnimationFrame(() => {
@@ -597,7 +599,8 @@ function alignSearch() {
     // RU: iOS может сдвинуть видимую область при открытии клавиатуры.
     // EN: Re-align after keyboard/viewport changes, not just before its animation.
     const visibleTop = window.visualViewport?.offsetTop ?? 0;
-    const offset = search.getBoundingClientRect().top - visibleTop;
+    const safeTop = Math.max(tg?.contentSafeAreaInset?.top ?? 0, tg?.safeAreaInset?.top ?? 0);
+    const offset = search.getBoundingClientRect().top - visibleTop - safeTop - 12;
     if (Math.abs(offset) > 1)
       window.scrollTo({ top: window.scrollY + offset, behavior: "instant" });
   });
@@ -634,15 +637,28 @@ $("search").addEventListener("keydown", (event) => {
 });
 document.addEventListener("pointerdown", (event) => {
   pointerInProgress = true;
+  searchPointer = event.target instanceof Element && !!event.target.closest("#search");
   leaveSearch(event);
 }, true);
 for (const name of ["pointerup", "pointercancel"])
-  document.addEventListener(name, () => {
+  document.addEventListener(name, event => {
+    // RU: Прокрутка во время mousedown может поменять цель mouseup на компьютере.
+    // EN: Restore input focus after the pointer sequence without clearing a second time.
+    if (name === "pointerup" && searchPointer && event.pointerType === "mouse")
+      $("search").focus({ preventScroll: true });
+    searchClick = name === "pointerup" && searchPointer;
     pointerInProgress = false;
+    searchPointer = false;
     settleSearchLayout();
   }, true);
 // RU/EN: Also handle keyboard activation and synthetic clicks without pointer events.
-document.addEventListener("click", leaveSearch, true);
+document.addEventListener("click", event => {
+  if (searchClick) {
+    searchClick = false;
+    return;
+  }
+  leaveSearch(event);
+}, true);
 window.addEventListener("resize", alignSearch);
 window.visualViewport?.addEventListener("resize", alignSearch);
 window.visualViewport?.addEventListener("scroll", alignSearch);

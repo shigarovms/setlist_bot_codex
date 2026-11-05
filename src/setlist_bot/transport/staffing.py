@@ -152,10 +152,13 @@ async def _input_reply(c: Controller, row: Confirmation, value: str) -> Response
                 bool(await c.store.find(ChatBinding, group_id=group_id, chat_id=c.chat_id)),
                 "input_expired",
             )
+        from setlist_bot.transport.permanent_team import input_value
         from setlist_bot.transport.staffing_lineups import lineup_input
         from setlist_bot.transport.staffing_preparation import preparation_input
 
-        special = await preparation_input(c, data, value)
+        special = await input_value(c, data, value)
+        if special is None:
+            special = await preparation_input(c, data, value)
         if special is None:
             special = await lineup_input(c, data, value)
         if special is not None:
@@ -234,8 +237,9 @@ async def team_view(c: Controller, group_id: UUID) -> Response:
     return Response(
         group.name + "\n\n" + c.t("staff_team"),
         [
-            (c.t("staff_templates"), action(c, "templates", group_id=str(group_id))),
+            (c.t("permanent_title"), action(c, "permanent", group_id=str(group_id))),
             (c.t("staff_contacts"), action(c, "contacts", group_id=str(group_id))),
+            (c.t("staff_templates"), action(c, "templates", group_id=str(group_id))),
             (
                 c.t("menu_back"),
                 f"use_group {group_id}"
@@ -248,7 +252,7 @@ async def team_view(c: Controller, group_id: UUID) -> Response:
 
 async def contacts_view(c: Controller, group_id: UUID, page: int = 0) -> Response:
     group = await c.groups.access(group_id, admin=True)
-    rows = await c.store.find(StaffContact, group_id=group_id)
+    rows = [r for r in await c.store.find(StaffContact, group_id=group_id) if not r.permanent]
     require(page >= 0, "input")
     rows.sort(key=lambda r: (r.role_id, r.user_id))
     buttons = []
@@ -662,10 +666,13 @@ async def handle(c: Controller, command: str, args: str) -> Response:
             and bool(await c.store.find(ChatBinding, group_id=UUID(group_id), chat_id=c.chat_id)),
             "forbidden",
         )
+    from setlist_bot.transport.permanent_team import handle as permanent_action
     from setlist_bot.transport.staffing_lineups import lineup_action
     from setlist_bot.transport.staffing_preparation import preparation_action
 
-    special = await preparation_action(c, op, data)
+    special = await permanent_action(c, op, data)
+    if special is None:
+        special = await preparation_action(c, op, data)
     if special is None:
         special = await lineup_action(c, op, data)
     if special is not None:
@@ -823,10 +830,14 @@ async def handle(c: Controller, command: str, args: str) -> Response:
             await service.contact(row.group_id, row.role_id, row.user_id, data["value"])
             return await contacts_view(c, row.group_id)
         person = await c.store.get(User, row.user_id)
+        from setlist_bot.transport.profiles import summary
+
+        profile = "\n\n" + summary(c, person.profile) if person.profile else ""
         return Response(
             (person.display_name or str(person.telegram_id))
             + "\n"
-            + c.t("staff_experience", count=row.worked_count),
+            + c.t("staff_experience", count=row.worked_count)
+            + profile,
             [
                 (
                     c.t(label),

@@ -180,7 +180,7 @@ class Processor:
 
                 user.username = normalized_username(sender_username) if sender_username else ""
                 user.username_seen_at = now()
-            if display_name:
+            if display_name and not user.profile.get("name"):
                 user.display_name = display_name[:200]
             await uow.store.flush()
             trace = ux_trace.get()
@@ -247,6 +247,18 @@ class Processor:
                                 Confirmation, user_id=user.id, chat_id=chat_id
                             ):
                                 staff_data = json.loads(staff_session.command)
+                                if staff_data.get(
+                                    "kind"
+                                ) == "profile_input" and reply_message_id in staff_data.get(
+                                    "message_ids", []
+                                ):
+                                    from setlist_bot.transport.profiles import (
+                                        reply as profile_reply,
+                                    )
+
+                                    return await profile_reply(
+                                        controller, staff_session, command, reply_message_id
+                                    )
                                 if staff_data.get(
                                     "kind"
                                 ) == "staff_input" and reply_message_id in staff_data.get(

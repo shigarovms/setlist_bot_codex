@@ -167,7 +167,12 @@ class Groups:
         target = user_id or self.user.id
         rows = await self.store.find(Membership, group_id=group_id, user_id=target)
         user = await self.store.get(User, target)
-        return (rows[0].musical_role if rows else "") or user.display_name or str(user.telegram_id)
+        return (
+            user.profile.get("name")
+            or (rows[0].musical_role if rows else "")
+            or user.display_name
+            or str(user.telegram_id)
+        )
 
     async def administrator(self, group_id: UUID, member_id: UUID, grant: bool) -> None:
         # RU: Владелец — отдельное право, оно не передаётся вместе с ролью admin.

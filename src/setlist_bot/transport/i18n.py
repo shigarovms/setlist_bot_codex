@@ -2,6 +2,7 @@ from typing import Any
 
 from setlist_bot.transport.calendar_texts import TEXTS as CALENDAR_TEXTS
 from setlist_bot.transport.music_texts import TEXTS as MUSIC_TEXTS
+from setlist_bot.transport.profile_texts import TEXTS as PROFILE_TEXTS
 from setlist_bot.transport.staffing_texts import TEXTS as STAFFING_TEXTS
 from setlist_bot.transport.workflow_texts import TEXTS as WORKFLOW_TEXTS
 
@@ -9,7 +10,7 @@ MESSAGES = {
     "ru": {
         "support_help": "Справка по командам и работе бота: /help.",
         "import_clarify_columns": "Не удалось разобрать таблицу. Давайте уточним столбцы.",
-        "input_add_new_songs": "Название  03:38  свет  110  комментарий\nПоследние три поля необязательны; - — пустое поле. Можно вставить таблицу текстом или как Article в ответ на это сообщение.",
+        "input_add_new_songs": "Название 03:38\nИли с дополнительными полями: Название  03:38  свет  110  комментарий\nПоследние три поля необязательны; - — пустое поле. Можно вставить таблицу текстом или как Article в ответ на это сообщение.",
         "article_format": "Не удалось прочитать формат Article. Пришлите простую таблицу с текстом в ячейках.",
         "article_one_table": "В одном сообщении должна быть одна таблица песен. Отправьте таблицы отдельно.",
         "article_table_required": "В Article не найдена таблица песен. Используйте /add_new_songs.",
@@ -854,9 +855,17 @@ MESSAGES["en"]["help"] += (
     "Same-day bookings are possible conflicts; external calendars are not read."
 )
 
-for _catalog in (MUSIC_TEXTS, WORKFLOW_TEXTS, CALENDAR_TEXTS, STAFFING_TEXTS):
+for _catalog in (MUSIC_TEXTS, WORKFLOW_TEXTS, CALENDAR_TEXTS, STAFFING_TEXTS, PROFILE_TEXTS):
     for _language, _texts in _catalog.items():
         MESSAGES[_language].update(_texts)
+
+
+MESSAGES["ru"]["help"] += (
+    "\n\nПрофиль: кнопка «👤 Мой профиль» под /start — имя, профессиональные роли и готовность к подменам."
+)
+MESSAGES["en"]["help"] += (
+    "\n\nProfile: use «👤 My profile» below /start to set your name, professional roles and substitution preferences."
+)
 
 
 def tr(language: str, key: str, **values: Any) -> str:

@@ -20,6 +20,12 @@ SPACED_SEPARATOR = re.compile(r"(?<![,\s])[^\S\r\n]{2,}(?![,\s])")
 TIME_CELL = re.compile(r"\d{1,5}:\d{2}")
 
 
+def short_song_row(line: str) -> list[str] | None:
+    """RU: Последнее отдельное ММ:СС — время. EN: Never split times inside the title."""
+    match = re.fullmatch(r"(.+?)\s+(\d{1,5}:\d{2})", line.strip())
+    return [match[1].strip(), match[2]] if match else None
+
+
 def _csv_rows(source: str, delimiter: str) -> list[list[str]]:
     return [
         [cell.strip() for cell in row]
@@ -37,6 +43,19 @@ def _read_rows(source: str) -> list[list[str]]:
         delimiter = csv.Sniffer().sniff(source, delimiters=",;").delimiter
     except csv.Error:
         delimiter = ";" if ";" in source.splitlines()[0] else ","
+    # RU/EN: Explicit tables/CSV win; this compact form is only title + trailing time.
+    compact = [short_song_row(line) for line in source.splitlines() if line.strip()]
+    if (
+        compact
+        and all(row is not None for row in compact)
+        and not re.search(r"[,;]\s*\d{1,5}:\d{2}\s*$", source, re.MULTILINE)
+        and not any(
+            SPACED_SEPARATOR.search(line) and len(SPACED_SEPARATOR.split(line.strip())) > 2
+            for line in source.splitlines()
+            if line.strip()
+        )
+    ):
+        return [row for row in compact if row is not None]
     csv_error = None
     try:
         csv_rows = [row for row in _csv_rows(source, delimiter) if any(row)]

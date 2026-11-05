@@ -247,6 +247,16 @@ class Controller:
         if command == "group":
             command = "new_band"
         args = args.strip()
+        if command in ("profile", "pf_go") or command == "start" and args == "profile":
+            from setlist_bot.transport.profiles import begin
+            from setlist_bot.transport.profiles import handle as profile_handle
+
+            if not self.private:
+                return Response(
+                    self.t("profile_private"),
+                    [(self.t("profile_button"), f"https://t.me/{self.bot_username}?start=profile")],
+                )
+            return await profile_handle(self, args) if command == "pf_go" else await begin(self)
         if command == "start" and args == "calendar":
             return await self.execute("calendar")
         if command == "start" and args == "my_gigs":
@@ -587,7 +597,19 @@ class Controller:
                 return await self.execute("groups")
             if command == "start" and args == "all_my_concerts":
                 return await self.execute("all_my_concerts")
-            return Response(self.t("welcome" if command == "start" else "help"))
+            return Response(
+                self.t("welcome" if command == "start" else "help"),
+                [
+                    (
+                        self.t("profile_button"),
+                        "profile"
+                        if self.private
+                        else f"https://t.me/{self.bot_username}?start=profile",
+                    )
+                ]
+                if command == "start"
+                else [],
+            )
         if command == "language":
             if not args:
                 return await self._request_input(command)
@@ -673,6 +695,7 @@ class Controller:
                     "song_selection",
                     "create_group",
                     "staff_input",
+                    "profile_input",
                 ) and prompt_data.get("command") not in ("music_query", "music_duration"):
                     other_dialog = True
                 if (
@@ -829,9 +852,10 @@ class Controller:
                     [(self.t("transfer_button"), f"ct_begin {group.id.hex}")]
                     if group.owner_id == self.user.id
                     else []
-                ),
+                )
+                + [(self.t("all_groups_back"), "groups")],
             )
-        if command in ("group_catalog", "catalog_edit"):
+        if command in ("group_catalog", "catalog_edit", "show_song"):
             # RU: Старая кнопка каталога относится к исходному коллективу, не к /groups.
             # EN: Resolve the explicit target and recheck access before changing context.
             target_group = (
@@ -858,7 +882,7 @@ class Controller:
             context.group_id = target_group
             if command == "catalog_edit":
                 command = "song_edit_menu"
-            else:
+            elif command == "group_catalog":
                 command, args = "catalog", ""
         require(context.group_id is not None, "select_group")
         group_id = context.group_id
@@ -1138,10 +1162,6 @@ class Controller:
                 songs,
                 response.buttons,
                 self.language,
-                edit_buttons=[
-                    (self.t("song_row_edit") + ": " + song.title, f"catalog_edit {song.id.hex}")
-                    for song in songs
-                ],
             )
             memberships = await self.store.find(Membership, group_id=group_id, user_id=self.user.id)
             if command == "catalog" and memberships and memberships[0].role == "admin":

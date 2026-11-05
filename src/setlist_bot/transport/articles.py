@@ -71,12 +71,7 @@ def setlist_articles(heading: str, snapshot: dict[str, Any], language: str) -> l
 
 
 def catalog_articles(
-    group_name: str,
-    songs: list[Song],
-    buttons: list[tuple[str, str]],
-    language: str,
-    *,
-    edit_buttons: list[tuple[str, str]] | None = None,
+    group_name: str, songs: list[Song], buttons: list[tuple[str, str]], language: str
 ) -> list[ArticlePage]:
     """Keep each table and its card buttons together, including text fallback pages."""
     groups: list[list[Song]] = []
@@ -97,7 +92,6 @@ def catalog_articles(
         label = tr(language, "catalog_article", page=number, pages=len(groups))
         heading = group_name + "\n" + label
         page_buttons = buttons[offset : offset + len(group)]
-        page_edits = (edit_buttons or [])[offset : offset + len(group)]
         rows = [
             [
                 tr(language, "catalog_title"),
@@ -105,7 +99,6 @@ def catalog_articles(
                 "BPM",
                 tr(language, "catalog_lights"),
                 tr(language, "catalog_comment"),
-                *([tr(language, "song_row_edit")] if page_edits else []),
             ],
             *[
                 [
@@ -114,7 +107,6 @@ def catalog_articles(
                     str(song.bpm or "—"),
                     song.lights or "—",
                     song.comment or "—",
-                    *([tr(language, "song_row_edit")] if page_edits else []),
                 ]
                 for song in group
             ],
@@ -129,16 +121,10 @@ def catalog_articles(
                         "button": {
                             "text": value,
                             "style": "link",
-                            "callback_data": (page_edits if column == 5 else page_buttons)[row - 1][
-                                1
-                            ],
+                            "callback_data": page_buttons[row - 1][1],
                         },
                     }
-                    if row
-                    and (
-                        (column == 0 and row <= len(page_buttons))
-                        or (column == 5 and row <= len(page_edits))
-                    )
+                    if row and column == 0 and row <= len(page_buttons)
                     else value,
                     "align": "right" if column in (1, 2) else "left",
                     "valign": "top",
@@ -161,7 +147,7 @@ def catalog_articles(
                     },
                 ],
                 text=heading + "\n\n" + "\n\n".join(song_card(song, language) for song in group),
-                buttons=page_buttons + page_edits,
+                buttons=page_buttons,
             )
         )
         offset += len(group)

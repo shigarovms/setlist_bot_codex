@@ -15,6 +15,7 @@ from setlist_bot.domain.entities import (
     Group,
     LineupTemplate,
     Membership,
+    StaffContact,
     StaffRole,
     User,
 )
@@ -124,23 +125,24 @@ async def template_view(
     buttons = []
     text = row.name
     require(page >= 0, "input")
-    roles = {
-        role.id: role
-        for role in await c.store.get_many(StaffRole, {UUID(slot["role_id"]) for slot in row.slots})
-    }
+    roles = {role.id: role for role in await c.store.find(StaffRole, group_id=row.group_id)}
+    defaults = Staffing.select_defaults(
+        roles,
+        await c.store.find(StaffContact, group_id=row.group_id),
+        [UUID(slot["role_id"]) for slot in row.slots],
+    )
     people = {
         person.id: person
-        for person in await c.store.get_many(
-            User, {UUID(slot["user_id"]) for slot in row.slots if slot.get("user_id")}
-        )
+        for person in await c.store.get_many(User, {person for person in defaults if person})
     }
     # RU: Полный текст состава не зависит от страницы; переключаются лишь кнопки.
     # EN: Batch-load the full lineup and paginate only the role actions.
     for index, slot in enumerate(row.slots):
         role = roles[UUID(slot["role_id"])]
         label = f"{index + 1}. {role.name[:64]}"
-        if slot.get("user_id"):
-            label += ": " + person_name(people[UUID(slot["user_id"])])[:48]
+        default_person = defaults[index]
+        if default_person is not None:
+            label += ": " + person_name(people[default_person])[:48]
         text += "\n" + label
         if page * 8 <= index < (page + 1) * 8:
             buttons.append(
@@ -306,7 +308,8 @@ async def lineup_action(c: Controller, op: str, data: dict[str, Any]) -> Respons
     if op == "templates":
         group = await c.groups.access(UUID(data["group_id"]), admin=True)
         rows = sorted(
-            await c.store.find(LineupTemplate, group_id=group.id), key=lambda r: (r.name_key, r.id)
+            await c.store.find(LineupTemplate, group_id=group.id),
+            key=lambda r: (r.created_at, r.id),
         )
         page = int(data.get("page", 0))
         require(page >= 0, "input")
@@ -394,16 +397,8 @@ async def lineup_action(c: Controller, op: str, data: dict[str, Any]) -> Respons
                         ),
                     ),
                     (
-                        c.t("staff_change_default"),
-                        action(
-                            c,
-                            "prompt",
-                            field="template_person",
-                            group_id=str(row.group_id),
-                            template_id=str(row.id),
-                            version=row.version,
-                            index=index,
-                        ),
+                        c.t("permanent_title"),
+                        action(c, "permanent", group_id=str(row.group_id)),
                     ),
                     (
                         c.t("staff_remove_template_role"),

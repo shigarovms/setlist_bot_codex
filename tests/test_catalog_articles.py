@@ -338,11 +338,15 @@ async def test_repertoire_menu_and_row_edit_are_bound_to_the_original_band(engin
     await send(f"use_group {world.other.id}", private=True)
     catalog = await send(repertoire, private=True)
     cells = catalog.articles[0].blocks[1]["cells"]
-    assert len(cells[0]) == 6
-    edit_action = cells[1][-1]["text"]["button"]["callback_data"]
-    assert cells[1][-1]["text"]["button"]["text"] == "Редактировать"
+    assert len(cells[0]) == 5
+    assert "Редактировать" not in [cell["text"] for cell in cells[0]]
+    open_action = cells[1][0]["text"]["button"]["callback_data"]
     InputRichMessage.model_validate({"blocks": catalog.articles[0].blocks})
     await send(f"use_group {world.other.id}", private=True)
+    opened = await send(open_action, private=True)
+    edit_action = next(
+        action for _, action in opened.buttons if action.startswith("song_edit_menu")
+    )
     editor = await send(edit_action, private=True)
     assert "Комета" in editor.text and "Чужая песня" not in editor.text
     assert any(action.startswith("song_field ") for _, action in editor.buttons)

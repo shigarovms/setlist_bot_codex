@@ -15,6 +15,8 @@ class Entity:
 
 @dataclass(kw_only=True)
 class User(Entity):
+    profile: dict[str, Any] = field(default_factory=dict)
+    profile_version: int = 0
     username: str = ""
     username_seen_at: datetime | None = None
     last_seen_at: datetime | None = None
@@ -393,6 +395,7 @@ class StaffRole(Entity):
 
 @dataclass(kw_only=True)
 class LineupTemplate(Entity):
+    created_at: datetime = field(default_factory=now)
     group_id: UUID
     name: str
     name_key: str
@@ -402,6 +405,9 @@ class LineupTemplate(Entity):
 
 @dataclass(kw_only=True)
 class StaffContact(Entity):
+    permanent: bool = False
+    priority: int = 100
+    version: int = 1
     group_id: UUID
     user_id: UUID
     role_id: UUID

@@ -102,6 +102,9 @@ table(
     col("language", String(2)),
     col("display_name", String(200)),
     col("export_settings", JSONB, server_default=text("'{}'::jsonb")),
+    col("profile", JSONB, server_default=text("'{}'::jsonb")),
+    col("profile_version", Integer, server_default="0"),
+    CheckConstraint("profile_version >= 0", name="profile_version"),
 )
 table(
     e.Group,
@@ -566,6 +569,7 @@ table(
 table(
     e.LineupTemplate,
     "lineup_templates",
+    col("created_at", DateTime(timezone=True), server_default=text("now()")),
     col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), index=True),
     col("name", String(100)),
     col("name_key", String(100)),
@@ -576,6 +580,9 @@ table(
 table(
     e.StaffContact,
     "staff_contacts",
+    col("permanent", Boolean, server_default="false"),
+    col("priority", Integer, server_default="100"),
+    col("version", Integer, server_default="1"),
     col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), index=True),
     col("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE")),
     col("role_id", Uuid),
@@ -587,6 +594,7 @@ table(
     UniqueConstraint("group_id", "user_id", "role_id"),
     CheckConstraint("preference IN ('normal','preferred','hidden')", name="preference"),
     CheckConstraint("worked_count >= 0", name="worked_count"),
+    CheckConstraint("priority BETWEEN 0 AND 9999 AND version > 0", name="contact_version"),
 )
 table(
     e.GigSlot,

@@ -243,13 +243,46 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 "(()=>{const s=getComputedStyle(document.getElementById('add-pause-bottom'));"
                 "return s.borderTopStyle==='dashed' && s.backgroundColor==='rgba(0, 0, 0, 0)'})()"
             )
+            # A real desktop mouse sequence must keep focus despite scrolling on pointerdown.
+            await browser.call(
+                "Emulation.setDeviceMetricsOverride",
+                {
+                    "width": 1200,
+                    "height": 800,
+                    "deviceScaleFactor": 1,
+                    "mobile": False,
+                },
+            )
+            await browser.js("document.getElementById('search').scrollIntoView({block:'center'})")
+            point = await browser.js(
+                "(()=>{const r=document.getElementById('search').getBoundingClientRect();"
+                "return {x:r.x+20,y:r.y+20}})()"
+            )
+            for event_type in ("mousePressed", "mouseReleased"):
+                await browser.call(
+                    "Input.dispatchMouseEvent",
+                    {"type": event_type, **point, "button": "left", "clickCount": 1},
+                )
+            await browser.wait("document.activeElement.id==='search'")
+            await browser.call("Input.insertText", {"text": "Ком"})
+            assert await browser.js("document.getElementById('search').value") == "Ком"
+            await browser.js("document.getElementById('search').blur()")
+            await browser.call(
+                "Emulation.setDeviceMetricsOverride",
+                {
+                    "width": 390,
+                    "height": 900,
+                    "deviceScaleFactor": 1,
+                    "mobile": True,
+                },
+            )
             # RU/EN: Native touch must still add a song while closing the search keyboard.
             await browser.js("document.getElementById('search').focus()")
             await browser.call("Input.insertText", {"text": "Ком"})
             await browser.wait("document.querySelectorAll('.catalog-entry').length===1")
             search_at_top = (
                 "Math.abs(document.getElementById('search').getBoundingClientRect().top"
-                "-(visualViewport?.offsetTop ?? 0))<2"
+                "-(visualViewport?.offsetTop ?? 0)-12)<2"
             )
             await browser.wait(search_at_top)
             await browser.js("document.getElementById('search').click()")

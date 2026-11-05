@@ -227,7 +227,7 @@ async def test_main_lineup_onboarding_and_groups_entry(engine, world):
         group_id = row.group_id
     selected = await send(f"/use_group {group_id}", private=True, chat=1)
     assert selected.buttons[0][1] == f"group_concerts {group_id.hex}"
-    assert selected.buttons[1][0] == "Составы Новая группа"
+    assert selected.buttons[2][0] == "Составы Новая группа"
 
 
 async def test_admin_replace_confirmed_person_keeps_source_until_approval(engine, world):
