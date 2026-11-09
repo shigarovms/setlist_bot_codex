@@ -5,6 +5,7 @@ import json
 import logging
 import os
 from datetime import datetime, time, timedelta
+from functools import partial
 from uuid import UUID
 
 from aiogram import Bot, Dispatcher
@@ -14,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from setlist_bot.application import reminders
 from setlist_bot.application.chat_cleanup import message_ids as known_message_ids
+from setlist_bot.application.chat_migration import migrate_binding
 from setlist_bot.application.setlist_menus import REQUEST, SetlistMenus
 from setlist_bot.application.trash import TrashCleanup
 from setlist_bot.config import Settings
@@ -497,9 +499,16 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
                         extra_scopes=settings.bot_command_extra_scopes,
                         legacy_languages=settings.bot_command_legacy_languages,
                     )
-                    report = await synchronize_commands(bot, targets)
+                    report = await synchronize_commands(
+                        bot, targets, on_chat_migrated=partial(migrate_binding, engine)
+                    )
                 except Exception as exc:
                     logger.error("Command menu synchronization failed (%s)", type(exc).__name__)
+                    if not sync_only:
+                        # RU: Ошибка старта не должна загружать CPU перезапусками контейнера.
+                        # EN: Cool down while still holding the singleton lock; CLI fails promptly.
+                        logger.warning("Waiting 30 seconds before exiting failed startup")
+                        await asyncio.sleep(30)
                     raise SystemExit(
                         "Command menu synchronization failed; retry startup or --sync-commands"
                     ) from None
