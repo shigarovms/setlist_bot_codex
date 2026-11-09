@@ -11,6 +11,7 @@ from uuid import UUID
 from setlist_bot.application.activity import record_activity
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
+from setlist_bot.application.role_dictionary import RoleDictionary
 from setlist_bot.domain.concerts import today
 from setlist_bot.domain.entities import (
     BusyPeriod,
@@ -28,7 +29,7 @@ from setlist_bot.domain.entities import (
     now,
 )
 from setlist_bot.domain.rules import normalize, require
-from setlist_bot.domain.staff_roles import matches, role_key
+from setlist_bot.domain.staff_roles import RoleIndex
 
 REMINDER_COOLDOWN = timedelta(minutes=1)
 
@@ -39,6 +40,12 @@ class Staffing:
     def __init__(self, store: Store, user: User):
         self.store, self.user = store, user
         self.groups = Groups(store, user)
+        self._vocabulary: RoleIndex | None = None
+
+    async def vocabulary(self) -> RoleIndex:
+        if self._vocabulary is None:
+            self._vocabulary = await RoleDictionary(self.store).index()
+        return self._vocabulary
 
     async def event(self, identifier: UUID, *, admin: bool = True) -> Concert:
         event = await self.store.get(Concert, identifier)
@@ -54,14 +61,20 @@ class Staffing:
         if found:
             # RU: Ключ нужен для поиска, а введённый регистр — для отображения.
             # EN: Reusing a normalized role must not discard the administrator's spelling.
-            found[0].name = name.strip()
+            if found[0].name != name.strip():
+                found[0].name = name.strip()
+                from setlist_bot.application.member_boards import queue_member_board
+
+                await self.store.flush()
+                await queue_member_board(self.store, group_id)
             return found[0]
-        canonical = role_key(name)
+        vocabulary = await self.vocabulary()
+        canonical = vocabulary.key(name)
         if not canonical.startswith("custom:"):
             synonyms = [
                 r
                 for r in await self.store.find(StaffRole, group_id=group_id)
-                if role_key(r.name) == canonical
+                if vocabulary.key(r.name) == canonical
             ]
             if synonyms:
                 return min(synonyms, key=lambda r: r.id)
@@ -100,14 +113,20 @@ class Staffing:
     ) -> StaffContact:
         row = await self.contact(group_id, role_id, user_id)
         if not row.permanent:
+            vocabulary = await self.vocabulary()
             roles = {r.id: r for r in await self.store.find(StaffRole, group_id=group_id)}
             previous = [
                 r.priority
                 for r in await self.store.find(StaffContact, group_id=group_id)
-                if r.permanent and role_key(roles[r.role_id].name) == role_key(roles[role_id].name)
+                if r.permanent
+                and vocabulary.key(roles[r.role_id].name) == vocabulary.key(roles[role_id].name)
             ]
             row.priority = max(previous, default=-1) + 1
         row.permanent = True
+        from setlist_bot.application.member_boards import queue_member_board
+
+        await self.store.flush()
+        await queue_member_board(self.store, group_id)
         return row
 
     async def change_contact(
@@ -131,13 +150,20 @@ class Staffing:
             row.priority = priority
         row.version += 1
         record_activity(self.store, self.user, "permanent_performer", row.id, removed=remove)
+        from setlist_bot.application.member_boards import queue_member_board
+
+        await self.store.flush()
+        await queue_member_board(self.store, row.group_id)
         return row
 
     async def lineup_people(self, group_id: UUID, identifiers: list[UUID]) -> list[UUID | None]:
         await self.groups.access(group_id, admin=True)
         roles = {r.id: r for r in await self.store.find(StaffRole, group_id=group_id)}
         return self.select_defaults(
-            roles, await self.store.find(StaffContact, group_id=group_id), identifiers
+            roles,
+            await self.store.find(StaffContact, group_id=group_id),
+            identifiers,
+            await self.vocabulary(),
         )
 
     @staticmethod
@@ -145,7 +171,9 @@ class Staffing:
         roles: dict[UUID, StaffRole],
         contacts: list[StaffContact],
         identifiers: list[UUID],
+        vocabulary: RoleIndex | None = None,
     ) -> list[UUID | None]:
+        vocabulary = vocabulary or RoleIndex()
         contacts = sorted(
             (c for c in contacts if c.permanent and c.preference != "hidden"),
             key=lambda c: (c.priority, c.preference != "preferred", -c.worked_count, c.id),
@@ -155,14 +183,14 @@ class Staffing:
         # RU: Два вокала — два человека. Повтор роли не дублирует первого кандидата.
         # EN: Consume a distinct default per occurrence of the same professional role.
         for identifier in identifiers:
-            key = role_key(roles[identifier].name)
+            key = vocabulary.key(roles[identifier].name)
             occupied = used.setdefault(key, set())
             person = next(
                 (
                     c.user_id
                     for c in contacts
                     if c.user_id not in occupied
-                    and matches(roles[identifier].name, roles[c.role_id].name)
+                    and vocabulary.matches(roles[identifier].name, roles[c.role_id].name)
                 ),
                 None,
             )
@@ -726,6 +754,7 @@ class Staffing:
         await self.event(event.id)
         contacts = await self.store.find(StaffContact, group_id=event.group_id)
         roles = {r.id: r for r in await self.store.find(StaffRole, group_id=event.group_id)}
+        vocabulary = await self.vocabulary()
         required = roles[role_id].name
         people = {p.id: p for p in await self.store.get_many(User, {c.user_id for c in contacts})}
         by_person: dict[UUID, list[StaffContact]] = {}
@@ -734,7 +763,7 @@ class Staffing:
         visible = []
         for person in people.values():
             local = by_person[person.id]
-            matching = [c for c in local if matches(required, roles[c.role_id].name)]
+            matching = [c for c in local if vocabulary.matches(required, roles[c.role_id].name)]
             if any(c.preference == "hidden" for c in matching):
                 continue
             eligible = [c for c in matching if c.preference != "hidden"]
@@ -749,7 +778,7 @@ class Staffing:
                     ),
                 )
             elif any(c.preference != "hidden" for c in local) and any(
-                matches(required, skill) for skill in person.profile.get("roles", [])
+                vocabulary.matches(required, skill) for skill in person.profile.get("roles", [])
             ):
                 # RU: Чужие коллективы/контакты не ищем; навыки расширяют только местных знакомых.
                 # EN: A declared skill broadens matching, never the contact visibility boundary.
@@ -777,7 +806,7 @@ class Staffing:
                     (
                         i
                         for i, skill in enumerate(row[1].profile.get("roles", []))
-                        if matches(required, skill)
+                        if vocabulary.matches(required, skill)
                     ),
                     100,
                 ),

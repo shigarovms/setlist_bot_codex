@@ -474,7 +474,7 @@ class Controller:
             group = await Collectives(self.store, self.user, self.chat_id).create(
                 session, self.chat_owner_id
             )
-            return self._created_group(group)
+            return await self._created_group(group)
         if reply_template_id is not None and (
             not message.startswith("/") or command == "suggestion"
         ):
@@ -769,7 +769,8 @@ class Controller:
             groups = [g for g in groups if g.deleted_at is None]
             return Response(
                 self.t("choose_group") if groups else self.t("empty"),
-                [(g.name, f"use_group {g.id}") for g in groups],
+                [(self.t("profile_button"), "profile")]
+                + [(g.name, f"use_group {g.id}") for g in groups],
             )
         if command == "all_my_concerts":
             if not self.private:
@@ -884,13 +885,45 @@ class Controller:
                 command = "song_edit_menu"
             elif command == "group_catalog":
                 command, args = "catalog", ""
+        if command == "join_band":
+            require(not self.private, "group_only")
+            join_target = UUID(args)
+            require(
+                bool(
+                    await self.store.find(ChatBinding, group_id=join_target, chat_id=self.chat_id)
+                ),
+                "not_found",
+            )
+            group = await self.store.get(Group, join_target, lock=True)
+            require(group.deleted_at is None, "in_trash")
+            context.group_id, context.concert_id = join_target, None
+            return await self._request_input("join_roles", context)
         require(context.group_id is not None, "select_group")
         group_id = context.group_id
         assert group_id is not None
+        if command == "join_roles":
+            require(not self.private, "group_only")
+            require(
+                bool(await self.store.find(ChatBinding, group_id=group_id, chat_id=self.chat_id)),
+                "not_found",
+            )
+            from setlist_bot.application.member_boards import queue_member_board
+
+            member = await self.groups.request_roles(group_id, [args])
+            await queue_member_board(self.store, group_id, ensure=True)
+            roles = member.requested_roles or []
+            label = await self.groups.name(group_id)
+            return Response(
+                self.t("join_requested", name=label, roles=", ".join(roles)),
+                [
+                    (self.t(key), f"member {action} {member.id} {member.version}")
+                    for action, key in (("yes", "approve_button"), ("no", "reject_button"))
+                ],
+            )
         if command == "register":
             require(not self.private, "group_only")
             if not args:
-                return await self._request_input(command, context)
+                return await self._request_input("join_roles", context)
             membership = await self.groups.register(group_id, args)
             return Response(
                 self.t("nickname_saved" if membership.status == "active" else "registered")
@@ -1136,14 +1169,33 @@ class Controller:
                             f"administrator {operation} {member.id}",
                         )
                     )
-                if member.status == "pending":
+                if member.requested_roles:
+                    lines.append(" · " + ", ".join(member.requested_roles))
+                if member.status == "pending" or member.requested_roles is not None:
                     for action, key in (("yes", "approve_button"), ("no", "reject_button")):
-                        buttons.append((f"{self.t(key)} {label}", f"member {action} {member.id}"))
+                        buttons.append(
+                            (
+                                f"{self.t(key)} {label}",
+                                f"member {action} {member.id}"
+                                + (
+                                    f" {member.version}"
+                                    if member.requested_roles is not None
+                                    else ""
+                                ),
+                            )
+                        )
             return Response("\n".join(lines), buttons)
         if command == "member":
-            action, identifier = args.split()
+            fields = args.split()
+            require(len(fields) in (2, 3), "input")
+            action, identifier = fields[:2]
             require(action in ("yes", "no"), "input")
-            await self.groups.decide_member(group_id, UUID(identifier), action == "yes")
+            await self.groups.decide_member(
+                group_id,
+                UUID(identifier),
+                action == "yes",
+                int(fields[2]) if len(fields) == 3 else None,
+            )
             return Response(self.t("ok"))
         if command in ("catalog", "archived"):
             songs = (
@@ -2102,7 +2154,7 @@ class Controller:
             + (
                 ""
                 if command in CONCERT_INPUTS
-                or command in ("concert", "edit_bpm", "edit_lights", "edit_comment")
+                or command in ("concert", "edit_bpm", "edit_lights", "edit_comment", "join_roles")
                 else self.t("input_prompt", command=command)
             )
             + "\n\n"
@@ -2340,7 +2392,10 @@ class Controller:
         response.cancel_label = self.t("cancel_button")
         return response
 
-    def _created_group(self, group: Group) -> Response:
+    async def _created_group(self, group: Group) -> Response:
+        from setlist_bot.application.member_boards import queue_member_board
+
+        await queue_member_board(self.store, group.id, ensure=True)
         from setlist_bot.transport.music_search import methods
         from setlist_bot.transport.staffing import action
 

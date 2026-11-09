@@ -125,6 +125,8 @@ table(
 table(
     e.Membership,
     "memberships",
+    col("requested_roles", JSONB(none_as_null=True), nullable=True),
+    col("version", Integer, server_default="0"),
     tenant(),
     col("user_id", Uuid, ForeignKey("users.id")),
     col("role", String(10)),
@@ -690,6 +692,26 @@ table(
 )
 
 
+table(
+    e.ProfessionalRole,
+    "professional_roles",
+    col("key", String(100), unique=True),
+    col("title", String(100)),
+    col("aliases", JSONB),
+    col("retired_aliases", JSONB),
+    col("version", Integer),
+    CheckConstraint("version > 0", name="role_version"),
+)
+table(
+    e.MemberBoard,
+    "member_boards",
+    col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), unique=True),
+    col("chat_id", BigInteger),
+    col("group_epoch", Integer),
+    col("message_ids", JSONB),
+)
+
+
 class PostgresStore:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -802,6 +824,13 @@ class PostgresStore:
     async def expired[T: e.Entity](self, kind: type[T], field: str, before: datetime) -> list[T]:
         return list(
             (await self.session.scalars(select(kind).where(getattr(kind, field) <= before))).all()
+        )
+
+    async def lock_role_dictionary(self) -> None:
+        await self.session.execute(
+            text(
+                "SELECT pg_advisory_xact_lock(hashtextextended('professional-role-dictionary', 0))"
+            )
         )
 
     async def lock_chat(self, chat_id: int) -> None:

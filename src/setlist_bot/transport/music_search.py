@@ -59,13 +59,13 @@ async def music_view(controller: Controller, job: MusicSearch) -> Response:
     elif job.status == "artists":
         response.text = t("music_artists")
         for index, artist in enumerate(job.data["artists"]):
+            response.text += "\n\n" + artist["name"]
             response.text += (
-                "\n\n" + artist["name"] + (" · " + artist["genre"] if artist.get("genre") else "")
+                "\n" + t("music_band_songs") + "\n" + "\n".join(artist.get("examples", [])[:3])
             )
-            response.text += "\n" + " · ".join(artist.get("examples", []))
             response.buttons.append(
                 (
-                    artist["name"] + (" · " + artist["genre"] if artist.get("genre") else ""),
+                    artist["name"],
                     f"mi_artist {job.id.hex} {index}",
                 )
             )

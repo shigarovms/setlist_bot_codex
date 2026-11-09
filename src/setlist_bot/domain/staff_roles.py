@@ -82,27 +82,68 @@ SOUND_ROLES = {"foh", "mon", "audio_tech", "system", "rf", "playback"}
 AMBIGUOUS = {"фон", "tm", "тм", "техник", "инженер", "оператор"}
 
 
+class RoleIndex:
+    def __init__(self, definitions: list[tuple[str, str, list[str]]] | None = None):
+        rows = (
+            definitions
+            if definitions is not None
+            else [(key, title, aliases.split("|")) for key, (title, aliases) in ROLES.items()]
+        )
+        self.titles = {key: title for key, title, _ in rows}
+        self.aliases = {
+            normalize(alias): key
+            for key, title, aliases in rows
+            for alias in [key, title, *aliases]
+        }
+
+    def key(self, name: str) -> str:
+        text = normalize(name)
+        return self.aliases.get(text, "custom:" + text)
+
+    def matches(self, required: str, offered: str) -> bool:
+        target, skill = self.key(required), self.key(offered)
+        return target == skill or target == "sound" and skill in SOUND_ROLES
+
+    @staticmethod
+    def _names(value: str) -> list[str]:
+        names = [s.strip() for s in re.split(r"[,;\n]+", value) if s.strip()]
+        require(
+            0 < len(names) <= 40
+            and all(len(s) <= 100 and not any(ord(c) < 32 for c in s) for s in names),
+            "input",
+        )
+        return names
+
+    def local_names(self, value: str) -> list[str]:
+        # RU: Роль в коллективе сохраняет написание и не заявляет глобальные навыки.
+        # EN: Local positions may be broad; they never imply specific professional skills.
+        result: dict[str, str] = {}
+        for name in self._names(value):
+            result.setdefault(self.key(name), name)
+        return list(result.values())
+
+    def parse(self, value: str) -> list[str]:
+        names = self._names(value)
+        require(
+            not any(normalize(s) in AMBIGUOUS or self.key(s) == "sound" for s in names),
+            "profile_roles_ambiguous",
+        )
+        result = []
+        for name in names:
+            key = self.key(name)
+            title = self.titles.get(key, name)
+            if title not in result:
+                result.append(title)
+        return result
+
+
 def role_key(name: str) -> str:
-    text = normalize(name)
-    return ALIASES.get(text, "custom:" + text)
+    return RoleIndex().key(name)
 
 
 def matches(required: str, offered: str) -> bool:
-    target, skill = role_key(required), role_key(offered)
-    return target == skill or target == "sound" and skill in SOUND_ROLES
+    return RoleIndex().matches(required, offered)
 
 
 def parse_skills(value: str) -> list[str]:
-    names = [s.strip() for s in re.split(r"[,;\n]+", value) if s.strip()]
-    require(0 < len(names) <= 40 and all(len(s) <= 100 for s in names), "input")
-    require(
-        not any(normalize(s) in AMBIGUOUS or role_key(s) == "sound" for s in names),
-        "profile_roles_ambiguous",
-    )
-    result = []
-    for name in names:
-        key = role_key(name)
-        title = ROLES[key][0] if key in ROLES else name
-        if title not in result:
-            result.append(title)
-    return result
+    return RoleIndex().parse(value)

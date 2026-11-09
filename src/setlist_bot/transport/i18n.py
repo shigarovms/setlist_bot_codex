@@ -122,7 +122,7 @@ MESSAGES = {
         "draft_edit": "Изменить",
         "welcome": "Бот для репертуара и сет-листов. /help — команды.\nАдминистратор создаёт коллектив командой /new_band Название в общем чате. Участники: /register Ваша роль.",
         "help": (
-            "Начало работы\nПоддержка: /support.\nСоздание коллектива: /new_band Название. Начать может любой участник; владелец Telegram-чата подтверждает создание, становится владельцем коллектива, а инициатор — администратором. Управление правами — /members.\nВступление: /register Имя в коллективе. После подтверждения заявки доступны сет-листы; участникам команда меняет имя.\nВ личном чате: /groups — выбрать коллектив. Можно участвовать в нескольких коллективах.\nЯзык интерфейса: /language ru; язык коллектива: /group_language ru.\n\nОсновная команда — /concerts. Предстоящие и прошедшие выступления; ✅ означает, что сет-лист утверждён. Выберите выступление, чтобы открыть список, предложить вариант или перейти к настройкам. Кнопка «Новое выступление» создаёт выступление.\nВ личке /all_my_concerts — все ваши выступления из всех коллективов, прошлые — под кнопкой «Прошедшие»; /calendar — подписка на календарь Google или Apple.\nНапоминания накануне: /reminders.\n\n"
+            "Начало работы\nПоддержка: /support.\nСоздание коллектива: /new_band Название. Начать может любой участник; владелец Telegram-чата подтверждает создание, становится владельцем коллектива, а инициатор — администратором. Управление правами — /members.\nВступление: /register или кнопка «Присоединиться» под списком участников. Укажите роли; после одобрения администратора они добавятся в постоянную команду. /register Имя сохраняет прежний быстрый ввод имени.\nВ личном чате: /groups — выбрать коллектив. Можно участвовать в нескольких коллективах.\nЯзык интерфейса: /language ru; язык коллектива: /group_language ru.\n\nОсновная команда — /concerts. Предстоящие и прошедшие выступления; ✅ означает, что сет-лист утверждён. Выберите выступление, чтобы открыть список, предложить вариант или перейти к настройкам. Кнопка «Новое выступление» создаёт выступление.\nВ личке /all_my_concerts — все ваши выступления из всех коллективов, прошлые — под кнопкой «Прошедшие»; /calendar — подписка на календарь Google или Apple.\nНапоминания накануне: /reminders.\n\n"
             "Добавить новые песни: /add_new_songs Название  03:38  свет  110  комментарий.\n"
             "Последние три поля необязательны. Между полями — два и более пробела; - — пустое поле. Можно вставить таблицу текстом или как Article ответом на запрос команды.\n"
             "Каталог: /catalog [поиск]; архив песен: /archived.\n"
@@ -533,7 +533,7 @@ MESSAGES = {
         "draft_edit": "Edit",
         "welcome": "Repertoire and setlist bot. /help — commands.\nA Telegram chat administrator creates the group with /new_band Name in the group chat. Members: /register Your role.",
         "help": (
-            "Getting started\nSupport: /support.\nAny member can start registration with /new_band Name. The Telegram chat owner confirms and owns the group; the initiator becomes an administrator. Manage roles with /members.\nJoin: /register Group display name. Existing members use it to change their name.\nPrivate chat: /groups — choose a group; you can belong to several.\nLanguage: /language en; group language: /group_language en.\n\nYour main tool is /concerts: upcoming and past performances; ✅ means the setlist is approved. Select an event to open its setlist, propose a variant or change settings. New concert creates an event.\nIn private, /all_my_concerts lists your performances across all groups, with past dates under Past; /calendar connects a Google or Apple calendar subscription.\nDay-before reminders: /reminders.\n\n"
+            "Getting started\nSupport: /support.\nAny member can start registration with /new_band Name. The Telegram chat owner confirms and owns the group; the initiator becomes an administrator. Manage roles with /members.\nJoin: /register or the Join button below the membership list. Enter roles for administrator approval and permanent-team assignment. /register Name still changes your group display name.\nPrivate chat: /groups — choose a group; you can belong to several.\nLanguage: /language en; group language: /group_language en.\n\nYour main tool is /concerts: upcoming and past performances; ✅ means the setlist is approved. Select an event to open its setlist, propose a variant or change settings. New concert creates an event.\nIn private, /all_my_concerts lists your performances across all groups, with past dates under Past; /calendar connects a Google or Apple calendar subscription.\nDay-before reminders: /reminders.\n\n"
             "Add new songs: /add_new_songs Title  03:38  lights  110  comment.\n"
             "The last three fields are optional. Separate fields with two or more spaces; - means empty. Paste a text table or reply to the command prompt with an Article table.\n"
             "Catalog: /catalog [search]; archived songs: /archived.\n"
@@ -861,10 +861,34 @@ for _catalog in (MUSIC_TEXTS, WORKFLOW_TEXTS, CALENDAR_TEXTS, STAFFING_TEXTS, PR
 
 
 MESSAGES["ru"]["help"] += (
-    "\n\nПрофиль: кнопка «👤 Мой профиль» под /start — имя, профессиональные роли и готовность к подменам."
+    "\n\nПрофиль: /profile или кнопка «👤 Мой профиль» в /groups и под /start — имя, профессиональные роли и готовность к подменам."
 )
 MESSAGES["en"]["help"] += (
-    "\n\nProfile: use «👤 My profile» below /start to set your name, professional roles and substitution preferences."
+    "\n\nProfile: /profile or «👤 My profile» in /groups and below /start to set your name, professional roles and substitution preferences."
+)
+
+
+MESSAGES["ru"].update(
+    {
+        "role_dictionary_input": "Укажите название и до 150 однозначных синонимов длиной до 100 символов. Каждый синоним — на отдельной строке.",
+        "role_dictionary_collision": "Это название или синоним уже относится к другой роли, в том числе в истории. Выберите другое обозначение.",
+        "input_join_roles": "Какие роли вы выполняете в коллективе? По одной на строку или через запятую. Например: басист, гитарист; либо FOH, MON. Заявку подтвердит администратор, после чего вы появитесь в постоянных участниках коллектива.",
+        "join_requested": "{name} хочет присоединиться к постоянной команде. Роли: {roles}.\nЗаявка ожидает подтверждения администратора.",
+        "join_board": "Присоединяйтесь к коллективу «{name}»: укажите свои роли, администратор подтвердит заявку.\n\nУчастники коллектива:",
+        "join_no_roles": "роли пока не указаны",
+        "join_button": "Присоединиться к {name}",
+    }
+)
+MESSAGES["en"].update(
+    {
+        "role_dictionary_input": "Enter a role title and up to 150 unambiguous aliases, each up to 100 characters and on a separate line.",
+        "role_dictionary_collision": "This name or alias already belongs to another role, including historical records. Choose a different name.",
+        "input_join_roles": "Which roles do you perform in this band? One per line or comma-separated, for example bassist, guitarist; or FOH, MON. After administrator approval you will appear among the band’s permanent performers.",
+        "join_requested": "{name} requests to join the permanent team. Roles: {roles}.\nWaiting for administrator approval.",
+        "join_board": "Join “{name}”: specify your roles for administrator approval.\n\nBand members:",
+        "join_no_roles": "roles not specified yet",
+        "join_button": "Join {name}",
+    }
 )
 
 

@@ -43,7 +43,17 @@ class Administration:
         )
         self.store.add(audit)
         await self.store.flush()
-        if action in ("support_reply", "support_close", "support_reopen"):
+        if action == "role_save":
+            from setlist_bot.application.role_dictionary import RoleDictionary
+
+            row = await RoleDictionary(self.store).save(
+                identifier,
+                int(values["expected_version"]),
+                values.get("title", ""),
+                [line.strip() for line in values.get("aliases", "").splitlines() if line.strip()],
+            )
+            audit.details = {"key": row.key, "version": row.version, "aliases": len(row.aliases)}
+        elif action in ("support_reply", "support_close", "support_reopen"):
             request = await self.store.get(Outbox, identifier, lock=True)
             routes = await self.store.find(SupportMessage, outbox_id=identifier)
             require(request.support_kind == "request" and bool(routes), "not_found")

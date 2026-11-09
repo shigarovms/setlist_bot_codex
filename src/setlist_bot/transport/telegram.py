@@ -1165,6 +1165,7 @@ def make_router(processor: Processor, username: str, *, diagnostics: bool = Fals
             if query.message.chat.type in ("group", "supergroup") and query.data.split(maxsplit=1)[
                 0
             ] in (
+                "new_band",
                 "group_create_yes",
                 "group_create_edit",
                 "group_create_cancel",

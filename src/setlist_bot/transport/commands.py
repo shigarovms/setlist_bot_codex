@@ -42,10 +42,11 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "start": ("Начать работу с ботом", "Start using the bot"),
     "support": ("Связаться с поддержкой", "Contact support"),
     "help": ("Команды и примеры использования", "Commands and examples"),
+    "profile": ("Мой профиль и профессиональные роли", "My profile and professional roles"),
     "groups": ("Выбрать музыкальный коллектив", "Select a musical group"),
     "register": (
-        "Имя в коллективе и заявка на вступление",
-        "Group display name and membership application",
+        "Вступить в коллектив и указать роли",
+        "Join a band and specify your roles",
     ),
     "catalog": ("Репертуар и поиск песен", "Repertoire and song search"),
     "archived": ("Архивные песни", "Archived songs"),
@@ -151,7 +152,7 @@ ADMIN = (
 MENUS: dict[Menu, tuple[str, ...]] = {
     "default": COMMON[:6],
     "private": COMMON[:6]
-    + ("all_my_concerts", "calendar", "my_gigs", "set_no_concert_days")
+    + ("profile", "all_my_concerts", "calendar", "my_gigs", "set_no_concert_days")
     + COMMON[6:]
     + ("publish", "language")
     + ADMIN,

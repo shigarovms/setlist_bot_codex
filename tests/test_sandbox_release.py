@@ -166,7 +166,7 @@ def test_sandbox_release_grants_pause_and_alias_read_before_miniapp_start(sandbo
     assert args[args.index("-d") + 1] == "setlist_sandbox"
     assert args[-1] == (
         "GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp; "
-        "GRANT SELECT ON song_aliases TO setlist_miniapp;"
+        "GRANT SELECT ON song_aliases,professional_roles TO setlist_miniapp;"
     )
     start = next(i for i, args in enumerate(operations) if "up" in args and args[-1] == "miniapp")
     assert grant < start

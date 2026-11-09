@@ -130,6 +130,7 @@ async def template_view(
         roles,
         await c.store.find(StaffContact, group_id=row.group_id),
         [UUID(slot["role_id"]) for slot in row.slots],
+        await Staffing(c.store, c.user).vocabulary(),
     )
     people = {
         person.id: person

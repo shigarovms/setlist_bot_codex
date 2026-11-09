@@ -6,9 +6,9 @@ from typing import Any
 from uuid import UUID
 
 from setlist_bot.application.profiles import Profiles
+from setlist_bot.application.role_dictionary import RoleDictionary
 from setlist_bot.domain.entities import Confirmation, now
 from setlist_bot.domain.rules import AppError, require
-from setlist_bot.domain.staff_roles import parse_skills
 from setlist_bot.transport.controller import Controller, Response
 
 STEPS = ("name", "roles", "city", "availability", "about", "confirm")
@@ -133,7 +133,11 @@ async def reply(c: Controller, row: Confirmation, value: str, prompt_id: int) ->
     try:
         if value.strip() != "=":
             values["values"][step] = (
-                ([] if value.strip() == "-" else parse_skills(value))
+                (
+                    []
+                    if value.strip() == "-"
+                    else (await RoleDictionary(c.store).index()).parse(value)
+                )
                 if step == "roles"
                 else ("" if value.strip() == "-" else value.strip())
             )

@@ -4,9 +4,9 @@ from typing import Any
 
 from setlist_bot.application.activity import record_activity
 from setlist_bot.application.ports import Store
+from setlist_bot.application.role_dictionary import RoleDictionary
 from setlist_bot.domain.entities import User
 from setlist_bot.domain.rules import require
-from setlist_bot.domain.staff_roles import parse_skills
 
 
 class Profiles:
@@ -30,10 +30,17 @@ class Profiles:
         roles = values.get("roles", [])
         require(isinstance(roles, list) and all(isinstance(r, str) for r in roles), "input")
         if roles:
-            roles = parse_skills("\n".join(roles))
+            roles = (await RoleDictionary(self.store).index()).parse("\n".join(roles))
         user.profile = {**values, "roles": roles}
         if values.get("name"):
             user.display_name = values["name"]
         user.profile_version += 1
         record_activity(self.store, self.user, "profile_saved", user.id, fields=sorted(values))
+        from setlist_bot.application.member_boards import queue_member_board
+        from setlist_bot.domain.entities import Membership
+
+        # RU: Не захватываем блокировки коллективов после пользователя.
+        # EN: Queue only; the worker locks tenants later, avoiding lock-order inversion.
+        for member in await self.store.find(Membership, user_id=user.id, status="active"):
+            await queue_member_board(self.store, member.group_id, coalesce=False)
         return user

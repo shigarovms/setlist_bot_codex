@@ -178,6 +178,10 @@ class Collectives:
         binding = (await self.store.find(ChatBinding, group_id=group.id))[0]
         require(binding.chat_id == data["old_chat_id"], "input_expired")
         binding.chat_id = self.chat_id
+        from setlist_bot.application.member_boards import queue_member_board
+
+        await self.store.flush()
+        await queue_member_board(self.store, group.id)
         self.finish(row, data, "accepted")
         record_activity(self.store, self.user, "group_chat_transferred", group.id)
         return group

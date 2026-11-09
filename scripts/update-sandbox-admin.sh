@@ -85,7 +85,7 @@ if [[ "$miniapp_enabled" == true ]]; then
   # RU: Средняя и чтение алиасов; запись каталога выполняет только bot через outbox.
   # EN: Keep catalog writes denied to the HTTP role; apply read access before restart.
   "${compose[@]}" exec -T db psql -X -U setlist -d setlist_sandbox -v ON_ERROR_STOP=1 \
-    -c 'GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp; GRANT SELECT ON song_aliases TO setlist_miniapp;'
+    -c 'GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp; GRANT SELECT ON song_aliases,professional_roles TO setlist_miniapp;'
 fi
 "${compose[@]}" up -d --no-build --no-deps admin
 "${compose[@]}" exec -T admin .venv/bin/python - <<'PY'

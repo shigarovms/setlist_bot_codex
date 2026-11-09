@@ -34,7 +34,7 @@ async def handle_collective(c: Controller, command: str, args: str) -> Response:
                 tr(group.language, "added_existing", name=group.name),
                 [(tr(group.language, "open_concerts"), "concerts")],
             )
-        return Response(t("added_welcome"))
+        return Response(t("added_welcome"), [(t("connect_band"), "new_band")])
     if command == "group_manage":
         require(c.private, "private_only")
         group = await c.groups.access(UUID(args))

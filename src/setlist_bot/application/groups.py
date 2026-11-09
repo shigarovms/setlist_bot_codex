@@ -3,6 +3,7 @@ from datetime import timedelta
 from uuid import UUID
 
 from setlist_bot.application.activity import record_activity
+from setlist_bot.application.member_boards import queue_member_board
 from setlist_bot.application.message_refresh import queue_card_refreshes
 from setlist_bot.application.ports import Store
 from setlist_bot.application.support import Support
@@ -131,6 +132,7 @@ class Groups:
         existing = await self.store.find(Membership, group_id=group_id, user_id=self.user.id)
         if existing:
             existing[0].musical_role = musical_role.strip()
+            await queue_member_board(self.store, group_id)
             return existing[0]
         membership = Membership(
             group_id=group_id, user_id=self.user.id, musical_role=musical_role.strip()
@@ -138,15 +140,58 @@ class Groups:
         self.store.add(membership)
         return membership
 
-    async def decide_member(self, group_id: UUID, membership_id: UUID, approve: bool) -> None:
+    async def request_roles(self, group_id: UUID, roles: list[str]) -> Membership:
+        group = await self.store.get(Group, group_id, lock=True)
+        require(group.deleted_at is None, "in_trash")
+        from setlist_bot.application.role_dictionary import RoleDictionary
+
+        require(isinstance(roles, list) and all(isinstance(role, str) for role in roles), "input")
+        roles = (await RoleDictionary(self.store).index()).local_names("\n".join(roles))
+        existing = await self.store.find(Membership, group_id=group_id, user_id=self.user.id)
+        member = (
+            existing[0]
+            if existing
+            else await self.register(
+                group_id,
+                self.user.profile.get("name")
+                or self.user.display_name
+                or str(self.user.telegram_id),
+            )
+        )
+        if member.requested_roles != roles:
+            member.requested_roles = list(roles)
+            member.version += 1
+        return member
+
+    async def decide_member(
+        self, group_id: UUID, membership_id: UUID, approve: bool, expected: int | None = None
+    ) -> None:
         await self.access(group_id, admin=True)
         membership = await self.store.get(Membership, membership_id)
         require(membership.group_id == group_id, "not_found")
-        require(membership.status == "pending", "already_done")
+        require(
+            membership.status == "pending" or membership.requested_roles is not None, "already_done"
+        )
+        if membership.requested_roles is not None:
+            require(expected == membership.version, "input_expired")
         if approve:
             membership.status = "active"
+            if membership.requested_roles:
+                from setlist_bot.application.staffing import Staffing
+
+                service = Staffing(self.store, self.user)
+                for name in membership.requested_roles:
+                    role = await service.role(group_id, name)
+                    await service.set_permanent(group_id, role.id, membership.user_id)
+            membership.requested_roles = None
+            membership.version += 1
+        elif membership.status == "active":
+            membership.requested_roles = None
+            membership.version += 1
         else:
             await self.store.delete(membership)
+        await self.store.flush()
+        await queue_member_board(self.store, group_id)
 
     async def context(self, chat_id: int, private: bool) -> Context:
         matches = await self.store.find(Context, user_id=self.user.id, chat_id=chat_id)

@@ -42,6 +42,8 @@ class Group(Entity):
 
 @dataclass(kw_only=True)
 class Membership(Entity):
+    requested_roles: list[str] | None = None
+    version: int = 0
     group_id: UUID
     user_id: UUID
     role: str = "member"
@@ -461,3 +463,20 @@ class BusyPeriod(Entity):
     user_id: UUID
     starts_on: date
     ends_on: date
+
+
+@dataclass(kw_only=True)
+class ProfessionalRole(Entity):
+    key: str
+    title: str
+    aliases: list[str] = field(default_factory=list)
+    retired_aliases: list[str] = field(default_factory=list)
+    version: int = 1
+
+
+@dataclass(kw_only=True)
+class MemberBoard(Entity):
+    group_id: UUID
+    chat_id: int
+    group_epoch: int
+    message_ids: list[int] = field(default_factory=list)
