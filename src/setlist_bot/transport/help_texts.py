@@ -70,8 +70,8 @@ HELP_TEXTS = {
             "пересечение."
         ),
         "help_calendar": (
-            "Календарь\n\n/calendar выдаёт ссылку для подписки в Google Calendar или Apple "
-            "Calendar. "
+            "Календарь\n\nВ «Моём расписании» нажмите «Подключить календарь» или введите "
+            "/calendar вручную. Бот выдаёт ссылку для Google Calendar или Apple Calendar. "
             "Есть отдельная подписка на подтверждённые участия. "
             "Храните ссылку как пароль. Бот публикует расписание по ссылке и не читает внешние "
             "календари."
@@ -148,8 +148,8 @@ HELP_TEXTS = {
             "overlap."
         ),
         "help_calendar": (
-            "Calendar\n\n/calendar provides a subscription link for Google Calendar or Apple "
-            "Calendar. "
+            "Calendar\n\nIn My schedule, choose Connect a calendar, or type /calendar. "
+            "The bot provides a subscription link for Google Calendar or Apple Calendar. "
             "You can subscribe to confirmed assignments separately. "
             "Keep the link private. The bot publishes the schedule and does not read external "
             "calendars."

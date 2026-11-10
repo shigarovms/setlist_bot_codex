@@ -69,14 +69,17 @@ p {
   align-items: baseline;
   flex-wrap: wrap;
   margin-top: 14px;
-}
-.timing strong {
+  color: var(--text);
   font-size: 30px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-.timing span {
-  color: var(--hint);
+.timing strong {
+  font-weight: inherit;
+}
+#planned-delta {
   font-size: 14px;
+  font-weight: 400;
 }
 button,
 input {

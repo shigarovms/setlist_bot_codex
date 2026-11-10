@@ -115,7 +115,6 @@ def test_public_menu_registry_matches_real_commands_and_localization():
         "my_gigs",
         "catalog",
         "profile",
-        "calendar",
         "help",
     )
     assert MENUS["group"] == ("support", "concerts", "catalog", "register", "help", "new_band")
@@ -139,6 +138,12 @@ async def test_sync_clears_legacy_scopes_languages_and_is_idempotent():
     for scope in targets.scopes:
         for language in targets.languages:
             bot.menus[scope_key(scope), language] = legacy()
+    for scope, menu in GLOBAL_SCOPES:
+        if menu == "private":
+            for language in ("", "ru", "en"):
+                bot.menus[scope_key(scope), language] = menu_commands(menu, language) + [
+                    BotCommand(command="calendar", description="Calendar")
+                ]
     report = await synchronize_commands(bot, targets)
     assert report.checked == report.removed == 24 and report.registered == 12
     for scope, menu in GLOBAL_SCOPES:
