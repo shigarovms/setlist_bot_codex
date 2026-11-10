@@ -15,6 +15,7 @@ class ArticlePage:
     blocks: list[dict[str, Any]]
     text: str
     buttons: list[tuple[str, str]]
+    show_buttons: bool = False
 
 
 def setlist_articles(heading: str, snapshot: dict[str, Any], language: str) -> list[ArticlePage]:
@@ -116,16 +117,7 @@ def catalog_articles(
         cells = [
             [
                 {
-                    "text": {
-                        "type": "button",
-                        "button": {
-                            "text": value,
-                            "style": "link",
-                            "callback_data": page_buttons[row - 1][1],
-                        },
-                    }
-                    if row and column == 0 and row <= len(page_buttons)
-                    else value,
+                    "text": value,
                     "align": "right" if column in (1, 2) else "left",
                     "valign": "top",
                     "is_header": row == 0,
@@ -148,6 +140,7 @@ def catalog_articles(
                 ],
                 text=heading + "\n\n" + "\n\n".join(song_card(song, language) for song in group),
                 buttons=page_buttons,
+                show_buttons=True,
             )
         )
         offset += len(group)

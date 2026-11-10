@@ -5,7 +5,7 @@ import pytest
 from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramNotFound
 from aiogram.methods import SendRichMessage
-from aiogram.types import Chat, InputRichMessage, Message, RichMessage, Update
+from aiogram.types import CallbackQuery, Chat, InputRichMessage, Message, RichMessage, Update
 from aiogram.types import User as TelegramUser
 from test_setlist_menus import sender
 from test_telegram import FakeTelegram
@@ -97,14 +97,11 @@ async def test_transport_article_and_rejection_fallback_keep_fields_buttons_and_
         sent = await send_response(bot, -100, response)
     assert len(sent) == 1
     method = session.sent[0] if failure else session.rich_sent[0]
+    assert method.reply_markup.inline_keyboard[0][0].callback_data == "show_song test"
     if failure:
-        assert method.reply_markup.inline_keyboard[0][0].callback_data == "show_song test"
         assert row.title in method.text and "01:00" in method.text
     else:
-        assert method.reply_markup is None
-        assert (
-            method.rich_message.blocks[1].cells[1][0].text.button.callback_data == "show_song test"
-        )
+        assert method.rich_message.blocks[1].cells[1][0].text == row.title
         assert method.rich_message.skip_entity_detection
         assert not session.sent
     assert session.deleted[0].message_id == 10
@@ -138,7 +135,7 @@ async def test_catalog_search_archive_and_tenant_permissions_remain_unchanged(en
     assert "Чужая песня" not in archived.text
 
 
-async def test_router_sends_article_and_remembers_all_pages_for_existing_cleanup(engine, world):
+async def test_router_opens_song_from_its_catalog_page_and_remembers_pages(engine, world):
     import json
 
     async with PostgresUnitOfWork(engine) as uow:
@@ -163,7 +160,39 @@ async def test_router_sends_article_and_remembers_all_pages_for_existing_cleanup
                 ),
             ),
         )
-    assert len(session.rich_sent) == 2 and not session.sent
+        assert len(session.rich_sent) == 2 and not session.sent
+        first, second = session.rich_sent
+        first_actions = [row[0].callback_data for row in first.reply_markup.inline_keyboard]
+        second_actions = [row[0].callback_data for row in second.reply_markup.inline_keyboard]
+        assert len(first_actions) == 21 and len(second_actions) == 2
+        assert first_actions[-1] == f"mi_open {world.group.id.hex}"
+        assert not set(first_actions) & set(second_actions)
+        assert second_actions[-1] == f"show_song {world.song.id}"
+        await dispatcher.feed_update(
+            bot,
+            Update(
+                update_id=700002,
+                callback_query=CallbackQuery(
+                    id="open-song",
+                    chat_instance="test",
+                    data=second_actions[-1],
+                    from_user=TelegramUser(id=1, is_bot=False, first_name="Test"),
+                    message=Message(
+                        message_id=902,
+                        date=datetime.now(UTC),
+                        chat=Chat(id=-100, type="supergroup"),
+                        rich_message=RichMessage.model_validate(
+                            second.rich_message.model_dump(exclude_none=True)
+                        ),
+                        reply_markup=second.reply_markup,
+                    ),
+                ),
+            ),
+        )
+        assert "Комета" in session.sent[-1].text
+        assert session.sent[-1].reply_markup.inline_keyboard[0][0].callback_data == (
+            f"song_edit_menu {world.song.id}"
+        )
     async with PostgresUnitOfWork(engine) as uow:
         panels = [json.loads(row.command) for row in await uow.store.find(Confirmation)]
         assert any(row.get("message_ids") == [901, 902] for row in panels)
@@ -280,7 +309,6 @@ async def test_native_song_callback_handles_expired_ack_without_hiding_real_erro
     engine, world, expired, caplog
 ):
     from aiogram.methods import AnswerCallbackQuery
-    from aiogram.types import CallbackQuery
 
     class CallbackTelegram(ArticleTelegram):
         async def make_request(self, bot, method, timeout=None):
@@ -340,7 +368,8 @@ async def test_repertoire_menu_and_row_edit_are_bound_to_the_original_band(engin
     cells = catalog.articles[0].blocks[1]["cells"]
     assert len(cells[0]) == 5
     assert "Редактировать" not in [cell["text"] for cell in cells[0]]
-    open_action = cells[1][0]["text"]["button"]["callback_data"]
+    assert cells[1][0]["text"] == world.song.title
+    open_action = catalog.articles[0].buttons[0][1]
     InputRichMessage.model_validate({"blocks": catalog.articles[0].blocks})
     await send(f"use_group {world.other.id}", private=True)
     opened = await send(open_action, private=True)

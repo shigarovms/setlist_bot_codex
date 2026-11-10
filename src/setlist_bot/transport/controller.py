@@ -1254,16 +1254,7 @@ class Controller:
                 label = self.t("music_entry")
                 response.buttons.append((label, action))
                 if response.articles:
-                    first = response.articles[0]
-                    first.blocks[0]["text"] = [
-                        first.blocks[0]["text"],
-                        "\n",
-                        {
-                            "type": "button",
-                            "button": {"text": label, "style": "link", "callback_data": action},
-                        },
-                    ]
-                    first.buttons.append((label, action))
+                    response.articles[0].buttons.append((label, action))
             response.navigation_slot = "catalog"
             return response
         if command in (
