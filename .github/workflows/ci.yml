@@ -43,4 +43,5 @@ jobs:
           mkdir -p "$RUNNER_TEMP/browser-bin"
           ln -s "$chrome" "$RUNNER_TEMP/browser-bin/chromium"
           echo "$RUNNER_TEMP/browser-bin" >> "$GITHUB_PATH"
-      - run: uv run pytest -q
+      - run: uv run pytest -q tests/test_admin_roles_browser.py tests/test_miniapp_browser.py
+      - run: uv run pytest -q --ignore=tests/test_admin_roles_browser.py --ignore=tests/test_miniapp_browser.py

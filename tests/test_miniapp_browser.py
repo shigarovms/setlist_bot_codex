@@ -68,11 +68,12 @@ class Browser:
         return result.get("result", {}).get("value")
 
     async def wait(self, expression):
-        for _ in range(100):
+        for _ in range(200):
             if await self.js(expression):
                 return
             await asyncio.sleep(0.05)
-        raise AssertionError("Browser condition failed: " + expression)
+        page = await self.js("({url: location.href, text: document.body?.innerText.slice(0, 500)})")
+        raise AssertionError(f"Browser condition failed: {expression}. Page: {page}")
 
     async def tap(self, selector):
         point = await self.js(

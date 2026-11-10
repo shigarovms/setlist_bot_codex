@@ -24,33 +24,38 @@ async def test_role_editor_can_save_in_chromium(engine, tmp_path):
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
-    process = subprocess.Popen(
-        [
-            shutil.which("chromium"),
-            "--headless",
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--no-first-run",
-            "--disable-background-networking",
-            f"--remote-debugging-port={port}",
-            f"--user-data-dir={tmp_path / 'chrome'}",
-            "about:blank",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    browser_log = tmp_path / "chromium.log"
+    with browser_log.open("w") as log:
+        process = subprocess.Popen(
+            [
+                shutil.which("chromium"),
+                "--headless",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-background-networking",
+                f"--remote-debugging-port={port}",
+                f"--user-data-dir={tmp_path / 'chrome'}",
+                "about:blank",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=log,
+        )
     browser = None
     try:
         async with aiohttp.ClientSession() as client:
-            for _ in range(100):
+            for _ in range(200):
                 try:
                     async with client.get(f"http://127.0.0.1:{port}/json/list") as response:
                         pages = await response.json()
                     break
                 except (aiohttp.ClientError, ValueError):
+                    if process.poll() is not None:
+                        raise AssertionError(browser_log.read_text()) from None
                     await asyncio.sleep(0.05)
             else:
-                raise AssertionError("Chromium did not start")
+                raise AssertionError(f"Chromium did not start: {browser_log.read_text()}")
             browser = Browser(await client.ws_connect(pages[0]["webSocketDebuggerUrl"]))
 
             async def wait(expression):
