@@ -77,6 +77,9 @@ const words = {
     songAliases: "Альтернативные названия — по одному на строку",
     songScope: "Меняется запись репертуара, поэтому правка отразится во всех её вхождениях в рабочих сет-листах. Правки участника требуют одобрения администратора.",
     songSave: "Сохранить", songPending: "Запрос сохраняется ботом…",
+    songDelete: "Удалить песню", songArchived: "Песня перенесена в архив репертуара.",
+    songArchiveConfirm: "Песня исчезнет из репертуара. Её можно будет восстановить из архива.",
+    songArchiveDraft: "Песня останется в текущем черновике. Чтобы сохранить следующие правки черновика, уберите её из списка или восстановите из архива.",
     songQueued: "Запрос в очереди. Проверьте сохранение перед новым изменением песни.",
     close: "Закрыть",
     songCheck: "Проверить сохранение", songSaved: "Репертуар обновлён.",
@@ -154,6 +157,9 @@ const words = {
     songAliases: "Alternative titles — one per line",
     songScope: "This updates the repertoire entry and all its occurrences in working setlists. Member edits require administrator approval.",
     songSave: "Save", songPending: "The bot is saving your request…",
+    songDelete: "Delete song", songArchived: "Song moved to the repertoire archive.",
+    songArchiveConfirm: "The song will be removed from the repertoire. You can restore it from the archive.",
+    songArchiveDraft: "The song will stay in this draft. To save further draft edits, remove it from the draft or restore it from the archive.",
     songQueued: "Request queued. Check its result before editing another song.",
     close: "Close",
     songCheck: "Check save", songSaved: "Repertoire updated.",
@@ -733,6 +739,8 @@ async function openSong(id = null) {
     $("song-error").textContent = "";
     $("song-dialog-title").textContent = t(id ? "repertoireSong" : "addSong");
     $("song-submit").textContent = t("songSave");
+    $("song-delete").textContent = t("songDelete");
+    $("song-delete").hidden = !editingSong || !state.can_set_group_default;
     $("song-reload").hidden = true;
     $("song-dialog").showModal();
   } catch (error) { status(error.message, true); }
@@ -769,35 +777,50 @@ async function refreshRepertoire() {
   saver.setDraft(current, defaultPause);
   render();
 }
-$("song-form").addEventListener("submit", async event => {
+$("song-delete").addEventListener("click", () => {
+  if (!editingSong || !state?.can_set_group_default || catalogAttempt || songSubmitting) return;
+  const used = current.some(item => item.song_id === editingSong.id);
+  const warning = used ? `\n\n${t("songArchiveDraft")}` : "";
+  if (confirm(`${editingSong.title}\n\n${t("songArchiveConfirm")}${warning}`)) void submitSong(true);
+});
+$("song-form").addEventListener("submit", event => {
   event.preventDefault();
+  void submitSong();
+});
+async function submitSong(archive = false) {
   if (songSubmitting || !saver) return;
+  const song = editingSong;
   songSubmitting = true;
   busy = true;
   $("song-submit").disabled = true;
   $("song-cancel").disabled = true;
   $("song-reload").disabled = true;
+  $("song-delete").disabled = true;
   saver.pause();
   render();
   try {
     if (!catalogAttempt) {
       await saver.flush();
       catalogAttempt = {
-        request_id: crypto.randomUUID(), song_id: editingSong?.id ?? null,
-        expected: editingSong?.version ?? null,
-        fields: {
+        request_id: crypto.randomUUID(), song_id: song?.id ?? null,
+        expected: song?.version ?? null,
+      };
+      if (archive) {
+        catalogAttempt.archive = true;
+      } else {
+        catalogAttempt.fields = {
           title: $("song-title").value.trim(), duration_seconds: $("song-duration").value.trim(),
           bpm: $("song-bpm").value ? Number($("song-bpm").value) : null,
           lights: $("song-lights").value, comment: $("song-comment").value,
           aliases: $("song-aliases").value.split("\n").map(v => v.trim()).filter(Boolean),
-        },
-      };
+        };
+      }
     }
     lockSongFields(true);
     $("song-error").textContent = t("songPending");
     let result = catalogRequest
       ? await api("catalog_status", { request: catalogRequest })
-      : await api("catalog_save", catalogAttempt, "POST");
+      : await api(catalogAttempt.archive ? "catalog_archive" : "catalog_save", catalogAttempt, "POST");
     catalogRequest = result.request;
     for (let i = 0; result.status === "pending" && i < 30; i++) {
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -818,7 +841,7 @@ $("song-form").addEventListener("submit", async event => {
     await refreshRepertoire();
     catalogAttempt = catalogRequest = null;
     $("song-dialog").close();
-    status(t(result.proposed ? "songProposed" : "songSaved"));
+    status(t(result.archived ? "songArchived" : result.proposed ? "songProposed" : "songSaved"));
   } catch (error) {
     // Explicit validation rejection means nothing was queued. Network failures stay retryable.
     if (!catalogRequest && error.data) catalogAttempt = null;
@@ -831,10 +854,11 @@ $("song-form").addEventListener("submit", async event => {
     $("song-submit").disabled = false;
     $("song-cancel").disabled = false;
     $("song-reload").disabled = false;
+    $("song-delete").disabled = !!catalogAttempt;
     saver.resume();
     render();
   }
-});
+}
 function openPause(index = null) {
   if (!state || preview || busy) return;
   const item = index === null ? null : current[index];

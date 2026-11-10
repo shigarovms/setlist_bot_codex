@@ -583,8 +583,13 @@ class Processor:
                     )
                 response.navigation_owner_id = user.id
                 if response.navigation_slot == "song":
-                    # RU: Меняем свою последнюю карточку, сохраняя отдельно каталог.
-                    # EN: Reuse only this user's card in this chat, never the catalog message.
+                    # A catalog tap must not silently update a card above the tapped table.
+                    song_source_id = (
+                        message_id
+                        if is_callback
+                        and command.partition(" ")[0] in ("show_song", "catalog_edit")
+                        else None
+                    )
                     for panel in await uow.store.find(
                         Confirmation, user_id=user.id, chat_id=chat_id
                     ):
@@ -594,7 +599,11 @@ class Processor:
                             and data.get("slot") == "song"
                             and panel.expires_at > now()
                         ):
-                            response.edit_message_ids = list(data.get("message_ids", []))
+                            identifiers = list(data.get("message_ids", []))
+                            if song_source_id is None or all(
+                                identifier >= song_source_id for identifier in identifiers
+                            ):
+                                response.edit_message_ids = identifiers
                             break
             return response
 

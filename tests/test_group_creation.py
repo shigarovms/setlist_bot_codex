@@ -226,7 +226,8 @@ async def test_start_has_three_steps_with_valid_public_commands_and_fits_descrip
     assert re.findall(r"^[1-9][.] ", start.text, flags=re.MULTILINE) == ["1. ", "2. ", "3. "]
     commands = set(re.findall(r"/([a-z_]+)", start.text))
     assert commands == {"new_band", "register", "concerts", "calendar", "help", "support"}
-    assert commands <= DESCRIPTIONS.keys()
+    # /calendar remains usable by name after being removed from the command menu.
+    assert commands <= DESCRIPTIONS.keys() | {"calendar"}
     help_response = await send("/help", private=True, chat=1)
     assert len(help_response.buttons) == 6
     topic = await send(help_response.buttons[0][1], private=True, chat=1, callback=True)

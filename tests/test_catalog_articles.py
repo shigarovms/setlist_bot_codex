@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from aiogram import Bot, Dispatcher
 from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramNotFound
-from aiogram.methods import SendRichMessage
+from aiogram.methods import SendMessage, SendRichMessage
 from aiogram.types import Chat, InputRichMessage, Message, RichMessage, Update
 from aiogram.types import User as TelegramUser
 from test_setlist_menus import sender
@@ -24,14 +24,16 @@ class ArticleTelegram(FakeTelegram):
         super().__init__()
         self.rich_sent = []
         self.fail = fail
+        self.message_id = 900
 
     async def make_request(self, bot, method, timeout=None):
         if isinstance(method, SendRichMessage):
             if self.fail:
                 raise self.fail(method=method, message="synthetic API rejection")
             self.rich_sent.append(method)
+            self.message_id += 1
             return Message(
-                message_id=900 + len(self.rich_sent),
+                message_id=self.message_id,
                 date=datetime.now(UTC),
                 chat=Chat(id=int(method.chat_id), type="supergroup"),
                 from_user=TelegramUser(id=bot.id, is_bot=True, first_name="Test"),
@@ -39,7 +41,11 @@ class ArticleTelegram(FakeTelegram):
                     method.rich_message.model_dump(exclude_none=True)
                 ),
             )
-        return await super().make_request(bot, method, timeout)
+        result = await super().make_request(bot, method, timeout)
+        if isinstance(method, SendMessage):
+            self.message_id += 1
+            return result.model_copy(update={"message_id": self.message_id})
+        return result
 
 
 def songs(count):
@@ -244,6 +250,22 @@ async def test_catalog_stays_and_song_card_is_reused_after_editing(engine, world
             assert len([panel for panel in panels if panel.get("slot") == "song"]) == 1
             identifiers = set(await collect(uow.store, chat_id))
             assert catalog_ids <= identifiers and card_id in identifiers
+
+        fresh_catalog, fresh_pages = await send("/catalog")
+        source = fresh_pages[0].message_id
+        assert source > card_id
+        title_buttons = [
+            row[0]["text"]["button"] for row in fresh_catalog.articles[0].blocks[1]["cells"][1:]
+        ]
+        open_action = next(
+            button["callback_data"] for button in title_buttons if button["text"] == "Комета"
+        )
+        reopened, new_card = await send(open_action, source=source)
+        assert not reopened.edit_message_ids and "Комета" in reopened.text
+        assert new_card[0].message_id > source
+        assert card_id in reopened.delete_message_ids and source not in reopened.delete_message_ids
+        switched, _ = await send(f"show_song {other.id}", source=source)
+        assert switched.edit_message_ids == [new_card[0].message_id] and "Другая" in switched.text
 
 
 async def test_missing_song_card_is_replaced_without_deleting_catalog(engine, world):

@@ -422,9 +422,23 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 "document.querySelector('#setlist li').classList.contains('pause')"
             )
             # Theme changes must not lose the in-progress list.
+            matching_timing_style = """(() => {
+                const total = getComputedStyle(document.querySelector('#total'));
+                const delta = getComputedStyle(document.querySelector('#planned-delta'));
+                const edit = getComputedStyle(document.querySelector('#planned-edit'));
+                const values = document.querySelectorAll('#planned-edit, .timing > [aria-hidden]');
+                return Array.from(values).every((element) => {
+                    const style = getComputedStyle(element);
+                    return ['fontFamily', 'fontSize', 'fontWeight', 'fontVariantNumeric', 'color']
+                        .every((property) => style[property] === total[property]);
+                }) && delta.color === total.color
+                   && getComputedStyle(document.body).color === total.color
+                   && edit.borderTopStyle === 'solid';
+            })()"""
             await browser.js("window.Telegram.WebApp.colorScheme='dark'; window.themeChange()")
             assert await browser.js("document.documentElement.dataset.theme") == "dark"
             assert await browser.js(transparent_pause)
+            assert await browser.js(matching_timing_style)
             await browser.js("window.scrollTo(0,0)")
             await browser.js("new Promise(resolve => setTimeout(resolve, 180))")
             screenshot = await browser.call("Page.captureScreenshot", {"format": "png"})
@@ -447,6 +461,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             )
             await browser.js("window.Telegram.WebApp.colorScheme='light'; window.themeChange()")
             assert await browser.js("document.documentElement.dataset.theme") == "light"
+            assert await browser.js(matching_timing_style)
             await browser.js("new Promise(resolve => setTimeout(resolve, 180))")
             screenshot = await browser.call("Page.captureScreenshot", {"format": "png"})
             (tmp_path / "miniapp-light.png").write_bytes(base64.b64decode(screenshot["data"]))
@@ -573,6 +588,37 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             assert "запас" in await browser.js(
                 "document.getElementById('planned-delta').textContent"
             )
+            await browser.js("""
+                document.getElementById('search').value='Меланхолия';
+                document.getElementById('search').dispatchEvent(new Event('input'));
+                document.querySelector('.catalog-entry .song-edit').click();
+            """)
+            await browser.wait("document.getElementById('song-dialog').open")
+            assert await browser.js("!document.getElementById('song-delete').hidden")
+            assert await browser.js("document.getElementById('song-title').value") == "Меланхолия"
+            await browser.js("""(() => {
+                const ask = window.confirm;
+                window.confirm = () => false;
+                document.getElementById('song-delete').click();
+                window.confirm = ask;
+            })()""")
+            assert await browser.js("document.getElementById('song-dialog').open")
+            async with PostgresUnitOfWork(engine) as uow:
+                assert not await uow.store.find(Outbox, support_kind="catalog", sent=False)
+            await browser.js("document.getElementById('song-delete').click()")
+            for _ in range(80):
+                async with PostgresUnitOfWork(engine) as uow:
+                    requests = await uow.store.find(Outbox, support_kind="catalog", sent=False)
+                if requests:
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("Archive request was not queued")
+            async with Bot("123456:TEST", session=FakeTelegram()) as bot:
+                assert await deliver_one_outbox(bot, engine)
+            await browser.wait("!document.getElementById('song-dialog').open")
+            assert "архив" in await browser.js("document.getElementById('status').textContent")
+            assert not await browser.js("!!document.querySelector('.catalog-entry')")
             await browser.js("document.getElementById('publish').click()")
             for _ in range(50):
                 async with PostgresUnitOfWork(engine) as uow:

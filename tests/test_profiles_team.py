@@ -260,6 +260,10 @@ async def test_profile_fields_can_be_kept_and_admin_views_stay_group_scoped(engi
     send = sender(engine)
     profile = await send("profile", actor=2, private=True, remember=171)
     assert "FOH" in profile.text and "Пермь" in profile.text
+    assert profile.buttons[-2][1] == "my_gigs" and profile.buttons[-1][1] == "groups"
+    schedule = await send(profile.buttons[-2][1], actor=2, private=True)
+    assert "Моё расписание" in schedule.text
+    profile = await send("/profile", actor=2, private=True, remember=171)
     city = next(action for label, action in profile.buttons if label == "Изменить город")
     await send(city, actor=2, private=True, remember=172)
     same = await send("=", actor=2, private=True, reply=172)

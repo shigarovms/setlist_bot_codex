@@ -98,6 +98,8 @@ async def test_subscriptions_can_be_created_by_members_and_deep_link_rechecks_ac
     assert world.other.name not in denied.text
     mine = await send("/all_my_concerts")
     assert ("📅 Подключить календарь", "calendar") in mine.buttons
+    schedule = await send("/my_gigs")
+    assert ("📅 Подключить календарь", "calendar") in schedule.buttons
 
 
 async def test_missing_public_configuration_does_not_issue_unusable_links(engine, world):

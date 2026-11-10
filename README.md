@@ -186,7 +186,9 @@ Compose ждёт PostgreSQL, применяет миграции отдельн�
 Области `default`, `all_private_chats`, `all_group_chats`, `all_chat_administrators`
 получают отдельные меню для `ru`, `en` и языка по умолчанию (русский).
 В личном чате видны `/support`, `/groups`, `/concerts`, `/my_gigs`, `/catalog`,
-`/profile`, `/calendar` и `/help`. В общем чате видны `/support`, `/concerts`,
+`/profile` и `/help`. В «Моём профиле» кнопка «Моё расписание» находится над «Назад».
+Календарь можно подключить из «Моего расписания» или командой `/calendar` вручную.
+В общем чате видны `/support`, `/concerts`,
 `/catalog`, `/register`, `/help` и `/new_band`. Для администраторов Telegram-чата
 добавляются `/add_new_songs` и `/concert`. Старые команды работают по-прежнему,
 примеры доступны в темах RU/EN-справки. Текущий ввод отменяется через `/cancel`.

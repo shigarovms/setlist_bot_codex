@@ -69,14 +69,17 @@ p {
   align-items: baseline;
   flex-wrap: wrap;
   margin-top: 14px;
-}
-.timing strong {
+  color: var(--text);
   font-size: 30px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-.timing span {
-  color: var(--hint);
+.timing strong {
+  font-weight: inherit;
+}
+#planned-delta {
   font-size: 14px;
+  font-weight: 400;
 }
 button,
 input {
@@ -412,6 +415,7 @@ pre {
 #add-song { width: 100%; margin-top: 8px; }
 #add-pause-bottom.drop-after { border-color: var(--button); background: var(--panel); }
 #song-error { color: var(--danger); white-space: pre-wrap; }
+#song-delete { color: var(--danger); }
 #song-scope { color: var(--hint); font-size: 13px; }
 
 #planned-edit {

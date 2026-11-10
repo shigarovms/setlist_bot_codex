@@ -54,7 +54,7 @@ async def show(c: Controller, row: Confirmation, values: dict[str, Any]) -> Resp
                 button("profile_edit_" + field, f"edit{index}")
                 for index, field in enumerate(STEPS[:-1])
             ]
-            + [(c.t("menu_back"), "groups")],
+            + [(c.t("staff_my"), "my_gigs"), (c.t("menu_back"), "groups")],
             workflow_id=row.id,
         )
 
