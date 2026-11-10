@@ -237,3 +237,30 @@ async def test_cancelling_an_unrelated_input_does_not_cancel_background_search(e
     await send("/cancel", private=True)
     async with PostgresUnitOfWork(engine) as uow:
         assert (await uow.store.get(MusicSearch, identifier)).status == "choosing"
+
+
+async def test_selected_filter_and_bulk_selection_cover_all_pages(engine, world):
+    identifier = await ready(engine, world, 42)
+    send = sender(engine)
+
+    await send(f"mi_select {identifier.hex} 0", private=True)
+    await send(f"mi_filter {identifier.hex} 1", private=True)
+    filtered = await send(f"mi_view {identifier.hex}", private=True)
+    assert "Выбрано 0 из 42" in filtered.text
+    assert len(filtered.articles[0].blocks[1]["cells"]) == 1
+    assert not any(action.startswith("mi_preview") for _, action in filtered.buttons)
+
+    await send(f"mi_select {identifier.hex} 1", private=True)
+    await send(f"mi_page {identifier.hex} 2", private=True)
+    last = await send(f"mi_view {identifier.hex}", private=True)
+    assert "Выбрано 42 из 42" in last.text
+    assert "Страница 3/3" in last.text
+    await send(f"mi_toggle {identifier.hex} 41", private=True)
+    last = await send(f"mi_view {identifier.hex}", private=True)
+    assert "Выбрано 41 из 42" in last.text
+    assert len(last.articles[0].blocks[1]["cells"]) == 2
+
+    preview = await send(f"mi_preview {identifier.hex}", private=True)
+    assert any(label == "✅ Добавить 41 песен" for label, _ in preview.buttons)
+    await send(f"mi_back {identifier.hex}", private=True)
+    assert "Выбрано 41 из 42" in (await send(f"mi_view {identifier.hex}", private=True)).text
