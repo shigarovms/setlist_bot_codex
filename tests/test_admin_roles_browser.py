@@ -10,7 +10,7 @@ import aiohttp
 import pytest
 from aiohttp.test_utils import TestServer
 from test_admin import PASSWORD, settings
-from test_miniapp_browser import Browser
+from test_miniapp_browser import Browser, browser_tab
 
 from setlist_bot.admin.app import create_app
 from setlist_bot.domain.entities import ProfessionalRole
@@ -45,18 +45,11 @@ async def test_role_editor_can_save_in_chromium(engine, tmp_path):
     browser = None
     try:
         async with aiohttp.ClientSession() as client:
-            for _ in range(200):
-                try:
-                    async with client.get(f"http://127.0.0.1:{port}/json/list") as response:
-                        pages = await response.json()
-                    break
-                except (aiohttp.ClientError, ValueError):
-                    if process.poll() is not None:
-                        raise AssertionError(browser_log.read_text()) from None
-                    await asyncio.sleep(0.05)
-            else:
-                raise AssertionError(f"Chromium did not start: {browser_log.read_text()}")
-            browser = Browser(await client.ws_connect(pages[0]["webSocketDebuggerUrl"]))
+            try:
+                url = await browser_tab(client, port, process)
+            except AssertionError as exc:
+                raise AssertionError(f"{exc}\n{browser_log.read_text()}") from exc
+            browser = Browser(await client.ws_connect(url))
 
             async def wait(expression):
                 try:

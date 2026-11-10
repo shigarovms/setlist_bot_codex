@@ -18,6 +18,22 @@ from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.miniapp.app import create_app
 
 
+async def browser_tab(client, port, process):
+    for _ in range(200):
+        if process.poll() is not None:
+            break
+        try:
+            async with client.get(f"http://127.0.0.1:{port}/json/list") as response:
+                pages = await response.json()
+            for page in pages:
+                if page["type"] == "page" and page["url"] == "about:blank":
+                    return page["webSocketDebuggerUrl"]
+        except (aiohttp.ClientError, ValueError):
+            pass
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"Chromium test tab did not open (exit code: {process.poll()})")
+
+
 class Browser:
     def __init__(self, ws):
         self.ws, self.sequence, self.pending = ws, 0, {}
@@ -172,16 +188,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
     browser = None
     try:
         async with aiohttp.ClientSession() as client:
-            for _ in range(100):
-                try:
-                    async with client.get(f"http://127.0.0.1:{port}/json/list") as response:
-                        pages = await response.json()
-                    break
-                except (aiohttp.ClientError, ValueError):
-                    await asyncio.sleep(0.05)
-            else:
-                raise AssertionError("Chromium did not start")
-            ws = await client.ws_connect(pages[0]["webSocketDebuggerUrl"])
+            ws = await client.ws_connect(await browser_tab(client, port, process))
             browser = Browser(ws)
             await browser.call("Page.enable")
             await browser.call(
