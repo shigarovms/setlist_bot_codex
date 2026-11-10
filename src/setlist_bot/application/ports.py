@@ -27,13 +27,24 @@ class Store(Protocol):
         self, identifier: UUID, group_id: UUID, concert_id: UUID, chat_id: int
     ) -> str: ...
 
+    async def visible_concert_ids(self, user_id: UUID, group_id: UUID) -> set[UUID]: ...
+
     async def concerts_for_user(
-        self, user_id: UUID, current: date, *, offset: int, limit: int
+        self,
+        user_id: UUID,
+        current: date,
+        *,
+        offset: int,
+        limit: int,
+        past: bool = False,
+        admin_only: bool = False,
     ) -> list[tuple[Concert, Group]]: ...
 
     async def expired[T: Entity](self, kind: type[T], field: str, before: datetime) -> list[T]: ...
 
     async def lock_chat(self, chat_id: int) -> None: ...
+
+    async def lock_role_dictionary(self) -> None: ...
 
     async def lock_people(self, identifiers: set[UUID]) -> None: ...
 

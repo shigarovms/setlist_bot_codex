@@ -15,6 +15,8 @@ class Entity:
 
 @dataclass(kw_only=True)
 class User(Entity):
+    profile: dict[str, Any] = field(default_factory=dict)
+    profile_version: int = 0
     username: str = ""
     username_seen_at: datetime | None = None
     last_seen_at: datetime | None = None
@@ -40,6 +42,8 @@ class Group(Entity):
 
 @dataclass(kw_only=True)
 class Membership(Entity):
+    requested_roles: list[str] | None = None
+    version: int = 0
     group_id: UUID
     user_id: UUID
     role: str = "member"
@@ -393,6 +397,7 @@ class StaffRole(Entity):
 
 @dataclass(kw_only=True)
 class LineupTemplate(Entity):
+    created_at: datetime = field(default_factory=now)
     group_id: UUID
     name: str
     name_key: str
@@ -402,6 +407,9 @@ class LineupTemplate(Entity):
 
 @dataclass(kw_only=True)
 class StaffContact(Entity):
+    permanent: bool = False
+    priority: int = 100
+    version: int = 1
     group_id: UUID
     user_id: UUID
     role_id: UUID
@@ -455,3 +463,20 @@ class BusyPeriod(Entity):
     user_id: UUID
     starts_on: date
     ends_on: date
+
+
+@dataclass(kw_only=True)
+class ProfessionalRole(Entity):
+    key: str
+    title: str
+    aliases: list[str] = field(default_factory=list)
+    retired_aliases: list[str] = field(default_factory=list)
+    version: int = 1
+
+
+@dataclass(kw_only=True)
+class MemberBoard(Entity):
+    group_id: UUID
+    chat_id: int
+    group_epoch: int
+    message_ids: list[int] = field(default_factory=list)

@@ -1,6 +1,8 @@
 from datetime import timedelta
 from itertools import count
 
+import pytest
+
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.domain.entities import Outbox, SongListTemplate, now
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
@@ -27,10 +29,11 @@ def button(response, prefix):
     return next(data for _, data in response.buttons if data.startswith(prefix))
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_button_only_on_current_editable_setlist_and_empty_prompt(engine, world):
     send = sender(engine)
     empty = await send(f"/use_concert {world.concert.id}")
-    assert empty.buttons[0][0] == "Предложить свой вариант"
+    assert empty.buttons[0][0] == "🎵 Открыть редактор"
     prompt = await send(button(empty, "copy_list "), actor=2)
     assert "Какой вариант вы предлагаете?" in prompt.text
     text_prompt = await send(button(prompt, "copy_text "), actor=2)
@@ -74,6 +77,7 @@ async def test_private_template_cannot_be_read_by_other_user_or_forwarded(engine
         assert version == 0 and not shared["blocks"][0]["items"]
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_published_proposals_and_previews_have_no_suggestion_button(engine, world):
     send = sender(engine)
     await send(f"/use_group {world.group.id}", actor=2, private=True)

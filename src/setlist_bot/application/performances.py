@@ -12,11 +12,25 @@ class PersonalPerformances:
     def __init__(self, store: Store, user: User) -> None:
         self.store, self.user = store, user
 
-    async def page(self, number: int) -> tuple[list[tuple[Concert, Group]], bool]:
+    async def page(
+        self, number: int, *, past: bool = False, admin_only: bool = False
+    ) -> tuple[list[tuple[Concert, Group]], bool]:
         require(0 <= number <= 10000, "input")
         # RU: Лишняя строка показывает наличие следующей страницы без COUNT(*).
         # EN: Listing never selects a group, creates drafts or locks every membership.
         rows = await self.store.concerts_for_user(
-            self.user.id, today(), offset=number * PAGE_SIZE, limit=PAGE_SIZE + 1
+            self.user.id,
+            today(),
+            offset=number * PAGE_SIZE,
+            limit=PAGE_SIZE + 1,
+            past=past,
+            admin_only=admin_only,
         )
         return rows[:PAGE_SIZE], len(rows) > PAGE_SIZE
+
+    async def has_past(self, *, admin_only: bool = False) -> bool:
+        return bool(
+            await self.store.concerts_for_user(
+                self.user.id, today(), offset=0, limit=1, past=True, admin_only=admin_only
+            )
+        )

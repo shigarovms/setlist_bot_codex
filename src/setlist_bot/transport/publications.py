@@ -37,7 +37,7 @@ async def queue_publication(
         group.name
         + "\n"
         + render_setlist(
-            snapshot, await store.get(Concert, concert_id), group.language, version, private=True
+            snapshot, await store.get(Concert, concert_id), group.language, version, proposal=True
         )
     )
     event = Outbox(

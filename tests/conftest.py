@@ -117,3 +117,51 @@ async def world(engine: AsyncEngine) -> SimpleNamespace:
         concert2=concert2,
         other_concert=other_concert,
     )
+
+
+async def invite_fixture_member(store, concert, user, *, status="confirmed"):
+    """Create a booking directly when the test exercises a feature downstream of staffing."""
+    from datetime import timedelta
+
+    from setlist_bot.domain.entities import GigInvitation, GigSlot, StaffRole, now
+
+    roles = await store.find(StaffRole, group_id=concert.group_id, name_key="fixture performer")
+    role = (
+        roles[0]
+        if roles
+        else StaffRole(
+            group_id=concert.group_id, name="Fixture performer", name_key="fixture performer"
+        )
+    )
+    if not roles:
+        store.add(role)
+        await store.flush()
+    slots = await store.find(GigSlot, concert_id=concert.id)
+    slot = GigSlot(
+        group_id=concert.group_id,
+        concert_id=concert.id,
+        role_id=role.id,
+        position=max((item.position for item in slots), default=0) + 1,
+    )
+    store.add(slot)
+    await store.flush()
+    row = GigInvitation(
+        group_id=concert.group_id,
+        concert_id=concert.id,
+        slot_id=slot.id,
+        user_id=user.id,
+        status=status,
+        date=concert.date,
+        concert_epoch=concert.lifecycle_version,
+        expires_at=now() + timedelta(days=7),
+    )
+    store.add(row)
+    await store.flush()
+    return row
+
+
+@pytest_asyncio.fixture
+async def invited_member(engine, world):
+    async with PostgresUnitOfWork(engine) as uow:
+        for concert in (world.concert, world.concert2):
+            await invite_fixture_member(uow.store, concert, world.member)

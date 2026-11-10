@@ -160,6 +160,7 @@ class MiniDrafts:
             and concert.lifecycle_version == data["concert_epoch"],
             "miniapp_expired",
         )
+        await self.groups.check_performance_visibility(group_id, concert.id)
         # RU: Сначала блокируем коллектив, затем сессию, как в командах бота.
         # EN: Match the bot's lock order; the session target cannot switch with /groups.
         row = await self.store.get(Confirmation, identifier, lock=True)
@@ -173,11 +174,7 @@ class MiniDrafts:
         songs = await self.store.find(Song, group_id=group_id, archived=False) if catalog else []
         require(len(songs) <= 5000, "miniapp_catalog_limit")
         counts: Counter[str] = Counter()
-        active = (
-            {c.id for c in await self.store.find(Concert, group_id=group_id, deleted_at=None)}
-            if catalog
-            else set()
-        )
+        active = await self.store.visible_concert_ids(self.user.id, group_id) if catalog else set()
         revisions = {
             s.approved_revision_id
             for s in (await self.store.find(Setlist, group_id=group_id) if catalog else [])
@@ -209,6 +206,7 @@ class MiniDrafts:
                 )
             ),
             "planned_seconds": concert.performance_duration_seconds,
+            "metadata_version": concert.metadata_version,
             "entries": entries(snapshot),
             "catalog": [
                 {
@@ -224,16 +222,62 @@ class MiniDrafts:
             result.pop("catalog")
         return result
 
-    async def history(self, identifier: UUID, index: int) -> dict[str, Any]:
+    async def _history(self, identifier: UUID) -> tuple[UUID, list[dict[str, str]]]:
         row, data, target = await self.load(identifier)
-        group_id = UUID(data["group_id"])
-        # RU: Фиксируем порядок при первом просмотре, автосохранение его не переставляет.
-        # EN: Store only public revision IDs; never include another user's private draft.
         if "history_sources" not in data:
-            sources = await self._history_sources(group_id, target, data)
+            sources = await self._history_sources(target.group_id, target, data)
             data = {**data, "history_sources": sources}
             row.command = json.dumps(data)
-        sources = data["history_sources"]
+        return target.group_id, data["history_sources"]
+
+    def _history_label(self, kind: str, concert: Concert, revision: Revision) -> str:
+        russian = self.user.language == "ru"
+        label = " · ".join(part for part in (button_date(concert.date), concert.title) if part)
+        if kind == "version":
+            return ("Версия " if russian else "Version ") + str(revision.number)
+        if kind == "recommendation":
+            return ("Рекомендуем · " if russian else "Suggested · ") + label
+        return label
+
+    async def history_menu(self, identifier: UUID) -> list[dict[str, Any]]:
+        group_id, sources = await self._history(identifier)
+        revisions = {
+            r.id: r
+            for r in await self.store.get_many(
+                Revision, {UUID(source["revision_id"]) for source in sources}
+            )
+            if r.group_id == group_id
+        }
+        lists = {
+            s.id: s
+            for s in await self.store.get_many(Setlist, {r.setlist_id for r in revisions.values()})
+            if s.group_id == group_id
+        }
+        visible = await self.store.visible_concert_ids(self.user.id, group_id)
+        events = {
+            c.id: c
+            for c in await self.store.get_many(
+                Concert, {s.concert_id for s in lists.values()} & visible
+            )
+        }
+        result = []
+        for index, source in enumerate(sources):
+            revision = revisions.get(UUID(source["revision_id"]))
+            if revision is None or revision.setlist_id not in lists:
+                continue
+            event = events.get(lists[revision.setlist_id].concert_id)
+            if event is not None:
+                result.append(
+                    {
+                        "index": index,
+                        "label": self._history_label(source["kind"], event, revision),
+                        "seconds": totals(revision.snapshot)[2],
+                    }
+                )
+        return result
+
+    async def history(self, identifier: UUID, index: int) -> dict[str, Any]:
+        group_id, sources = await self._history(identifier)
         require(type(index) is int and 0 <= index < len(sources), "miniapp_no_history")
         source = sources[index]
         revision = await self.store.get(Revision, UUID(source["revision_id"]))
@@ -241,19 +285,15 @@ class MiniDrafts:
         concert = await self.store.get(Concert, setlist.concert_id)
         require(
             revision.group_id == setlist.group_id == concert.group_id == group_id
-            and concert.deleted_at is None,
+            and concert.deleted_at is None
+            and concert.id in await self.store.visible_concert_ids(self.user.id, group_id),
             "miniapp_no_history",
         )
-        label = " · ".join(part for part in (button_date(concert.date), concert.title) if part)
-        if source["kind"] == "version":
-            label = ("Версия " if self.user.language == "ru" else "Version ") + str(revision.number)
-        elif source["kind"] == "recommendation":
-            label = ("Рекомендуем · " if self.user.language == "ru" else "Suggested · ") + label
         return {
             "index": index,
             "count": len(sources),
             "kind": source["kind"],
-            "label": label,
+            "label": self._history_label(source["kind"], concert, revision),
             "default_pause_seconds": flat_content(revision.snapshot)["default_pause_seconds"],
             "seconds": totals(revision.snapshot)[2],
             "entries": entries(revision.snapshot),
@@ -269,10 +309,11 @@ class MiniDrafts:
             if r.number <= data.get("history_max_version", current.version) and entries(r.snapshot)
         ]
         versions.sort(key=lambda r: r.number, reverse=True)
+        visible = await self.store.visible_concert_ids(self.user.id, group_id)
         concerts = {
             c.id: c
             for c in await self.store.find(Concert, group_id=group_id, deleted_at=None)
-            if c.date < min(today(), target.date)
+            if c.id in visible and c.date < min(today(), target.date)
         }
         past = [
             s

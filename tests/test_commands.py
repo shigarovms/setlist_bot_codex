@@ -4,9 +4,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 from aiogram import Bot
-from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
+from aiogram.exceptions import TelegramBadRequest, TelegramMigrateToChat, TelegramRetryAfter
 from aiogram.methods import GetMyCommands
-from aiogram.types import BotCommand, BotCommandScopeChat, BotCommandScopeChatMember
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeChat,
+    BotCommandScopeChatAdministrators,
+    BotCommandScopeChatMember,
+)
 
 from setlist_bot import main
 from setlist_bot.config import Settings
@@ -103,11 +108,18 @@ def test_public_menu_registry_matches_real_commands_and_localization():
                 "edit_list",
                 "change_shared",
             } & {c.command for c in commands}
-    assert "publish" in MENUS["private"] and "publish" not in MENUS["group"]
-    assert "approve" in MENUS["admin"] and "approve" not in MENUS["private"]
-    assert "delete_group" in MENUS["admin"] and "delete_group" not in MENUS["group"]
-    assert "new_band" in MENUS["group"] and "new_band" in MENUS["admin"]
-    assert all("group" not in names for names in MENUS.values())
+    assert MENUS["private"] == (
+        "support",
+        "groups",
+        "concerts",
+        "my_gigs",
+        "catalog",
+        "profile",
+        "calendar",
+        "help",
+    )
+    assert MENUS["group"] == ("support", "concerts", "catalog", "register", "help", "new_band")
+    assert MENUS["admin"] == MENUS["group"] + ("add_new_songs", "concert")
     assert (
         menu_commands("private", "")[0].description == menu_commands("private", "ru")[0].description
     )
@@ -251,4 +263,173 @@ async def test_sync_only_runs_menu_sync_without_starting_polling(monkeypatch, da
     monkeypatch.setattr(main, "Dispatcher", dispatcher)
     await main.run(sync_only=True)
     synchronize.assert_awaited_once()
+    dispatcher.assert_not_called()
+
+
+@pytest.mark.parametrize("phase", ["read", "delete", "verify"])
+async def test_chat_migration_redirects_scope_in_each_sync_phase(phase):
+    old, new = -123, -100123
+
+    class Migrating(FakeCommandAPI):
+        def __init__(self):
+            super().__init__()
+            self.reads = 0
+            self.triggered = False
+
+        def redirect(self, scope):
+            if getattr(scope, "chat_id", None) == old:
+                self.triggered = True
+                raise TelegramMigrateToChat(
+                    method=GetMyCommands(), message="group upgraded", migrate_to_chat_id=new
+                )
+
+        async def get_my_commands(self, *, scope, language_code):
+            if getattr(scope, "chat_id", None) == old:
+                self.reads += 1
+                if phase == "read" or phase == "verify" and self.reads == 2:
+                    self.redirect(scope)
+            return await super().get_my_commands(scope=scope, language_code=language_code)
+
+        async def delete_my_commands(self, *, scope, language_code):
+            if phase == "delete":
+                self.redirect(scope)
+            return await super().delete_my_commands(scope=scope, language_code=language_code)
+
+    bot = Migrating()
+    scope = BotCommandScopeChat(chat_id=old)
+    bot.menus[scope_key(scope), ""] = legacy()
+    bot.menus[scope_key(BotCommandScopeChat(chat_id=new)), ""] = legacy()
+    migrated = AsyncMock()
+    report = await synchronize_commands(
+        bot, CommandTargets((scope,), ("",)), on_chat_migrated=migrated
+    )
+    assert bot.triggered
+    migrated.assert_awaited_once_with(old, new)
+    assert not bot.menus.get((scope_key(BotCommandScopeChat(chat_id=new)), ""))
+    assert report.checked == 1 and report.unavailable == 0
+
+
+async def test_migration_preserves_admin_member_scopes_languages_and_persisted_binding(
+    engine, world
+):
+    from functools import partial
+
+    from setlist_bot.application.chat_migration import migrate_binding
+    from setlist_bot.domain.entities import ChatBinding
+
+    old, new = -100, -100999
+
+    class Migrating(FakeCommandAPI):
+        async def get_my_commands(self, *, scope, language_code):
+            if getattr(scope, "chat_id", None) == old:
+                raise TelegramMigrateToChat(
+                    method=GetMyCommands(), message="group upgraded", migrate_to_chat_id=new
+                )
+            return await super().get_my_commands(scope=scope, language_code=language_code)
+
+    bot = Migrating()
+    old_scopes = (
+        BotCommandScopeChat(chat_id=old),
+        BotCommandScopeChatAdministrators(chat_id=old),
+        BotCommandScopeChatMember(chat_id=old, user_id=2),
+    )
+    new_scopes = tuple(scope.model_copy(update={"chat_id": new}) for scope in old_scopes)
+    for scope in new_scopes:
+        for lang in ("", "ru", "en"):
+            bot.menus[scope_key(scope), lang] = legacy()
+    targets = CommandTargets(
+        tuple(scope for scope, _ in GLOBAL_SCOPES) + old_scopes + new_scopes, ("", "ru", "en")
+    )
+    report = await synchronize_commands(
+        bot, targets, on_chat_migrated=partial(migrate_binding, engine)
+    )
+    assert report.checked == 21 and report.removed == 9 and report.registered == 12
+    assert len([key for operation, key in bot.calls if operation == "delete"]) == 9
+    for scope in new_scopes:
+        assert all(not bot.menus.get((scope_key(scope), lang)) for lang in targets.languages)
+    async with PostgresUnitOfWork(engine) as uow:
+        binding = (await uow.store.find(ChatBinding, group_id=world.group.id))[0]
+        assert binding.chat_id == new
+        assert (await uow.store.find(ChatBinding, group_id=world.other.id))[0].chat_id == -200
+        assert (await uow.store.get(Group, world.group.id)).owner_id == world.admin.id
+
+
+@pytest.mark.parametrize("phase", ["delete", "verify"])
+async def test_chat_becomes_inaccessible_after_initial_menu_read(phase):
+    scope = BotCommandScopeChat(chat_id=-321)
+
+    class Disappearing(FakeCommandAPI):
+        async def delete_my_commands(self, *, scope, language_code):
+            self.unavailable.add(scope_key(scope))
+            if phase == "delete":
+                raise TelegramBadRequest(method=GetMyCommands(), message="chat not found")
+            return await super().delete_my_commands(scope=scope, language_code=language_code)
+
+    bot = Disappearing()
+    bot.menus[scope_key(scope), ""] = legacy()
+    report = await synchronize_commands(bot, CommandTargets((scope,), ("",)))
+    assert report.unavailable == 1
+
+
+async def test_global_migration_and_cyclic_chat_redirects_still_fail():
+    class Unexpected(FakeCommandAPI):
+        async def get_my_commands(self, *, scope, language_code):
+            raise TelegramMigrateToChat(
+                method=GetMyCommands(), message="migration", migrate_to_chat_id=-100999
+            )
+
+    bot = Unexpected()
+    with pytest.raises(TelegramMigrateToChat):
+        await synchronize_commands(bot, CommandTargets((GLOBAL_SCOPES[0][0],), ("",)))
+
+    class Cycle(FakeCommandAPI):
+        async def get_my_commands(self, *, scope, language_code):
+            raise TelegramMigrateToChat(
+                method=GetMyCommands(),
+                message="migration",
+                migrate_to_chat_id=-100999 if scope.chat_id == -100 else -100,
+            )
+
+    with pytest.raises(CommandSyncError, match="Cyclic"):
+        await synchronize_commands(
+            Cycle(), CommandTargets((BotCommandScopeChat(chat_id=-100),), ("",))
+        )
+
+
+@pytest.mark.parametrize("sync_only", [True, False])
+async def test_failed_startup_cools_down_but_explicit_sync_cli_exits_promptly(
+    monkeypatch, database_url, engine, sync_only
+):
+    fake = SimpleNamespace(
+        get_me=AsyncMock(return_value=SimpleNamespace(id=123456, username="test_bot"))
+    )
+
+    class FakeBot:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return fake
+
+        async def __aexit__(self, *args):
+            pass
+
+    monkeypatch.setattr(main, "Bot", FakeBot)
+    monkeypatch.setattr(
+        main, "Settings", lambda: Settings(database_url=database_url, bot_token="test")
+    )
+    monkeypatch.setattr(
+        main,
+        "synchronize_commands",
+        AsyncMock(side_effect=RuntimeError("synthetic startup failure")),
+    )
+    sleep, dispatcher = AsyncMock(), AsyncMock()
+    monkeypatch.setattr(main.asyncio, "sleep", sleep)
+    monkeypatch.setattr(main, "Dispatcher", dispatcher)
+    with pytest.raises(SystemExit, match="Command menu synchronization failed"):
+        await main.run(sync_only=sync_only)
+    if sync_only:
+        sleep.assert_not_awaited()
+    else:
+        sleep.assert_awaited_once_with(30)
     dispatcher.assert_not_called()

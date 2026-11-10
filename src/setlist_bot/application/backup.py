@@ -41,6 +41,7 @@ class Backup:
             ("revisions", e.Revision),
             ("submissions", e.Submission),
             ("staff_roles", e.StaffRole),
+            ("staff_contacts", e.StaffContact),
             ("lineup_templates", e.LineupTemplate),
             ("gig_slots", e.GigSlot),
             ("gig_invitations", e.GigInvitation),

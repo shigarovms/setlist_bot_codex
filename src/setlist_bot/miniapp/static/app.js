@@ -4,26 +4,35 @@ const tg = window.Telegram?.WebApp,
   $ = (id) => document.getElementById(id);
 const words = {
   ru: {
-    heading: "Личный черновик",
-    planned: "Выступаем",
-    unknown: "не задано",
+    heading: "Ваш черновик",
+    planned: "Плановая длительность",
+    plannedHint: "45 — минуты, 1:15 — час и 15 минут, - — очистить",
+    plannedSaved: "Плановая длительность сохранена.",
+    plannedQueued: "Запрос в очереди. Нажмите, чтобы проверить результат.",
+    plannedConflict: "Данные выступления изменились. Проверьте текущую длительность и повторите правку.",
+    unknown: "Не задано",
     current: "Текущий черновик",
     catalog: "Репертуар",
     search: "Поиск песни",
     private:
       "Черновик сохраняется автоматически. Отправка группе — только по кнопке.",
-    publish: "📤 Предложить в группу и закрыть",
+    publish: "📤 Предложить группе",
     publishing: "Отправляем предложение в группу…",
     queued: "Предложение в очереди. Нажмите ещё раз, чтобы проверить отправку.",
     failed:
       "Не удалось отправить предложение. Черновик сохранён. Можно повторить.",
-    save: "Сохранить черновик",
+    save: "Повторить сохранение",
+    saveOk: "Сохранено", savePending: "Сохраняем…", saveFailed: "Не удалось сохранить",
+    historyEmpty: "Пока нет доступных версий или прошлых выступлений.",
+    backDraft: "К черновику", undoLabel: "Отменить последнее действие",
+    shorter: "запас", longer: "дольше на", onTarget: "ровно по плану",
+    repertoireSong: "Песня в репертуаре",
     back: "Вернуться к боту",
     pause: "пауза",
     addPause: "＋ Пауза",
     addPauseBottom: "+ пауза",
-    older: "← прошлые",
-    undo: "↶ Отменить",
+    older: "История",
+    undo: "↶ Undo",
     empty:
       "Добавьте песни из репертуара ниже или возьмите прошлый сет-лист за основу.",
     use: "Взять за основу",
@@ -57,31 +66,51 @@ const words = {
     seconds: "сек",
     averageTitle: "Средняя пауза между песнями",
     averageHint: "В секундах. 0 — без пауз. Отдельные паузы сохраняются.",
-    averageGroupHint: "В секундах. Сохранится и для новых сет-листов коллектива. Отдельные паузы не изменятся.",
+    averageGroupHint: "В секундах. Для этого черновика и новых сет-листов коллектива. Уже созданные списки не изменятся.",
     averagePrivateHint: "В секундах. Изменится только ваш черновик. Паузу для новых выступлений задаёт администратор.",
     apply: "Применить",
     requestAccess: "Запросить права у владельца",
     reload: "Обновите редактор, чтобы получить актуальный каталог.",
+    editSong: "Редактировать песню", addSong: "＋ Добавить песню",
+    songTitle: "Название *", songDuration: "Длительность ММ:СС *",
+    songLights: "Цвета / свет", songComment: "Комментарий",
+    songAliases: "Альтернативные названия — по одному на строку",
+    songScope: "Меняется запись репертуара, поэтому правка отразится во всех её вхождениях в рабочих сет-листах. Правки участника требуют одобрения администратора.",
+    songSave: "Сохранить", songPending: "Запрос сохраняется ботом…",
+    songQueued: "Запрос в очереди. Проверьте сохранение перед новым изменением песни.",
+    close: "Закрыть",
+    songCheck: "Проверить сохранение", songSaved: "Репертуар обновлён.",
+    songProposed: "Изменения предложены администратору. До одобрения репертуар не изменится.",
+    songReload: "Загрузить актуальную",
   },
   en: {
     heading: "Private draft",
-    planned: "Planned",
-    unknown: "unknown",
+    planned: "Planned duration",
+    plannedHint: "45 means minutes, 1:15 means 1 hour and 15 minutes, - clears the duration",
+    plannedSaved: "Planned duration saved.",
+    plannedQueued: "Request queued. Press to check the result.",
+    plannedConflict: "The performance changed. Review the current duration and retry.",
+    unknown: "Not set",
     current: "Current draft",
     catalog: "Repertoire",
     search: "Find a song",
     private:
       "Draft saved automatically. Only the publish button sends it to the group.",
-    publish: "📤 Propose to group and close",
+    publish: "📤 Suggest to the band",
     publishing: "Sending your proposal…",
     queued: "Proposal queued. Press again to check delivery.",
     failed: "Delivery failed. Your draft is saved; you can retry.",
-    save: "Save draft",
+    save: "Retry save",
+    saveOk: "Saved", savePending: "Saving…", saveFailed: "Could not save",
+    historyEmpty: "No versions or past performances are available yet.",
+    backDraft: "Back to draft", undoLabel: "Undo last action",
+    shorter: "remaining", longer: "over by", onTarget: "on target",
+    repertoireSong: "Song in repertoire",
     back: "Back to bot",
     pause: "pause",
     addPause: "＋ Pause",
     addPauseBottom: "+ pause",
-    older: "← past",
+    older: "History",
     undo: "↶ Undo",
     empty: "Add songs below or use a previous performance as a starting point.",
     use: "Use as starting point",
@@ -119,6 +148,17 @@ const words = {
     apply: "Apply",
     requestAccess: "Request administrator access",
     reload: "Reopen the editor to refresh the catalog.",
+    editSong: "Edit song", addSong: "＋ Add song",
+    songTitle: "Title *", songDuration: "Duration MM:SS *",
+    songLights: "Colors / lighting", songComment: "Comment",
+    songAliases: "Alternative titles — one per line",
+    songScope: "This updates the repertoire entry and all its occurrences in working setlists. Member edits require administrator approval.",
+    songSave: "Save", songPending: "The bot is saving your request…",
+    songQueued: "Request queued. Check its result before editing another song.",
+    close: "Close",
+    songCheck: "Check save", songSaved: "Repertoire updated.",
+    songProposed: "Changes proposed to an administrator. The repertoire stays unchanged until approval.",
+    songReload: "Load current song",
   },
 };
 let lang = "ru",
@@ -127,7 +167,6 @@ let lang = "ru",
   defaultPause = 5,
   undos = [],
   preview = null,
-  historyIndex = -1,
   catalogPage = 0,
   busy = false,
   latest = null,
@@ -256,7 +295,7 @@ function render() {
     .join(" · ");
   $("catalog").inert = busy;
   $("setlist").inert = busy;
-  $("older").disabled = busy || (preview && historyIndex + 1 >= preview.count);
+  $("older").disabled = busy;
   $("average-pause").disabled = busy || !!preview;
   $("average-pause").textContent = t("averageShort");
   $("average-pause").setAttribute("aria-label", `${t("average")}: ${preview?.default_pause_seconds ?? defaultPause}${t("seconds")}`);
@@ -306,7 +345,11 @@ function render() {
       mark.setAttribute("aria-hidden", "true");
       edit.append(mark);
       row.append(edit);
-    } else row.append(node("span", item.title, "song-name"));
+    } else {
+      row.append(node("span", item.title, "song-name"));
+      if (!preview && state.catalog.some(song => song.id === item.song_id))
+        row.append(button("✎", `${t("editSong")}: ${item.title}`, () => openSong(item.song_id), "song-edit"));
+    }
     row.append(node("span", clock(item.duration_seconds), "song-time"));
     if (
       item.kind === "song" &&
@@ -325,24 +368,34 @@ function render() {
     row.append(remove);
     $("setlist").append(row);
   });
-  $("total").textContent = clock(
-    preview ? preview.seconds : total(current, defaultPause),
-  );
-  $("planned").textContent =
-    `${t("planned")}: ${state.planned_seconds ? clock(state.planned_seconds) : t("unknown")}`;
+  const seconds = preview ? preview.seconds : total(current, defaultPause);
+  const target = state.planned_seconds;
+  const delta = target - seconds;
+  const plan = target ? clock(target) : t("unknown");
+  const canEdit = state.can_set_group_default;
+  $("planned").textContent = canEdit ? "" : plan;
+  $("planned").hidden = canEdit;
+  $("planned-edit").hidden = !canEdit;
+  $("planned-edit").textContent = plan;
+  $("planned-edit").setAttribute("aria-label", `${t("planned")}: ${plan}`);
+  $("planned-delta").textContent = !target ? "" : delta === 0
+    ? `· ${t("onTarget")}`
+    : `· ${t(delta > 0 ? "shorter" : "longer")} ${clock(Math.abs(delta))}`;
+  $("total").textContent = clock(seconds);
   $("empty").hidden = items.length > 0;
   $("empty").textContent = t("empty");
   $("history-label").textContent = preview
     ? `${preview.label} · ${clock(preview.seconds)}`
     : t("current");
-  $("newer").disabled = historyIndex < 0 || busy;
+  $("newer").hidden = !preview;
+  $("newer").disabled = busy;
   $("use-history").hidden = !preview;
   $("catalog").hidden = !!preview;
   $("undo").disabled = !undos.length || !!preview || busy;
   $("add-pause").disabled = !!preview || busy;
   $("add-pause-bottom").disabled = !!preview || busy;
   $("add-pause-bottom").hidden = !!preview;
-  $("save").disabled = !!preview || !dirty() || busy;
+  renderSaveStatus();
   $("publish").disabled =
     !!preview || !current.length || busy || !!saver?.blocked;
   dirty()
@@ -352,6 +405,13 @@ function render() {
 }
 function renderCatalog() {
   if (!state) return;
+  $("add-song").textContent = t("addSong");
+  for (const [id, word] of Object.entries({
+    "song-title-label": "songTitle", "song-duration-label": "songDuration",
+    "song-lights-label": "songLights", "song-comment-label": "songComment",
+    "song-aliases-label": "songAliases", "song-scope": "songScope",
+    "song-cancel": catalogAttempt ? "close" : "cancel", "song-reload": "songReload",
+  })) $(id).textContent = t(word);
   const query = $("search").value.toLocaleLowerCase().replaceAll("ё", "е");
   const songs = state.catalog.filter((song) =>
     song.title.toLocaleLowerCase().replaceAll("ё", "е").includes(query),
@@ -367,6 +427,7 @@ function renderCatalog() {
         () => {},
         "handle",
       );
+    row.dataset.songId = song.id;
     handle.addEventListener("pointerdown", (event) =>
       startDrag(event, { song }),
     );
@@ -374,6 +435,7 @@ function renderCatalog() {
       handle,
       node("span", clock(song.duration_seconds), "song-time"),
       node("span", song.title, "song-name"),
+      button("✎", `${t("editSong")}: ${song.title}`, () => openSong(song.id), "song-edit"),
       button(
         "+",
         lang === "ru" ? "Добавить песню" : "Add song",
@@ -387,6 +449,7 @@ function renderCatalog() {
   $("page-prev").disabled = catalogPage === 0;
   $("page-next").disabled = catalogPage + 1 >= pages;
 }
+let suppressPauseClickUntil = 0;
 let drag = null,
   scrollFrame = 0;
 function startDrag(event, source) {
@@ -418,6 +481,7 @@ function startDrag(event, source) {
       .forEach((n) => n.classList.remove("drop-before", "drop-after"));
     const target = document.elementFromPoint(e.clientX, e.clientY);
     const row = target?.closest("#setlist .entry");
+    target?.closest("#add-pause-bottom")?.classList.add("drop-after");
     if (row)
       row.classList.add(
         e.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2
@@ -437,10 +501,12 @@ function startDrag(event, source) {
     const target = document.elementFromPoint(e.clientX, e.clientY),
       row = target?.closest("#setlist .entry");
     if (drag.moved) {
+      suppressPauseClickUntil = performance.now() + 500;
       if (
         row ||
         target?.closest("#setlist") ||
-        target?.closest("#empty")
+        target?.closest("#empty") ||
+        target?.closest("#add-pause-bottom")
       ) {
         let at = row ? Number(row.dataset.index) : current.length;
         if (
@@ -473,6 +539,8 @@ function startDrag(event, source) {
       ghost.remove();
       drag = null;
       cancelAnimationFrame(scrollFrame);
+      document.querySelectorAll(".drop-before, .drop-after")
+        .forEach(n => n.classList.remove("drop-before", "drop-after"));
     }
     handle.removeEventListener("pointermove", update);
     handle.removeEventListener("pointerup", finish);
@@ -483,33 +551,40 @@ function startDrag(event, source) {
   handle.addEventListener("pointercancel", cancel);
   scrollFrame = requestAnimationFrame(auto);
 }
-async function browse(index) {
-  // RU: История — отдельный preview. Текущий ввод заменяется только кнопкой ниже.
-  // EN: Browsing past performances must not overwrite current edits.
-  if (busy) return;
-  if (index < 0) {
-    preview = null;
-    historyIndex = -1;
-    render();
-    return;
-  }
+$("older").addEventListener("click", async () => {
+  if (busy || !state) return;
+  const dialog = $("history-dialog"), list = $("history-sources");
+  list.textContent = t("loading");
+  dialog.showModal();
   try {
-    busy = true;
-    render();
-    const source = await api("history", { index });
-    preview = source;
-    historyIndex = index;
-    render();
-    status(t("ready"));
+    const { sources } = await api("history_menu");
+    list.replaceChildren();
+    for (const source of sources) {
+      const label = `${source.label} · ${clock(source.seconds)}`;
+      list.append(button(label, label, async () => {
+        if (busy) return;
+        busy = true;
+        render();
+        try {
+          preview = await api("history", { index: source.index });
+          dialog.close();
+        } catch (error) {
+          list.prepend(node("p", error.message, "error"));
+        } finally {
+          busy = false;
+          render();
+        }
+      }));
+    }
+    if (!sources.length) list.textContent = t("historyEmpty");
   } catch (error) {
-    status(error.message, true);
-  } finally {
-    busy = false;
-    render();
+    list.textContent = error.message;
   }
-}
-$("older").addEventListener("click", () => browse(historyIndex + 1));
-$("newer").addEventListener("click", () => browse(historyIndex - 1));
+});
+$("newer").addEventListener("click", () => {
+  preview = null;
+  render();
+});
 $("use-history").addEventListener("click", () => {
   if (!preview) return;
   if (dirty() && !confirm(t("replace"))) return;
@@ -528,7 +603,6 @@ $("use-history").addEventListener("click", () => {
   });
   const gap = preview.default_pause_seconds;
   preview = null;
-  historyIndex = -1;
   change(withKeys(replacement), gap);
 });
 $("undo").addEventListener("click", () => {
@@ -547,7 +621,9 @@ $("search").addEventListener("input", () => {
   renderCatalog();
 });
 let searchScrollFrame = 0,
-  pointerInProgress = false;
+  pointerInProgress = false,
+  searchPointer = false,
+  searchClick = false;
 function alignSearch() {
   cancelAnimationFrame(searchScrollFrame);
   searchScrollFrame = requestAnimationFrame(() => {
@@ -556,7 +632,8 @@ function alignSearch() {
     // RU: iOS может сдвинуть видимую область при открытии клавиатуры.
     // EN: Re-align after keyboard/viewport changes, not just before its animation.
     const visibleTop = window.visualViewport?.offsetTop ?? 0;
-    const offset = search.getBoundingClientRect().top - visibleTop;
+    const safeTop = Math.max(tg?.contentSafeAreaInset?.top ?? 0, tg?.safeAreaInset?.top ?? 0);
+    const offset = search.getBoundingClientRect().top - visibleTop - safeTop - 12;
     if (Math.abs(offset) > 1)
       window.scrollTo({ top: window.scrollY + offset, behavior: "instant" });
   });
@@ -593,15 +670,28 @@ $("search").addEventListener("keydown", (event) => {
 });
 document.addEventListener("pointerdown", (event) => {
   pointerInProgress = true;
+  searchPointer = event.target instanceof Element && !!event.target.closest("#search");
   leaveSearch(event);
 }, true);
 for (const name of ["pointerup", "pointercancel"])
-  document.addEventListener(name, () => {
+  document.addEventListener(name, event => {
+    // RU: Прокрутка во время mousedown может поменять цель mouseup на компьютере.
+    // EN: Restore input focus after the pointer sequence without clearing a second time.
+    if (name === "pointerup" && searchPointer && event.pointerType === "mouse")
+      $("search").focus({ preventScroll: true });
+    searchClick = name === "pointerup" && searchPointer;
     pointerInProgress = false;
+    searchPointer = false;
     settleSearchLayout();
   }, true);
 // RU/EN: Also handle keyboard activation and synthetic clicks without pointer events.
-document.addEventListener("click", leaveSearch, true);
+document.addEventListener("click", event => {
+  if (searchClick) {
+    searchClick = false;
+    return;
+  }
+  leaveSearch(event);
+}, true);
 window.addEventListener("resize", alignSearch);
 window.visualViewport?.addEventListener("resize", alignSearch);
 window.visualViewport?.addEventListener("scroll", alignSearch);
@@ -612,6 +702,138 @@ $("page-prev").addEventListener("click", () => {
 $("page-next").addEventListener("click", () => {
   catalogPage++;
   renderCatalog();
+});
+let editingSong = null, catalogAttempt = null, catalogRequest = null, songSubmitting = false;
+function fillSong(song) {
+  $("song-title").value = song?.title ?? "";
+  $("song-duration").value = song?.duration ?? "";
+  $("song-bpm").value = song?.bpm ?? "";
+  $("song-lights").value = song?.lights ?? "";
+  $("song-comment").value = song?.comment ?? "";
+  $("song-aliases").value = (song?.aliases ?? []).join("\n");
+}
+function lockSongFields(locked) {
+  for (const element of $("song-form").querySelectorAll("input, textarea")) element.disabled = locked;
+}
+async function openSong(id = null) {
+  if (!state || busy || preview) return;
+  if (catalogAttempt) {
+    // RU: Потерянный ответ повторяется с прежним ID, а не создаёт новую песню.
+    // EN: Resume an unresolved operation before accepting another catalog mutation.
+    $("song-dialog").showModal();
+    $("song-error").textContent = t("songQueued");
+    return;
+  }
+  busy = true;
+  render();
+  try {
+    editingSong = id ? await api("song", { song_id: id }) : null;
+    fillSong(editingSong);
+    lockSongFields(false);
+    $("song-error").textContent = "";
+    $("song-dialog-title").textContent = t(id ? "repertoireSong" : "addSong");
+    $("song-submit").textContent = t("songSave");
+    $("song-reload").hidden = true;
+    $("song-dialog").showModal();
+  } catch (error) { status(error.message, true); }
+  finally { busy = false; render(); }
+}
+$("add-song").addEventListener("click", () => openSong());
+$("song-cancel").addEventListener("click", () => {
+  if (!songSubmitting) $("song-dialog").close();
+});
+$("song-dialog").addEventListener("cancel", event => {
+  if (songSubmitting) event.preventDefault();
+});
+$("song-reload").addEventListener("click", async () => {
+  if (!editingSong || songSubmitting) return;
+  try {
+    editingSong = await api("song", { song_id: editingSong.id });
+    fillSong(editingSong);
+    $("song-error").textContent = "";
+    $("song-reload").hidden = true;
+  } catch (error) { $("song-error").textContent = error.message; }
+});
+async function refreshRepertoire() {
+  const updated = await api("state");
+  state.catalog = updated.catalog;
+  const catalog = new Map(updated.catalog.map(song => [song.id, song]));
+  const refresh = items => items.map(item => {
+    const song = item.kind === "song" && catalog.get(item.song_id);
+    return song ? { ...item, title: song.title, duration_seconds: song.duration_seconds, version: song.version } : item;
+  });
+  // RU: Порядок/повторы/паузы неизменны. Отмена порядка не отменяет правку репертуара.
+  // EN: Refresh all occurrences, including Undo, without replacing the user's draft.
+  current = refresh(current);
+  undos = undos.map(item => ({ ...item, entries: refresh(item.entries) }));
+  saver.setDraft(current, defaultPause);
+  render();
+}
+$("song-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  if (songSubmitting || !saver) return;
+  songSubmitting = true;
+  busy = true;
+  $("song-submit").disabled = true;
+  $("song-cancel").disabled = true;
+  $("song-reload").disabled = true;
+  saver.pause();
+  render();
+  try {
+    if (!catalogAttempt) {
+      await saver.flush();
+      catalogAttempt = {
+        request_id: crypto.randomUUID(), song_id: editingSong?.id ?? null,
+        expected: editingSong?.version ?? null,
+        fields: {
+          title: $("song-title").value.trim(), duration_seconds: $("song-duration").value.trim(),
+          bpm: $("song-bpm").value ? Number($("song-bpm").value) : null,
+          lights: $("song-lights").value, comment: $("song-comment").value,
+          aliases: $("song-aliases").value.split("\n").map(v => v.trim()).filter(Boolean),
+        },
+      };
+    }
+    lockSongFields(true);
+    $("song-error").textContent = t("songPending");
+    let result = catalogRequest
+      ? await api("catalog_status", { request: catalogRequest })
+      : await api("catalog_save", catalogAttempt, "POST");
+    catalogRequest = result.request;
+    for (let i = 0; result.status === "pending" && i < 30; i++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      result = await api("catalog_status", { request: catalogRequest });
+    }
+    if (result.status === "pending") {
+      $("song-error").textContent = t("songQueued");
+      $("song-submit").textContent = t("songCheck");
+      return;
+    }
+    if (result.status === "failed") {
+      catalogAttempt = catalogRequest = null;
+      const error = new Error(result.message);
+      error.data = result;
+      throw error;
+    }
+    // Keep the receipt until catalog refresh succeeds; retry must not save twice.
+    await refreshRepertoire();
+    catalogAttempt = catalogRequest = null;
+    $("song-dialog").close();
+    status(t(result.proposed ? "songProposed" : "songSaved"));
+  } catch (error) {
+    // Explicit validation rejection means nothing was queued. Network failures stay retryable.
+    if (!catalogRequest && error.data) catalogAttempt = null;
+    $("song-error").textContent = error.message;
+    if (!catalogAttempt) lockSongFields(false);
+    $("song-reload").hidden = !editingSong || error.data?.error !== "conflict";
+    $("song-submit").textContent = t(catalogAttempt ? "songCheck" : "songSave");
+  } finally {
+    songSubmitting = busy = false;
+    $("song-submit").disabled = false;
+    $("song-cancel").disabled = false;
+    $("song-reload").disabled = false;
+    saver.resume();
+    render();
+  }
 });
 function openPause(index = null) {
   if (!state || preview || busy) return;
@@ -629,7 +851,9 @@ function openPause(index = null) {
   $("pause-value").focus();
 }
 $("add-pause").addEventListener("click", () => openPause());
-$("add-pause-bottom").addEventListener("click", () => openPause());
+$("add-pause-bottom").addEventListener("click", () => {
+  if (performance.now() >= suppressPauseClickUntil) openPause();
+});
 $("pause-cancel").addEventListener("click", () => {
   pauseDialogSerial++;
   $("pause-dialog").close();
@@ -680,7 +904,84 @@ $("pause-form").addEventListener("submit", async (event) => {
     if (serial === pauseDialogSerial) $("pause-submit").disabled = false;
   }
 });
+let plannedAttempt = null, plannedRequest = null;
+$("planned-edit").addEventListener("click", () => {
+  if (!state?.can_set_group_default) return;
+  if (!plannedAttempt) {
+    $("planned-value").value = "";
+    $("planned-status").textContent = "";
+    $("planned-submit").textContent = t("songSave");
+    $("planned-value").readOnly = false;
+  }
+  $("planned-dialog").showModal();
+});
+$("planned-close").addEventListener("click", () => $("planned-dialog").close());
+$("planned-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const submit = $("planned-submit"), input = $("planned-value"), resultText = $("planned-status");
+  if (submit.disabled) return;
+  plannedAttempt ??= {
+    request_id: crypto.randomUUID(), expected: state.metadata_version, value: input.value.trim(),
+  };
+  submit.disabled = input.readOnly = true;
+  resultText.textContent = t("songPending");
+  try {
+    let result = plannedRequest
+      ? await api("catalog_status", { request: plannedRequest })
+      : await api("duration_save", plannedAttempt, "POST");
+    plannedRequest = result.request;
+    for (let i = 0; result.status === "pending" && i < 10; i++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      result = await api("catalog_status", { request: plannedRequest });
+    }
+    if (result.status === "pending") {
+      resultText.textContent = t("plannedQueued");
+      return;
+    }
+    plannedAttempt = plannedRequest = null;
+    if (result.status === "failed") {
+      const error = new Error(result.message);
+      error.data = result;
+      throw error;
+    }
+    if (result.metadata_version >= state.metadata_version) {
+      state.metadata_version = result.metadata_version;
+      state.planned_seconds = result.planned_seconds;
+    }
+    $("planned-dialog").close();
+    render();
+    status(t("plannedSaved"));
+  } catch (error) {
+    if (!plannedRequest && error.data && error.data.error !== "unavailable") plannedAttempt = null;
+    resultText.textContent = error.message;
+    if (error.data?.error === "conflict") {
+      resultText.textContent = t("plannedConflict");
+      try {
+        const latestState = await api("state");
+        state.metadata_version = latestState.metadata_version;
+        state.planned_seconds = latestState.planned_seconds;
+        render();
+      } catch (refreshError) {
+        resultText.textContent = refreshError.message;
+      }
+    }
+  } finally {
+    submit.disabled = false;
+    input.readOnly = !!plannedAttempt;
+    submit.textContent = t(plannedAttempt ? "songCheck" : "songSave");
+  }
+});
+function renderSaveStatus() {
+  const failed = !!saver?.lastError;
+  const retry = $("save");
+  $("save-status").textContent = saver
+    ? t(failed ? "saveFailed" : dirty() ? "savePending" : "saveOk")
+    : "";
+  retry.hidden = !failed || !!saver?.blocked;
+  retry.disabled = !dirty() || busy || !!preview;
+}
 function saveError(error) {
+  renderSaveStatus();
   if (error.data?.latest) {
     saver.blocked = true;
     saver.lastError = error;
@@ -697,6 +998,10 @@ function persistence() {
     current,
     (payload) => api("save", payload, "POST"),
     (saved, unchanged) => {
+      if (saved.metadata_version < state.metadata_version) {
+        saved.metadata_version = state.metadata_version;
+        saved.planned_seconds = state.planned_seconds;
+      }
       state = { ...state, ...saved };
       if (unchanged) {
         current = withKeys(saved.entries);
@@ -827,6 +1132,13 @@ function labels() {
     "add-pause": "addPause",
     "add-pause-bottom": "addPauseBottom",
     older: "older",
+    newer: "backDraft",
+    "history-title": "older",
+    "history-close": "close",
+    "planned-title": "planned",
+    "planned-hint": "plannedHint",
+    "planned-close": "close",
+    "planned-submit": "songSave",
     undo: "undo",
     "use-history": "use",
     "load-latest": "loadLatest",
@@ -843,6 +1155,7 @@ function labels() {
     "average-submit": "apply",
   }))
     $(id).textContent = t(key);
+  $("undo").setAttribute("aria-label", t("undoLabel"));
   $("search").placeholder = t("search");
   document.documentElement.lang = lang;
 }

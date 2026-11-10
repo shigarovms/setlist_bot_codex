@@ -54,6 +54,7 @@ def render_setlist(
     *,
     private: bool = False,
     approved: bool = False,
+    proposal: bool = False,
     header_only: bool = False,
 ) -> str:
     status = "draft" if private else "approved_title" if approved else "working"
@@ -62,7 +63,9 @@ def render_setlist(
         concert_label(concert, language),
         tr(language, status) + " " + tr(language, "version", version=version),
     ]
-    if approved and snapshot.get("approved_by"):
+    if proposal:
+        lines.pop()
+    elif approved and snapshot.get("approved_by"):
         lines[1] = tr(language, "approved_by", name=snapshot["approved_by"], version=version)
     lines.append(
         tr(

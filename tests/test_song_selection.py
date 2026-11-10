@@ -63,6 +63,7 @@ async def contents(engine, world):
         return await service.read(world.group.id, world.concert.id, private=True)
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_confirm_replaces_only_private_draft_preserves_order_duplicates_and_is_idempotent(
     engine, world
 ):
@@ -110,6 +111,7 @@ async def test_confirm_replaces_only_private_draft_preserves_order_duplicates_an
         assert len(await uow.store.find(Revision, setlist_id=shared.id)) == 1
 
 
+@pytest.mark.usefixtures("invited_member")
 @pytest.mark.parametrize("review_first", [False, True])
 async def test_cancel_discards_selection_preserves_existing_draft_and_returns_input_menu(
     engine, world, review_first
@@ -140,6 +142,7 @@ async def test_cancel_discards_selection_preserves_existing_draft_and_returns_in
             assert active is None
 
 
+@pytest.mark.usefixtures("invited_member")
 @pytest.mark.parametrize("use_text_button", [False, True])
 async def test_multiline_paste_without_reply_is_available_from_method_menu(
     engine, world, use_text_button
@@ -156,10 +159,11 @@ async def test_multiline_paste_without_reply_is_available_from_method_menu(
     assert "Список не применён" in invalid.text
     assert (await contents(engine, world))[1] == 0
     saved = await send("Комета\nКомета", raw=True)
-    assert "Личный черновик" in saved.text
+    assert "Ваш черновик · виден только вам" in saved.text
     assert len((await contents(engine, world))[0]["blocks"][0]["items"]) == 2
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_popularity_uses_only_latest_approval_per_concert_and_freezes_roster(engine, world):
     async with PostgresUnitOfWork(engine) as uow:
         catalog = Catalog(uow.store, world.admin)
@@ -178,7 +182,11 @@ async def test_popularity_uses_only_latest_approval_per_concert_and_freezes_rost
         archived = Song(group_id=world.group.id, title="Архив", duration_seconds=60, archived=True)
         uow.store.add(archived)
     send = messenger(engine)
-    picker = await choose(send, world)
+    await send(f"/use_group {world.group.id}")
+    await send(f"/use_concert {world.concert.id}")
+    await send("/setlist")
+    method = await send("/suggestion")
+    picker = await send(button(method, "pick_start"))
     labels = [s for row in picker.reply_keyboard[2:-1] for s in row]
     assert labels == ["01:00 Альфа", "03:38 Комета", "01:00 Гамма"]
     async with PostgresUnitOfWork(engine) as uow:
@@ -195,6 +203,7 @@ async def test_popularity_uses_only_latest_approval_per_concert_and_freezes_rost
     assert "1. Альфа" in (await send("01:00 Альфа", raw=True)).text
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_forty_per_page_two_columns_keep_page_and_selections(engine, world):
     async with PostgresUnitOfWork(engine) as uow:
         for i in range(44):
@@ -221,6 +230,7 @@ async def test_forty_per_page_two_columns_keep_page_and_selections(engine, world
     assert "Всего позиций: 3" in back.text
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_stale_foreign_callbacks_context_switch_commands_and_update_dedup(engine, world):
     send = messenger(engine)
     picker = await choose(send, world)
@@ -239,6 +249,7 @@ async def test_stale_foreign_callbacks_context_switch_commands_and_update_dedup(
     assert (await contents(engine, world))[1] == 0
 
 
+@pytest.mark.usefixtures("invited_member")
 @pytest.mark.parametrize("change", ["archive", "draft", "expire", "membership", "lifecycle"])
 async def test_changed_state_cannot_overwrite_or_publish_draft(engine, world, change):
     send = messenger(engine)
@@ -273,6 +284,7 @@ async def test_changed_state_cannot_overwrite_or_publish_draft(engine, world, ch
         assert not await uow.store.find(Outbox)
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_duplicate_titles_are_saved_by_song_id_and_limits_are_atomic(engine, world):
     async with PostgresUnitOfWork(engine) as uow:
         twin = Song(group_id=world.group.id, title="Комета", duration_seconds=60)
@@ -335,6 +347,7 @@ class PickerTelegram(BaseSession):
         )
 
 
+@pytest.mark.usefixtures("invited_member")
 @pytest.mark.parametrize("save", [True, False])
 async def test_real_router_deletes_only_picker_input_edits_panel_and_survives_delete_failure(
     engine, world, save

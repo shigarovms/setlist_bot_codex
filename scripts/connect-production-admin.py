@@ -23,9 +23,10 @@ PRODUCTION = Path("/opt/setlist_bot_codex")
 SANDBOX = Path("/opt/setlist_bot_sandbox")
 ROLE = "setlist_web_admin"
 CONTAINER = "setlist_bot_codex-db-1"
-SCHEMA = "d71f439e8a20"
+SCHEMA = "c91a72e6b304"
 READ_TABLES = (
     "users",
+    "professional_roles",
     "groups",
     "memberships",
     "chat_bindings",
@@ -86,6 +87,7 @@ def grants(role, database, actions):
             f'GRANT UPDATE({columns}) ON {table} TO "{role}"' for table, columns in UPDATES.items()
         ]
         statements += [
+            f'GRANT INSERT,UPDATE ON professional_roles TO "{role}"',
             f'GRANT INSERT,UPDATE ON support_cases TO "{role}"',
             f'GRANT INSERT ON outbox,chat_bindings TO "{role}"',
         ]

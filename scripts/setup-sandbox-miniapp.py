@@ -20,9 +20,10 @@ from urllib.request import urlopen
 
 ROOT = Path("/opt/setlist_bot_sandbox")
 ROLE = "setlist_miniapp"
-SCHEMA = "d71f439e8a20"
+SCHEMA = "c91a72e6b304"
 READ_TABLES = (
     "users",
+    "professional_roles",
     "groups",
     "memberships",
     "concerts",
@@ -31,6 +32,7 @@ READ_TABLES = (
     "items",
     "revisions",
     "songs",
+    "song_aliases",
     "personal_drafts",
     "confirmations",
     "alembic_version",
@@ -51,6 +53,8 @@ def grants():
         f"GRANT USAGE ON SCHEMA public TO {ROLE};\n"
         f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {ROLE};\n"
         f"GRANT SELECT ON {','.join(READ_TABLES)} TO {ROLE};\n"
+        "GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch,expires_at) "
+        f"ON gig_invitations TO {ROLE};\n"
         f"GRANT UPDATE(id) ON groups,memberships TO {ROLE};\n"
         f"GRANT UPDATE(default_pause_seconds) ON groups TO {ROLE};\n"
         f"GRANT INSERT,UPDATE(content,version) ON personal_drafts TO {ROLE};\n"

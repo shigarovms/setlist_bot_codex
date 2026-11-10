@@ -369,3 +369,30 @@ async def test_article_force_reply_enters_mapping_without_repeating_input_prompt
             CommandInputs.data(row).get("kind") == "command_input"
             for row in await uow.store.find(Confirmation)
         )
+
+
+@pytest.mark.parametrize(
+    "source,title,seconds",
+    [
+        ("Новая песня 03:20", "Новая песня", 200),
+        ("Песня 12:34 03:20", "Песня 12:34", 200),
+        ("Hello, world 00:05", "Hello, world", 5),
+        ("Title, 03:20", "Title", 200),
+    ],
+)
+def test_single_space_song_uses_only_last_time_token(source, title, seconds):
+    from setlist_bot.domain.importing import parse_import
+
+    parsed = parse_import(source)
+    assert not parsed.error
+    assert parsed.rows[0].data["title"] == title
+    assert parsed.rows[0].data["duration_seconds"] == seconds
+
+
+def test_compact_multiline_durations_still_validate_seconds():
+    from setlist_bot.domain.importing import parse_import
+
+    parsed = parse_import("Первая 03:20\nВторая 12:34 01:20\nОшибка 03:75")
+    assert parsed.rows[0].data["duration_seconds"] == 200
+    assert parsed.rows[1].data["title"] == "Вторая 12:34"
+    assert parsed.rows[2].error == "import_duration"

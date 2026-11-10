@@ -18,6 +18,22 @@ from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.miniapp.app import create_app
 
 
+async def browser_tab(client, port, process):
+    for _ in range(200):
+        if process.poll() is not None:
+            break
+        try:
+            async with client.get(f"http://127.0.0.1:{port}/json/list") as response:
+                pages = await response.json()
+            for page in pages:
+                if page["type"] == "page" and page["url"] == "about:blank":
+                    return page["webSocketDebuggerUrl"]
+        except (aiohttp.ClientError, ValueError):
+            pass
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"Chromium test tab did not open (exit code: {process.poll()})")
+
+
 class Browser:
     def __init__(self, ws):
         self.ws, self.sequence, self.pending = ws, 0, {}
@@ -68,11 +84,12 @@ class Browser:
         return result.get("result", {}).get("value")
 
     async def wait(self, expression):
-        for _ in range(100):
+        for _ in range(200):
             if await self.js(expression):
                 return
             await asyncio.sleep(0.05)
-        raise AssertionError("Browser condition failed: " + expression)
+        page = await self.js("({url: location.href, text: document.body?.innerText.slice(0, 500)})")
+        raise AssertionError(f"Browser condition failed: {expression}. Page: {page}")
 
     async def tap(self, selector):
         point = await self.js(
@@ -171,16 +188,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
     browser = None
     try:
         async with aiohttp.ClientSession() as client:
-            for _ in range(100):
-                try:
-                    async with client.get(f"http://127.0.0.1:{port}/json/list") as response:
-                        pages = await response.json()
-                    break
-                except (aiohttp.ClientError, ValueError):
-                    await asyncio.sleep(0.05)
-            else:
-                raise AssertionError("Chromium did not start")
-            ws = await client.ws_connect(pages[0]["webSocketDebuggerUrl"])
+            ws = await client.ws_connect(await browser_tab(client, port, process))
             browser = Browser(ws)
             await browser.call("Page.enable")
             await browser.call(
@@ -227,13 +235,12 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.js("document.getElementById('average-pause').textContent")
                 == "Сред. пауза"
             )
-            assert await browser.js("document.getElementById('older').textContent") == "← прошлые"
-            assert await browser.js("""(()=>{
-                const o=document.getElementById('older'), n=document.getElementById('newer');
-                const label=document.getElementById('history-label');
-                return Math.abs(o.getBoundingClientRect().width-n.getBoundingClientRect().width)<1
-                  && getComputedStyle(o).fontSize===getComputedStyle(label).fontSize;
-            })()""")
+            assert await browser.js("document.getElementById('older').textContent") == "История"
+            assert await browser.js("document.getElementById('newer').hidden")
+            assert await browser.js("document.getElementById('save').hidden")
+            assert await browser.js(
+                "document.getElementById('undo').ariaLabel === 'Отменить последнее действие'"
+            )
             assert not await browser.js("!!document.querySelector('#remove-zone, [data-remove]')")
             assert (
                 await browser.js("document.getElementById('add-pause-bottom').textContent")
@@ -243,13 +250,46 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 "(()=>{const s=getComputedStyle(document.getElementById('add-pause-bottom'));"
                 "return s.borderTopStyle==='dashed' && s.backgroundColor==='rgba(0, 0, 0, 0)'})()"
             )
+            # A real desktop mouse sequence must keep focus despite scrolling on pointerdown.
+            await browser.call(
+                "Emulation.setDeviceMetricsOverride",
+                {
+                    "width": 1200,
+                    "height": 800,
+                    "deviceScaleFactor": 1,
+                    "mobile": False,
+                },
+            )
+            await browser.js("document.getElementById('search').scrollIntoView({block:'center'})")
+            point = await browser.js(
+                "(()=>{const r=document.getElementById('search').getBoundingClientRect();"
+                "return {x:r.x+20,y:r.y+20}})()"
+            )
+            for event_type in ("mousePressed", "mouseReleased"):
+                await browser.call(
+                    "Input.dispatchMouseEvent",
+                    {"type": event_type, **point, "button": "left", "clickCount": 1},
+                )
+            await browser.wait("document.activeElement.id==='search'")
+            await browser.call("Input.insertText", {"text": "Ком"})
+            assert await browser.js("document.getElementById('search').value") == "Ком"
+            await browser.js("document.getElementById('search').blur()")
+            await browser.call(
+                "Emulation.setDeviceMetricsOverride",
+                {
+                    "width": 390,
+                    "height": 900,
+                    "deviceScaleFactor": 1,
+                    "mobile": True,
+                },
+            )
             # RU/EN: Native touch must still add a song while closing the search keyboard.
             await browser.js("document.getElementById('search').focus()")
             await browser.call("Input.insertText", {"text": "Ком"})
             await browser.wait("document.querySelectorAll('.catalog-entry').length===1")
             search_at_top = (
                 "Math.abs(document.getElementById('search').getBoundingClientRect().top"
-                "-(visualViewport?.offsetTop ?? 0))<2"
+                "-(visualViewport?.offsetTop ?? 0)-12)<2"
             )
             await browser.wait(search_at_top)
             await browser.js("document.getElementById('search').click()")
@@ -386,9 +426,12 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             assert await browser.js("document.documentElement.dataset.theme") == "dark"
             assert await browser.js(transparent_pause)
             await browser.js("window.scrollTo(0,0)")
+            await browser.js("new Promise(resolve => setTimeout(resolve, 180))")
             screenshot = await browser.call("Page.captureScreenshot", {"format": "png"})
             (tmp_path / "miniapp-dark.png").write_bytes(base64.b64decode(screenshot["data"]))
             await browser.js("document.getElementById('older').click()")
+            await browser.wait("document.querySelectorAll('#history-sources button').length > 0")
+            await browser.js("document.querySelector('#history-sources button').click()")
             await browser.wait("!document.getElementById('use-history').hidden")
             assert await browser.js("document.querySelectorAll('#setlist li').length") == 1
             await browser.js("document.getElementById('newer').click()")
@@ -397,13 +440,14 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             await browser.js("document.querySelector('#setlist li:first-child .remove').click()")
             assert await browser.js("document.querySelectorAll('#setlist li').length") == 2
             await browser.js("document.getElementById('undo').click()")
-            await browser.js("document.getElementById('save').click()")
             await browser.wait(
-                "document.getElementById('save').disabled && "
+                "document.getElementById('save').hidden && "
+                "document.getElementById('save-status').textContent === 'Сохранено' && "
                 "!document.getElementById('publish').disabled"
             )
             await browser.js("window.Telegram.WebApp.colorScheme='light'; window.themeChange()")
             assert await browser.js("document.documentElement.dataset.theme") == "light"
+            await browser.js("new Promise(resolve => setTimeout(resolve, 180))")
             screenshot = await browser.call("Page.captureScreenshot", {"format": "png"})
             (tmp_path / "miniapp-light.png").write_bytes(base64.b64decode(screenshot["data"]))
             assert await browser.js("document.documentElement.scrollWidth<=innerWidth")
@@ -423,10 +467,116 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             from setlist_bot.domain.entities import Outbox
             from setlist_bot.main import deliver_one_outbox
 
+            async def catalog_acknowledgement():
+                for _ in range(100):
+                    async with PostgresUnitOfWork(engine) as uow:
+                        pending_catalog = await uow.store.find(
+                            Outbox, support_kind="catalog", sent=False
+                        )
+                    if pending_catalog:
+                        break
+                    await asyncio.sleep(0.05)
+                else:
+                    raise AssertionError("Catalog operation was not queued")
+                async with Bot("123456:TEST", session=FakeTelegram()) as worker:
+                    assert await deliver_one_outbox(worker, engine)
+                await browser.wait("!document.getElementById('song-dialog').open")
+
+            # RU/EN: Creating repertoire entries never inserts them into the current draft.
+            await browser.js("document.getElementById('add-song').click()")
+            await browser.wait("document.getElementById('song-dialog').open")
+            await browser.js("""
+                document.getElementById('song-title').value='Звёздный ветер';
+                document.getElementById('song-duration').value='02:30';
+                document.getElementById('song-bpm').value='140';
+                document.getElementById('song-lights').value='белый';
+                document.getElementById('song-comment').value='Вступление';
+                document.getElementById('song-aliases').value='Ветер';
+                document.getElementById('song-form').requestSubmit();
+            """)
+            await catalog_acknowledgement()
+            assert await browser.js("document.querySelectorAll('#setlist li').length") == 3
+            # Every occurrence is refreshed; order and blank pause are preserved.
+            assert await browser.js("""['#setlist .song-edit', '#setlist .remove'].every(
+                selector => {
+                    const box = document.querySelector(selector).getBoundingClientRect();
+                    return box.width >= 44 && box.height >= 44;
+                }
+            )""")
+            await browser.js("document.querySelector('#setlist .song-edit').click()")
+            await browser.wait("document.getElementById('song-dialog').open")
+            await browser.js("""
+                document.getElementById('song-title').value='Комета обновлённая';
+                document.getElementById('song-duration').value='04:00';
+                document.getElementById('song-bpm').value='150';
+                document.getElementById('song-aliases').value='Ком';
+                document.getElementById('song-form').requestSubmit();
+            """)
+            await catalog_acknowledgement()
+            assert await browser.js("""Array.from(
+                document.querySelectorAll('#setlist li:not(.pause) .song-name'))
+                .every(n=>n.textContent==='Комета обновлённая')""")
+            assert (
+                await browser.js("document.querySelector('#setlist .pause .song-name').textContent")
+                == ""
+            )
+            # A catalogue drag onto the WHOLE footer button appends, for mouse and touch.
+            await browser.js("""
+                document.getElementById('search').value='Звёздный';
+                document.getElementById('search').dispatchEvent(new Event('input'));
+                document.getElementById('add-pause-bottom').scrollIntoView({block:'center'});
+            """)
+            await browser.drag(".catalog-entry .handle", "#add-pause-bottom", touch=public_launch)
+            assert await browser.js("document.querySelectorAll('#setlist li').length") == 4
+            assert (
+                await browser.js(
+                    "document.querySelector('#setlist li:last-child .song-name').textContent"
+                )
+                == "Звёздный ветер"
+            )
+            assert not await browser.js("document.getElementById('pause-dialog').open")
+            await browser.wait(
+                "document.getElementById('status').textContent.includes('Сохранено')"
+            )
+            async with PostgresUnitOfWork(engine) as uow:
+                saved, _, _ = await Setlists(uow.store, world.admin).read(
+                    world.group.id, world.concert.id, private=True
+                )
+                assert [
+                    item["title"] for item in saved["blocks"][0]["items"] if item.get("song_id")
+                ] == ["Комета обновлённая", "Комета обновлённая", "Звёздный ветер"]
+            # The ordinary click is still a pause dialog, independent of drag behavior.
+            await asyncio.sleep(0.55)
+            await browser.js("document.getElementById('add-pause-bottom').click()")
+            assert await browser.js("document.getElementById('pause-dialog').open")
+            await browser.js("document.getElementById('pause-cancel').click()")
+            await browser.js("""
+                document.getElementById('planned-edit').click();
+                document.getElementById('planned-value').value='1:15';
+                document.getElementById('planned-form').requestSubmit();
+            """)
+            await browser.wait("document.getElementById('planned-dialog').open")
+            for _ in range(80):
+                async with PostgresUnitOfWork(engine) as uow:
+                    requests = await uow.store.find(Outbox, support_kind="catalog", sent=False)
+                if requests:
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("Planned duration request was not queued")
+            async with Bot("123456:TEST", session=FakeTelegram()) as bot:
+                assert await deliver_one_outbox(bot, engine)
+            await browser.wait("!document.getElementById('planned-dialog').open")
+            assert (
+                await browser.js("document.getElementById('planned-edit').textContent") == "75:00"
+            )
+            assert "запас" in await browser.js(
+                "document.getElementById('planned-delta').textContent"
+            )
             await browser.js("document.getElementById('publish').click()")
             for _ in range(50):
                 async with PostgresUnitOfWork(engine) as uow:
-                    pending = await uow.store.find(Outbox)
+                    pending = await uow.store.find(Outbox, sent=False)
                 if pending:
                     break
                 await asyncio.sleep(0.05)

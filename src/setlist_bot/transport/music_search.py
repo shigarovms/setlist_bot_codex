@@ -59,13 +59,13 @@ async def music_view(controller: Controller, job: MusicSearch) -> Response:
     elif job.status == "artists":
         response.text = t("music_artists")
         for index, artist in enumerate(job.data["artists"]):
+            response.text += "\n\n" + artist["name"]
             response.text += (
-                "\n\n" + artist["name"] + (" · " + artist["genre"] if artist.get("genre") else "")
+                "\n" + t("music_band_songs") + "\n" + "\n".join(artist.get("examples", [])[:3])
             )
-            response.text += "\n" + " · ".join(artist.get("examples", []))
             response.buttons.append(
                 (
-                    artist["name"] + (" · " + artist["genre"] if artist.get("genre") else ""),
+                    artist["name"],
                     f"mi_artist {job.id.hex} {index}",
                 )
             )
@@ -74,9 +74,15 @@ async def music_view(controller: Controller, job: MusicSearch) -> Response:
         group = await controller.store.get(Group, job.group_id)
         choosing = job.status == "choosing"
         rows = job.data["tracks"] if choosing else job.data.get("preview_rows", [])
-        pages = max(1, (len(rows) + PAGE_SIZE - 1) // PAGE_SIZE)
-        page = min(max(job.data.get("page", 0), 0), pages - 1)
         excluded = set(job.data.get("excluded", []))
+        selected_only = choosing and job.data.get("selected_only", False)
+        visible = [
+            (index, row)
+            for index, row in enumerate(rows)
+            if not selected_only or index not in excluded
+        ]
+        pages = max(1, (len(visible) + PAGE_SIZE - 1) // PAGE_SIZE)
+        page = min(max(job.data.get("page", 0), 0), pages - 1)
         if choosing:
             response.text = t(
                 "music_choose",
@@ -87,6 +93,8 @@ async def music_view(controller: Controller, job: MusicSearch) -> Response:
                 page=page + 1,
                 pages=pages,
             )
+            if not visible:
+                response.text += "\n\n" + t("music_no_selection")
             if job.data.get("warnings"):
                 response.text += "\n\n" + t("music_partial")
         else:
@@ -112,8 +120,7 @@ async def music_view(controller: Controller, job: MusicSearch) -> Response:
             ]
         ]
         fallback, row_buttons = [], []
-        for index in range(page * PAGE_SIZE, min(len(rows), (page + 1) * PAGE_SIZE)):
-            row = rows[index]
+        for index, row in visible[page * PAGE_SIZE : (page + 1) * PAGE_SIZE]:
             if choosing:
                 label = row["title"]
                 seconds = job.data.get("durations", {}).get(str(index), row["seconds"])
@@ -168,11 +175,25 @@ async def music_view(controller: Controller, job: MusicSearch) -> Response:
         if page + 1 < pages:
             response.buttons.append((t("music_next"), f"mi_page {job.id.hex} {page + 1}"))
         if choosing:
-            response.buttons.append((t("music_continue"), f"mi_preview {job.id.hex}"))
+            response.buttons.extend(
+                [
+                    (
+                        t("music_show_all" if selected_only else "music_show_selected"),
+                        f"mi_filter {job.id.hex} {0 if selected_only else 1}",
+                    ),
+                    (t("music_select_all"), f"mi_select {job.id.hex} 1"),
+                    (t("music_select_none"), f"mi_select {job.id.hex} 0"),
+                ]
+            )
+            if len(excluded) < len(rows):
+                response.buttons.append((t("music_continue"), f"mi_preview {job.id.hex}"))
         else:
             if job.data["new_count"]:
                 response.buttons.append(
-                    (t("music_commit"), f"mi_commit {job.id.hex} {job.data['preview_token']}")
+                    (
+                        t("music_commit", count=job.data["new_count"]),
+                        f"mi_commit {job.id.hex} {job.data['preview_token']}",
+                    )
                 )
             response.buttons.append((t("music_back"), f"mi_back {job.id.hex}"))
         response.buttons.append(cancel)
@@ -310,9 +331,21 @@ async def handle_music(controller: Controller, command: str, args: str) -> Respo
         service.toggle(job, int(values[1]))
         await notify_search(controller.store, job, debounce=True)
         return Response("", deferred=True)
+    elif command in ("mi_filter", "mi_select"):
+        require(job.status == "choosing" and values[1:] in (["0"], ["1"]), "input_expired")
+        enabled = values[1] == "1"
+        if command == "mi_filter":
+            service.write(job, selected_only=enabled, page=0)
+        else:
+            excluded = [] if enabled else list(range(len(job.data["tracks"])))
+            service.write(job, excluded=excluded, page=0)
+        await notify_search(controller.store, job, debounce=True)
+        return Response("", deferred=True)
     elif command == "mi_page":
         require(job.status in ("choosing", "preview"), "input_expired")
         count = len(job.data["tracks"] if job.status == "choosing" else job.data["preview_rows"])
+        if job.status == "choosing" and job.data.get("selected_only"):
+            count -= len(job.data.get("excluded", []))
         require(0 <= int(values[1]) < max(1, (count + PAGE_SIZE - 1) // PAGE_SIZE), "input")
         service.write(job, page=int(values[1]))
         await notify_search(controller.store, job, debounce=True)

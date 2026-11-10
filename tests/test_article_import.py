@@ -122,11 +122,11 @@ async def test_member_single_proposal_bulk_import_permissions_and_hidden_aliases
     assert "новых — 1" in (await send("/import\nТаблица\t03:20")).text
     assert "03:20" in (await send("/song Старая команда  03:20  103  красный")).text
     for menu in ("private", "group", "admin"):
-        assert "add_new_songs" in MENUS[menu]
+        assert ("add_new_songs" in MENUS[menu]) == (menu == "admin")
         assert "song" not in MENUS[menu] and "import" not in MENUS[menu]
     for language in ("ru", "en"):
-        help_text = MESSAGES[language]["help"]
-        assert help_text.index("/add_new_songs") < help_text.index("/catalog")
+        help_text = MESSAGES[language]["help_catalog"]
+        assert "/add_new_songs" in help_text and "/catalog" in help_text
         assert "/song " not in help_text and "/import " not in help_text
 
 

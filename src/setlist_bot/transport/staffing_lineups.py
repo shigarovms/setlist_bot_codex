@@ -15,6 +15,7 @@ from setlist_bot.domain.entities import (
     Group,
     LineupTemplate,
     Membership,
+    StaffContact,
     StaffRole,
     User,
 )
@@ -81,7 +82,7 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
                 if confirmed and person
                 else c.t("staff_wait_person", name=person_name(person)[:48])
                 if person
-                else c.t("staff_invite_person")
+                else c.t("staff_invite_or_remove")
             )
             label = (
                 f"{'✅ ' if confirmed else ''}{number}. {roles[slot.role_id].name[:64]}: {label}"
@@ -113,7 +114,7 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
                 action(c, "templates", group_id=str(group.id), event_id=str(event.id)),
             )
         )
-    buttons.append((c.t("menu_back"), f"use_concert {event.id}"))
+    buttons.append((c.t("back_performance"), f"use_concert {event.id}"))
     return Response("\n".join(lines) or c.t("staff_empty_lineup"), buttons)
 
 
@@ -124,23 +125,25 @@ async def template_view(
     buttons = []
     text = row.name
     require(page >= 0, "input")
-    roles = {
-        role.id: role
-        for role in await c.store.get_many(StaffRole, {UUID(slot["role_id"]) for slot in row.slots})
-    }
+    roles = {role.id: role for role in await c.store.find(StaffRole, group_id=row.group_id)}
+    defaults = Staffing.select_defaults(
+        roles,
+        await c.store.find(StaffContact, group_id=row.group_id),
+        [UUID(slot["role_id"]) for slot in row.slots],
+        await Staffing(c.store, c.user).vocabulary(),
+    )
     people = {
         person.id: person
-        for person in await c.store.get_many(
-            User, {UUID(slot["user_id"]) for slot in row.slots if slot.get("user_id")}
-        )
+        for person in await c.store.get_many(User, {person for person in defaults if person})
     }
     # RU: Полный текст состава не зависит от страницы; переключаются лишь кнопки.
     # EN: Batch-load the full lineup and paginate only the role actions.
     for index, slot in enumerate(row.slots):
         role = roles[UUID(slot["role_id"])]
         label = f"{index + 1}. {role.name[:64]}"
-        if slot.get("user_id"):
-            label += ": " + person_name(people[UUID(slot["user_id"])])[:48]
+        default_person = defaults[index]
+        if default_person is not None:
+            label += ": " + person_name(people[default_person])[:48]
         text += "\n" + label
         if page * 8 <= index < (page + 1) * 8:
             buttons.append(
@@ -306,7 +309,8 @@ async def lineup_action(c: Controller, op: str, data: dict[str, Any]) -> Respons
     if op == "templates":
         group = await c.groups.access(UUID(data["group_id"]), admin=True)
         rows = sorted(
-            await c.store.find(LineupTemplate, group_id=group.id), key=lambda r: (r.name_key, r.id)
+            await c.store.find(LineupTemplate, group_id=group.id),
+            key=lambda r: (r.created_at, r.id),
         )
         page = int(data.get("page", 0))
         require(page >= 0, "input")
@@ -349,9 +353,7 @@ async def lineup_action(c: Controller, op: str, data: dict[str, Any]) -> Respons
                 c.t("menu_back"),
                 f"sf_lineup {UUID(data['event_id']).hex}"
                 if data.get("event_id")
-                else f"use_group {group.id}"
-                if c.private
-                else "concerts",
+                else action(c, "team", group_id=str(group.id)),
             )
         )
         return Response(c.t("staff_group_lineups", name=group.name), buttons)
@@ -396,19 +398,11 @@ async def lineup_action(c: Controller, op: str, data: dict[str, Any]) -> Respons
                         ),
                     ),
                     (
-                        c.t("staff_change_default"),
-                        action(
-                            c,
-                            "prompt",
-                            field="template_person",
-                            group_id=str(row.group_id),
-                            template_id=str(row.id),
-                            version=row.version,
-                            index=index,
-                        ),
+                        c.t("permanent_title"),
+                        action(c, "permanent", group_id=str(row.group_id)),
                     ),
                     (
-                        c.t("staff_remove_role"),
+                        c.t("staff_remove_template_role"),
                         action(
                             c,
                             "template_remove_role",
@@ -594,7 +588,7 @@ async def lineup_action(c: Controller, op: str, data: dict[str, Any]) -> Respons
         )
         buttons.append(
             (
-                c.t("staff_remove_role"),
+                c.t("staff_remove_event_role"),
                 action(c, "slot_remove_preview", slot_id=str(slot.id), version=slot.version),
             )
         )

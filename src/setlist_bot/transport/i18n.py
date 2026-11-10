@@ -1,7 +1,9 @@
 from typing import Any
 
 from setlist_bot.transport.calendar_texts import TEXTS as CALENDAR_TEXTS
+from setlist_bot.transport.help_texts import HELP_TEXTS
 from setlist_bot.transport.music_texts import TEXTS as MUSIC_TEXTS
+from setlist_bot.transport.profile_texts import TEXTS as PROFILE_TEXTS
 from setlist_bot.transport.staffing_texts import TEXTS as STAFFING_TEXTS
 from setlist_bot.transport.workflow_texts import TEXTS as WORKFLOW_TEXTS
 
@@ -9,7 +11,7 @@ MESSAGES = {
     "ru": {
         "support_help": "Справка по командам и работе бота: /help.",
         "import_clarify_columns": "Не удалось разобрать таблицу. Давайте уточним столбцы.",
-        "input_add_new_songs": "Название  03:38  свет  110  комментарий\nПоследние три поля необязательны; - — пустое поле. Можно вставить таблицу текстом или как Article в ответ на это сообщение.",
+        "input_add_new_songs": "Название 03:38\nИли с дополнительными полями: Название  03:38  свет  110  комментарий\nПоследние три поля необязательны; - — пустое поле. Можно вставить таблицу текстом или как Article в ответ на это сообщение.",
         "article_format": "Не удалось прочитать формат Article. Пришлите простую таблицу с текстом в ячейках.",
         "article_one_table": "В одном сообщении должна быть одна таблица песен. Отправьте таблицы отдельно.",
         "article_table_required": "В Article не найдена таблица песен. Используйте /add_new_songs.",
@@ -20,8 +22,11 @@ MESSAGES = {
         "catalog_time": "Время",
         "catalog_lights": "Свет",
         "catalog_comment": "Комментарий",
-        "back_concerts": "◀️ Назад к выступлениям",
-        "group_events": "Мероприятия {name}",
+        "back_concerts": "◀️ К выступлениям",
+        "group_events": "Выступления {name}",
+        "group_repertoire": "Репертуар {name}",
+        "song_row_edit": "Редактировать",
+        "song_aliases_preview": "Альтернативные названия: {aliases}",
         "miniapp_open": "🖐 Открыть редактор",
         "editor_prompt": "Откройте редактор: добавьте песни, настройте паузы и отправьте свой вариант коллективу.",
         "suggestion_private_button": "🎵 Собрать вариант в личке",
@@ -57,7 +62,7 @@ MESSAGES = {
         "grant": "Назначить администратором",
         "revoke": "Снять права администратора",
         "administrator_prompt": "{action}: {name}?",
-        "approved_by": "Одобрен: {name} · версия {version}",
+        "approved_by": "Утверждён {name} · версия {version}",
         "compact_header": "Пауза: {pause} · Выступаем: {planned}",
         "cleanup_button": "Прибраться в чате",
         "cleanup_prompt": "Удалить доступные сообщения бота за последние 48 часов, включая сообщения с сет-листами? Сами сет-листы, песни, выступления и все варианты бот запомнит.",
@@ -96,14 +101,14 @@ MESSAGES = {
         "concert_created": "Выступление создано.",
         "set_field": "Задать: {field}",
         "change_field": "Изменить: {field}",
-        "concert_settings": "Параметры выступления",
+        "concert_settings": "Данные выступления",
         "open_setlist": "Открыть сет-лист",
         "past_concerts": "Прошедшие",
         "new_concert": "Новое выступление",
         "input_concert_duration": "Введите длительность выступления: 1ч 42мин, 90 мин или 1:15 (1 час 15 минут). Число без единиц — минуты. Знак - убирает значение.",
         "input_concert_city": "Введите город. Знак - убирает значение.",
         "input_concert_info": "Введите дополнительную информацию (до 2000 символов). Знак - убирает значение.",
-        "export_settings": "Параметры экспорта",
+        "export_settings": "Оформление PDF",
         "export_font": "Шрифт: {value}",
         "export_size": "Размер: {value} pt",
         "export_align": "Выравнивание: {value}",
@@ -114,47 +119,15 @@ MESSAGES = {
         "input_picker_pause": "Какой длины пауза? Например: 5 мин, 2:30, 1 час 13 минут 43 секунды. Число без единиц — минуты; секунды: 3сек или 00:00:03.",
         "pause_duration": "Укажите положительную длительность до 24 часов: 5 мин, 2:30, 3 мин 30 сек.",
         "flat_list_only": "Сет-лист теперь единый список песен и пауз. Введите паузу отдельной строкой, например 5 мин.",
-        "draft_publish": "Предложить этот вариант",
+        "draft_publish": "📤 Предложить группе",
         "draft_edit": "Изменить",
         "welcome": "Бот для репертуара и сет-листов. /help — команды.\nАдминистратор создаёт коллектив командой /new_band Название в общем чате. Участники: /register Ваша роль.",
-        "help": (
-            "Начало работы\nПоддержка: /support.\nСоздание коллектива: /new_band Название. Начать может любой участник; владелец Telegram-чата подтверждает создание, становится владельцем коллектива, а инициатор — администратором. Управление правами — /members.\nВступление: /register Имя в коллективе. После подтверждения заявки доступны сет-листы; участникам команда меняет имя.\nВ личном чате: /groups — выбрать коллектив. Можно участвовать в нескольких коллективах.\nЯзык интерфейса: /language ru; язык коллектива: /group_language ru.\n\nОсновная команда — /concerts. Предстоящие и прошедшие выступления; ✅ означает, что сет-лист утверждён. Выберите выступление, чтобы открыть список, предложить вариант или перейти к настройкам. Кнопка «Новое выступление» создаёт выступление.\nВ личке /all_my_concerts — все ваши выступления из всех коллективов; /calendar — подписка на календарь Google или Apple.\nНапоминания накануне: /reminders.\n\n"
-            "Добавить новые песни: /add_new_songs Название  03:38  свет  110  комментарий.\n"
-            "Последние три поля необязательны. Между полями — два и более пробела; - — пустое поле. Можно вставить таблицу текстом или как Article ответом на запрос команды.\n"
-            "Каталог: /catalog [поиск]; архив песен: /archived.\n"
-            "Загрузка песен из интернета — кнопка «🌐 Найти песни в интернете» в /catalog (для администратора).\n"
-            "Изменить песню: /edit Название  Новое название  03:38  110  свет  комментарий.\n"
-            "Скопировать: /copy Название  Новое название  05:00.\n"
-            "Алиас: /alias Название  Альтернативное название.\n"
-            "Архивировать: /archive Название; восстановить: /unarchive Название.\n"
-            "Предложения по каталогу: /proposals. Изменения участника одобряет администратор.\n"
-            "\n"
-            "Выступление: /concert 23.04 Клуб Космос. 45мин. Сольник. Москва; выбор: /concerts.\n"
-            "Список: /setlist; общий вариант: /shared.\n"
-            "Добавить: /add Комета. Для списка — одна песня или длительность паузы на строку: 5 мин, 2:30, 1 час 13 минут 43 секунды.\n"
-            "Новый вариант: /suggestion Названия песен. История сохраняется.\n"
-            "Удалить песню или паузу: /remove 2.\n"
-            "Переставить песню или паузу: /move 2  3.\n"
-            "Средняя пауза: /pause 30. Явные паузы вводите длительностью на отдельной строке.\n"
-            "Пауза для новых выступлений: /group_pause 5 (администратор).\n"
-            "Стандартные паузы учитываются в итогах и не показываются перед песнями.\n"
-            "\n"
-            "В личном черновике — «Изменить», «Предложить этот вариант» (если он отличается от общего), «⚙️ Опции». В группе — предложение, опции, утверждение.\n"
-            "Экспорт утверждённого сет-листа: /export — PDF для музыкантов, световика или оба файла.\n"
-            "Утвердить: /approve; вернуть в работу: /reopen (администратор).\n"
-            "Участник кнопками запрашивает у администратора утверждение или редактирование.\n"
-            "История и восстановление: /history, /versions.\n"
-            "Удаление: /delete_concert, /delete_group; ZIP общих данных: /backup.\n"
-            "Корзина и восстановление: /trash. Срок хранения удалённых данных — 30 дней.\n"
-            "\n"
-            "В личке правки меняют только личный черновик. Отправить свой вариант группе: /publish.\n"
-            "Ответ списком на рабочий сет-лист или приглашение — предложение нового варианта.\n"
-            "«Предложить свой вариант» и «Изменить» открывают редактор: перетаскивайте песни, задавайте среднюю паузу и выбирайте прежние версии стрелками. /cancel — отмена текущего ввода и подтверждений.\n"
-        ),
         "ok": "Готово.",
         "empty": "Пока пусто.",
         "choose_group": "Выберите коллектив:",
         "choose_concert": "Выберите выступление:",
+        "performance_forbidden": "Это выступление доступно по действующему приглашению или администратору коллектива.",
+        "no_visible_performances": "В этом разделе нет доступных выступлений. Личные приглашения и участия можно открыть через /my_gigs.",
         "all_my_concerts_title": "Все ваши выступления:",
         "all_my_concerts_button": "Сводный календарь всех коллективов",
         "all_my_concerts_private": "Общий список выступлений всех ваших коллективов доступен в личном чате с ботом.",
@@ -168,7 +141,7 @@ MESSAGES = {
         "saved_song": "Песня «{name}» сохранена.",
         "approve_button": "Одобрить",
         "reject_button": "Отклонить",
-        "draft": "Личный черновик",
+        "draft": "Ваш черновик · виден только вам",
         "working": "Общий рабочий сет-лист",
         "approved_title": "Утверждённый сет-лист",
         "version": "Версия {version}",
@@ -187,8 +160,14 @@ MESSAGES = {
         "menu_options": "⚙️ Опции",
         "menu_variants": "📋 Варианты",
         "menu_back": "◀️ Назад",
+        "download_pdf": "📄 Скачать PDF",
+        "open_editor": "🎵 Открыть редактор",
+        "request_approval_button": "Запросить утверждение",
+        "back_performance": "◀️ К выступлению",
+        "shared_title": "Общий сет-лист",
+        "draft_publish_hint": "Предложение появится в общем чате для согласования.",
         "menu_approve": "✅ Утвердить",
-        "menu_edit": "✏️ Редактировать",
+        "menu_edit": "Вернуть в работу",
         "menu_cancel": "❌ Отмена",
         "menu_return_yes": "✅ Да, вернуть",
         "menu_reopen_prompt": "Вернуть сет-лист в режим редактирования? Статус „Утверждён“ будет снят.",
@@ -198,7 +177,7 @@ MESSAGES = {
         "request_edit": "открыть редактирование утверждённого сет-листа",
         "request_yes": "✅ Подтвердить",
         "request_no": "❌ Отказать",
-        "request_sent": "Запрос поставлен в очередь отправки администратору в личные сообщения.",
+        "request_sent": "Запрос администратору принят к отправке. Статус сет-листа пока не изменился.",
         "request_duplicate": "Вы уже отправили запрос для этого варианта. Ожидайте решения администратора.",
         "request_group": "{name} запросил у администратора: {action}.\nВыступление: {concert}, версия {version}.",
         "request_accepted": "Запрос подтверждён.",
@@ -287,8 +266,8 @@ MESSAGES = {
         "group_pause_setting": "{name}\nПауза по умолчанию для новых выступлений: {time}.\nТекущие выступления и черновики сохраняют свои настройки. Изменить: /group_pause секунды (администратор).",
         "pause_usage": "Средняя пауза: /pause 5. Явные паузы: отдельная строка длительности в /add или /suggestion.",
         "pause_input": "Укажите целое число секунд от 0 до 86400. Например, /pause 30 или /pause 1 2 0.",
-        "published": "Черновик опубликован в общем чате.",
-        "submission": "{name} предлагает вариант сет-листа.",
+        "published": "Вариант поставлен в очередь для отправки в общий чат.",
+        "submission": "Вариант {name} · предложен коллективу",
         "restore_notice": "Будет восстановлен порядок выбранной версии. Параметры песен берутся из текущего каталога.",
         "private_only": "Эта команда доступна только в личном чате с ботом.",
         "group_only": "Эта команда доступна в привязанном общем чате. В личном чате редактируется только личный черновик.",
@@ -306,7 +285,13 @@ MESSAGES = {
         "not_approved": "Сет-лист ещё не утверждён.",
         "empty_setlist": "Нельзя утвердить пустой сет-лист.",
         "duration": "Длительность должна быть положительной в формате ММ:СС, например 00:05.",
-        "song_input": "Проверьте поля песни. /help — формат команды.",
+        "song_bpm": "BPM — целое число от 1 до 1000. Например, 110.",
+        "song_title_missing": "Укажите название песни, например «Комета».",
+        "no_bands": "У вас пока нет коллективов. В общем чате отправьте /new_band или /register.",
+        "catalog_no_matches": "Песни по этому запросу не найдены. Попробуйте часть названия.",
+        "catalog_empty_state": "Здесь пока нет песен. Пополнить репертуар можно через /add_new_songs.",
+        "pause_admin_scope": "Для этого черновика и новых сет-листов коллектива. Уже созданные списки не изменятся.",
+        "song_input": "Укажите название и длительность песни. Например, /add_new_songs Комета 03:38.",
         "field_separator": "Разделитель полей — два и более пробела вместо вертикальной черты. Примеры: /help.",
         "input_prompt": "Введите данные для /{command} ответом на это сообщение.",
         "input_cancel": "/cancel — отменить ввод.",
@@ -349,7 +334,8 @@ MESSAGES = {
         "no_chat": "Общий чат коллектива недоступен.",
         "musical_role": "Укажите имя в коллективе: например, /register Илья — гитара.",
         "registered": "Заявка принята и ожидает подтверждения администратора. /members — список заявок для администратора.",
-        "members": "Участники и заявки (имя · права · статус):",
+        "membership_permissions": "Участники и права",
+        "members": "Участники и права · заявки",
         "pending": "ожидает подтверждения",
         "active": "принят",
         "input": "Не удалось разобрать команду. /help — примеры.",
@@ -430,6 +416,9 @@ MESSAGES = {
         "catalog_comment": "Comment",
         "back_concerts": "◀️ Back to performances",
         "group_events": "Performances — {name}",
+        "group_repertoire": "Repertoire — {name}",
+        "song_row_edit": "Edit",
+        "song_aliases_preview": "Alternative titles: {aliases}",
         "miniapp_open": "🖐 Open editor",
         "editor_prompt": "Open the editor to add songs, adjust pauses and propose your draft to the group.",
         "suggestion_private_button": "🎵 Build in private chat",
@@ -465,7 +454,7 @@ MESSAGES = {
         "grant": "Grant administrator rights",
         "revoke": "Revoke administrator rights",
         "administrator_prompt": "{action}: {name}?",
-        "approved_by": "Approved by: {name} · version {version}",
+        "approved_by": "Approved by {name} · version {version}",
         "compact_header": "Pause: {pause} · Performing: {planned}",
         "cleanup_button": "Clean up chat",
         "cleanup_prompt": "Delete available bot messages from the last 48 hours, including setlist messages? The bot will retain all setlists, songs, concerts and variants.",
@@ -511,7 +500,7 @@ MESSAGES = {
         "input_concert_duration": "Enter performance duration: 1h 42min, 90 min or 1:15 (1 hour 15 minutes). A number alone means minutes. Use - to clear.",
         "input_concert_city": "Enter city. Use - to clear.",
         "input_concert_info": "Enter additional information (up to 2000 characters). Use - to clear.",
-        "export_settings": "Export settings",
+        "export_settings": "PDF appearance",
         "export_font": "Font: {value}",
         "export_size": "Size: {value} pt",
         "export_align": "Alignment: {value}",
@@ -522,47 +511,15 @@ MESSAGES = {
         "input_picker_pause": "How long is the pause? For example: 5 min, 2:30, 1 hour 13 minutes 43 seconds. A number alone means minutes; seconds: 3sec or 00:00:03.",
         "pause_duration": "Enter a positive duration up to 24 hours: 5 min, 2:30, 3 min 30 sec.",
         "flat_list_only": "Setlists now contain a flat sequence of songs and pauses. Enter a pause as a duration-only line, for example 5 min.",
-        "draft_publish": "Propose this variant",
+        "draft_publish": "📤 Suggest to the band",
         "draft_edit": "Edit",
         "welcome": "Repertoire and setlist bot. /help — commands.\nA Telegram chat administrator creates the group with /new_band Name in the group chat. Members: /register Your role.",
-        "help": (
-            "Getting started\nSupport: /support.\nAny member can start registration with /new_band Name. The Telegram chat owner confirms and owns the group; the initiator becomes an administrator. Manage roles with /members.\nJoin: /register Group display name. Existing members use it to change their name.\nPrivate chat: /groups — choose a group; you can belong to several.\nLanguage: /language en; group language: /group_language en.\n\nYour main tool is /concerts: upcoming and past performances; ✅ means the setlist is approved. Select an event to open its setlist, propose a variant or change settings. New concert creates an event.\nIn private, /all_my_concerts lists your performances across all groups; /calendar connects a Google or Apple calendar subscription.\nDay-before reminders: /reminders.\n\n"
-            "Add new songs: /add_new_songs Title  03:38  lights  110  comment.\n"
-            "The last three fields are optional. Separate fields with two or more spaces; - means empty. Paste a text table or reply to the command prompt with an Article table.\n"
-            "Catalog: /catalog [search]; archived songs: /archived.\n"
-            "Online import: use ‘🌐 Find songs online’ in /catalog (group administrators).\n"
-            "Edit: /edit Title  New title  03:38  110  lights  comment.\n"
-            "Copy: /copy Title  New title  05:00.\n"
-            "Alias: /alias Title  Alternative title.\n"
-            "Archive: /archive Title; restore: /unarchive Title.\n"
-            "Catalog proposals: /proposals. Member changes require administrator approval.\n"
-            "\n"
-            "Performance: /concert 23.04 Cosmos Club. 45min. Solo. Moscow; select: /concerts.\n"
-            "Setlist: /setlist; shared version: /shared.\n"
-            "Add: /add Comet. For lists enter one song or pause duration per line: 5 min, 2:30, 1 hour 13 minutes 43 seconds.\n"
-            "New variant: /suggestion Song titles. History is preserved.\n"
-            "Remove song or pause: /remove 2.\n"
-            "Move song or pause: /move 2  3.\n"
-            "Average pause: /pause 30. Enter explicit pauses as duration-only lines.\n"
-            "Pause for new concerts: /group_pause 5 (administrator).\n"
-            "Inherited pauses count in totals but are hidden before songs.\n"
-            "\n"
-            "Personal drafts show “Propose this variant”, “Edit”, “⚙️ Options”. Group lists show proposal, options, approval.\n"
-            "Approved setlist export: /export — PDF for musicians, lighting, or both files.\n"
-            "Approve: /approve; reopen: /reopen (administrator).\n"
-            "Members can request approval or reopening from the administrator using buttons.\n"
-            "History and restoration: /history, /versions.\n"
-            "Delete: /delete_concert, /delete_group; ZIP of shared data: /backup.\n"
-            "Trash and restoration: /trash. Deleted data is retained for 30 days.\n"
-            "\n"
-            "In private chat edits change only your personal draft. Send your variant to the group: /publish.\n"
-            "Replying with a list to a working setlist or invitation proposes a new variant.\n"
-            "Suggest your variant and Edit open the editor: drag songs, set an average pause and browse versions with the arrows. /cancel cancels input and pending confirmations.\n"
-        ),
         "ok": "Done.",
         "empty": "Nothing here yet.",
         "choose_group": "Select a group:",
         "choose_concert": "Select a concert:",
+        "performance_forbidden": "A current invitation or band administrator access is required for this performance.",
+        "no_visible_performances": "No performances are available here. Open /my_gigs for invitations and confirmed assignments.",
         "all_my_concerts_title": "All your performances:",
         "all_my_concerts_button": "Combined calendar for all groups",
         "all_my_concerts_private": "Your performances across all groups are available in the bot's private chat.",
@@ -576,7 +533,7 @@ MESSAGES = {
         "saved_song": "Song “{name}” saved.",
         "approve_button": "Approve",
         "reject_button": "Reject",
-        "draft": "Personal draft",
+        "draft": "Your draft · visible only to you",
         "working": "Shared working setlist",
         "approved_title": "Approved setlist",
         "version": "Version {version}",
@@ -595,8 +552,14 @@ MESSAGES = {
         "menu_options": "⚙️ Options",
         "menu_variants": "📋 Variants",
         "menu_back": "◀️ Back",
+        "download_pdf": "📄 Download PDF",
+        "open_editor": "🎵 Open editor",
+        "request_approval_button": "Request approval",
+        "back_performance": "◀️ To performance",
+        "shared_title": "Shared setlist",
+        "draft_publish_hint": "Your variant will appear in the group chat for discussion.",
         "menu_approve": "✅ Approve",
-        "menu_edit": "✏️ Edit",
+        "menu_edit": "Reopen",
         "menu_cancel": "❌ Cancel",
         "menu_return_yes": "✅ Yes, reopen",
         "menu_reopen_prompt": "Reopen this setlist for editing? Its approved status will be removed.",
@@ -606,7 +569,7 @@ MESSAGES = {
         "request_edit": "reopen the approved setlist for editing",
         "request_yes": "✅ Confirm",
         "request_no": "❌ Decline",
-        "request_sent": "Your request is queued for delivery to the administrator's private chat.",
+        "request_sent": "Your request is queued for the administrator. The setlist status is unchanged.",
         "request_duplicate": "You already requested this action for this variant. Please wait for the administrator's decision.",
         "request_group": "{name} asked the administrator to {action}.\nConcert: {concert}, version {version}.",
         "request_accepted": "Request accepted.",
@@ -695,8 +658,8 @@ MESSAGES = {
         "group_pause_setting": "{name}\nDefault pause for new concerts: {time}.\nExisting concerts and drafts keep their settings. Change: /group_pause seconds (administrator).",
         "pause_usage": "Average pause: /pause 5. Explicit pauses: duration-only lines in /add or /suggestion.",
         "pause_input": "Enter a whole number of seconds from 0 to 86400. For example, /pause 30 or /pause 1 2 0.",
-        "published": "Draft published in the group chat.",
-        "submission": "{name} proposes a setlist.",
+        "published": "Your variant is queued for delivery to the group chat.",
+        "submission": "Variant by {name} · suggested to the band",
         "restore_notice": "Restores the selected order using current catalog parameters.",
         "private_only": "This command is available only in a private chat with the bot.",
         "group_only": "Use the linked group chat. Private chat edits only affect your personal draft.",
@@ -714,7 +677,13 @@ MESSAGES = {
         "not_approved": "The setlist is not approved yet.",
         "empty_setlist": "Cannot approve an empty setlist.",
         "duration": "Use a positive MM:SS duration, for example 00:05.",
-        "song_input": "Check the song fields. See /help for the command format.",
+        "song_bpm": "BPM must be a whole number from 1 to 1000, for example 110.",
+        "song_title_missing": "Enter a song title, for example “Comet”.",
+        "no_bands": "You have no bands yet. Send /new_band or /register in a group chat.",
+        "catalog_no_matches": "No songs matched. Try searching for part of the title.",
+        "catalog_empty_state": "There are no songs here yet. Use /add_new_songs to add repertoire.",
+        "pause_admin_scope": "Applies to this draft and new band setlists. Existing setlists stay as they are.",
+        "song_input": "Enter a title and duration, for example /add_new_songs Comet 03:38.",
         "field_separator": "Separate fields with two or more spaces instead of a vertical bar. See /help for examples.",
         "input_prompt": "Reply to this message with the input for /{command}.",
         "input_cancel": "/cancel — cancel input.",
@@ -757,7 +726,8 @@ MESSAGES = {
         "no_chat": "The group's chat is unavailable.",
         "musical_role": "Specify your group display name, for example /register Alex — guitar.",
         "registered": "Application received; waiting for administrator approval. /members lists applications for the administrator.",
-        "members": "Members and applications (name · permissions · status):",
+        "membership_permissions": "Membership and permissions",
+        "members": "Membership and permissions · requests",
         "pending": "pending approval",
         "active": "accepted",
         "input": "Could not parse the command. See /help for examples.",
@@ -825,32 +795,40 @@ MESSAGES = {
 }
 
 
-MESSAGES["ru"]["help"] += (
-    "\n\nПараметры сет-листа в Опциях действуют для всего коллектива: моноширинный вывод или Article и предложения только от администраторов. Перенос в новый чат: /groups в личке → выберите коллектив → Перенести в другой чат (владелец). Для проверки переноса следуйте одноразовой команде бота; /chat_transfer не нужно вводить без кода.\nДля улучшения интерфейса собираем обезличенную статистику действий без содержания переписки; подробные события храним 90 дней."
-)
-MESSAGES["en"]["help"] += (
-    "\n\nSetlist settings in Options apply to the whole group: monospaced or Article display and administrator-only suggestions. To move to a new chat: /groups in private → select group → Move to another chat (owner only). Follow the generated single-use /chat_transfer command.\nWe collect pseudonymous usage statistics without message content; detailed events are retained for 90 days."
-)
-
-
-MESSAGES["ru"]["help"] += (
-    "\n\nСоставы: /team — роли, составы и знакомые исполнители (администратор); "
-    "/lineup — состав выбранного выступления. Приглашения принимаются в личке. "
-    "/my_gigs — ваши участия, приглашения и запросы подмены; /set_no_concert_days — личная занятость. "
-    "В /calendar есть отдельная подписка на подтверждённые участия. "
-    "Совпадение дат — возможное пересечение; бот не читает внешние календари."
-)
-MESSAGES["en"]["help"] += (
-    "\n\nStaffing: /team — roles, lineups and known performers (administrator); "
-    "/lineup — selected performance lineup. Reply to invitations in private. "
-    "/my_gigs — assignments, invitations and substitution requests; /set_no_concert_days — private busy periods. "
-    "/calendar offers a separate confirmed-assignment subscription. "
-    "Same-day bookings are possible conflicts; external calendars are not read."
-)
-
-for _catalog in (MUSIC_TEXTS, WORKFLOW_TEXTS, CALENDAR_TEXTS, STAFFING_TEXTS):
+for _catalog in (
+    HELP_TEXTS,
+    MUSIC_TEXTS,
+    WORKFLOW_TEXTS,
+    CALENDAR_TEXTS,
+    STAFFING_TEXTS,
+    PROFILE_TEXTS,
+):
     for _language, _texts in _catalog.items():
         MESSAGES[_language].update(_texts)
+
+
+MESSAGES["ru"].update(
+    {
+        "role_dictionary_input": "Укажите название и до 150 однозначных синонимов длиной до 100 символов. Каждый синоним — на отдельной строке.",
+        "role_dictionary_collision": "Это название или синоним уже относится к другой роли, в том числе в истории. Выберите другое обозначение.",
+        "input_join_roles": "Какие роли вы выполняете в коллективе? По одной на строку или через запятую. Например: басист, гитарист; либо FOH, MON. Заявку подтвердит администратор, после чего вы появитесь в постоянных участниках коллектива.",
+        "join_requested": "{name} хочет присоединиться к постоянной команде. Роли: {roles}.\nЗаявка ожидает подтверждения администратора.",
+        "join_board": "Присоединяйтесь к коллективу «{name}»: укажите свои роли, администратор подтвердит заявку.\n\nУчастники коллектива:",
+        "join_no_roles": "роли пока не указаны",
+        "join_button": "Присоединиться к {name}",
+    }
+)
+MESSAGES["en"].update(
+    {
+        "role_dictionary_input": "Enter a role title and up to 150 unambiguous aliases, each up to 100 characters and on a separate line.",
+        "role_dictionary_collision": "This name or alias already belongs to another role, including historical records. Choose a different name.",
+        "input_join_roles": "Which roles do you perform in this band? One per line or comma-separated, for example bassist, guitarist; or FOH, MON. After administrator approval you will appear among the band’s permanent performers.",
+        "join_requested": "{name} requests to join the permanent team. Roles: {roles}.\nWaiting for administrator approval.",
+        "join_board": "Join “{name}”: specify your roles for administrator approval.\n\nBand members:",
+        "join_no_roles": "roles not specified yet",
+        "join_button": "Join {name}",
+    }
+)
 
 
 def tr(language: str, key: str, **values: Any) -> str:

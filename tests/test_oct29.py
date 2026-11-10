@@ -23,22 +23,24 @@ async def test_empty_menu_and_back_navigation_bind_original_group(engine, world)
     send = sender(engine)
     empty = await send(f"/use_concert {world.concert.id}", remember=50)
     assert [label for label, _ in empty.buttons] == [
-        "Предложить свой вариант",
+        "🎵 Открыть редактор",
+        "👥 Состав выступления",
         "⚙️ Опции",
-        "◀️ Назад к выступлениям",
+        "◀️ К выступлениям",
     ]
     # RU/EN: Даже поддельное старое действие не утверждает пустоту / backend still rejects it.
     denied = await send(f"slact {empty.menu_card_id.hex} approve", source=50)
     assert denied.callback_notice
     await send(f"/use_group {world.other.id}")
-    returned = await send(action(empty, "◀️ Назад к выступлениям"), source=50)
+    returned = await send(action(empty, "◀️ К выступлениям"), source=50)
     assert any(str(world.concert.id) in callback for _, callback in returned.buttons)
     assert not any(str(world.other_concert.id) in callback for _, callback in returned.buttons)
     await send(f"/use_concert {world.concert.id}")
     populated = await send("/suggestion Комета")
-    assert [label for label, _ in populated.buttons][-2:] == [
+    assert [label for label, _ in populated.buttons][-3:] == [
         "✅ Утвердить",
-        "◀️ Назад к выступлениям",
+        "⚙️ Опции",
+        "◀️ К выступлениям",
     ]
 
 
@@ -47,18 +49,18 @@ async def test_private_publish_only_when_different_and_edit_first(engine, world)
     await send(f"/use_group {world.group.id}", private=True)
     initial = await send(f"/use_concert {world.concert.id}", private=True)
     assert [label for label, _ in initial.buttons] == [
-        "Изменить",
+        "🎵 Открыть редактор",
         "⚙️ Опции",
-        "◀️ Назад к выступлениям",
+        "◀️ К выступлениям",
     ]
     changed = await send("/suggestion\nКомета\n2 мин\nКомета", private=True)
     assert [label for label, _ in changed.buttons] == [
-        "Изменить",
-        "Предложить этот вариант",
+        "🎵 Открыть редактор",
+        "📤 Предложить группе",
         "⚙️ Опции",
-        "◀️ Назад к выступлениям",
+        "◀️ К выступлениям",
     ]
-    publish = action(changed, "Предложить этот вариант")
+    publish = action(changed, "📤 Предложить группе")
     # Shared changes can make an old personal publish button redundant.
     await send(f"/use_concert {world.concert.id}")
     await send("/suggestion\nКомета\n2 мин\nКомета")
@@ -67,7 +69,7 @@ async def test_private_publish_only_when_different_and_edit_first(engine, world)
     async with PostgresUnitOfWork(engine) as uow:
         assert not await uow.store.find(Submission)
     same = await send("/setlist", private=True)
-    assert "Предложить этот вариант" not in dict(same.buttons)
+    assert "📤 Предложить группе" not in dict(same.buttons)
 
 
 async def test_settings_title_type_order_clear_cancel_and_back(engine, world):
@@ -102,7 +104,7 @@ async def test_settings_title_type_order_clear_cancel_and_back(engine, world):
     title = await send(action(edited, "Изменить: Название"), private=True, remember=503)
     cleared = await send("-", private=True, reply=503)
     options = await send(action(cleared, "◀️ Назад"), private=True)
-    assert "Параметры выступления" in dict(options.buttons)
+    assert "Данные выступления" in dict(options.buttons)
     assert "Удалить выступление" not in dict(options.buttons)
     async with PostgresUnitOfWork(engine) as uow:
         concert = await uow.store.get(Concert, world.concert.id)
@@ -183,7 +185,7 @@ async def test_recommendation_no_duration_latest_and_group_copy_heading(engine, 
         assert result.source_date == last.date and result.titles == [title]
     send = sender(engine)
     panel = await send(f"/use_concert {world.concert.id}")
-    prompt = await send(action(panel, "Предложить свой вариант"))
+    prompt = await send(action(panel, "🎵 Открыть редактор"))
     assert "в личном чате" in prompt.text.lower() and "кнопками" in prompt.text
     copied = await send(next(a for _, a in prompt.buttons if a.startswith("copy_text ")))
     assert copied.text.startswith("На выступлении ")

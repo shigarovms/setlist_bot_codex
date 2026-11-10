@@ -158,6 +158,8 @@ async def boundary(request: web.Request, handler: HANDLER) -> web.StreamResponse
                 "conflict",
                 "in_trash",
                 "input",
+                "role_dictionary_input",
+                "role_dictionary_collision",
             )
             else "Действие недоступно."
         )
@@ -209,7 +211,7 @@ async def boundary(request: web.Request, handler: HANDLER) -> web.StreamResponse
 @web.middleware
 async def authenticate(request: web.Request, handler: HANDLER) -> web.StreamResponse:
     local_path = request.path.removeprefix(request.app[STATE].settings.url_prefix)
-    if local_path in ("/login", "/healthz") or local_path.startswith("/static/"):
+    if local_path in ("/login", "/healthz", "/favicon.ico") or local_path.startswith("/static/"):
         return await handler(request)
     state = request.app[STATE]
     token = request.cookies.get(cookie_name(request), "")
@@ -240,6 +242,12 @@ def check_origin(request: web.Request) -> None:
             raise web.HTTPForbidden(text="Недопустимый источник формы")
     if request.headers.get("Sec-Fetch-Site") == "cross-site":
         raise web.HTTPForbidden(text="Межсайтовая отправка запрещена")
+
+
+async def favicon(request: web.Request) -> web.Response:
+    # RU: Служебный запрос браузера не должен открывать новую форму входа/CSRF-cookie.
+    # EN: A favicon request must never rotate the login form's CSRF cookie.
+    return web.Response(status=204)
 
 
 async def login_get(request: web.Request) -> web.Response:
@@ -783,6 +791,62 @@ async def owner_form(request: web.Request) -> web.Response:
     return render(request, "Смена владельца", body, "groups")
 
 
+async def professional_roles(request: web.Request) -> web.Response:
+    from uuid import uuid4
+
+    from setlist_bot.domain.entities import ProfessionalRole
+    from setlist_bot.domain.rules import normalize
+    from setlist_bot.domain.staff_roles import ROLES
+
+    async with PostgresUnitOfWork(request.app[STATE].engine) as uow:
+        rows = await uow.store.find(ProfessionalRole)
+    # RU: Страница просмотра не пишет в БД. EN: Read-only browsing never seeds data.
+    query = request.query.get("q", "")[:100]
+    selected = request.query.get("role", "")
+    row = next((r for r in rows if str(r.id) == selected), None)
+    if selected and row is None:
+        raise web.HTTPNotFound()
+    shown = sorted(rows, key=lambda r: normalize(r.title))
+    if query:
+        shown = [r for r in shown if normalize(query) in normalize(" ".join([r.title, *r.aliases]))]
+    body = "<p>Словарь действует только в выбранном контуре. Старые названия сохраняются для совместимости с профилями, составами и историей. Редактирование словаря не переименовывает роли коллективов.</p>"
+    body += v.search(query, "", []) + v.table(
+        ["Роль", "Синонимы", "Версия", ""],
+        [
+            [
+                v.h(r.title),
+                v.h(", ".join(r.aliases)),
+                v.h(r.version),
+                v.link("/roles?role=" + str(r.id), "Изменить"),
+            ]
+            for r in shown
+        ],
+    )
+    if not rows:
+        body += (
+            "<p>Начальный словарь будет заполнен при первом сохранении: "
+            + v.h(", ".join(t for t, _ in ROLES.values()))
+            + "</p>"
+        )
+    target = row.id if row else uuid4()
+    fields = (
+        '<input type="hidden" name="expected_version" value="'
+        + str(row.version if row else 0)
+        + '">'
+        '<label>Название<input name="title" maxlength="100" required value="'
+        + v.h(row.title if row else "")
+        + '"></label>'
+        '<label>Синонимы — по одному на строке<textarea name="aliases" maxlength="15150">'
+        + v.h("\n".join(row.aliases) if row else "")
+        + "</textarea></label>"
+    )
+    body += "<section><h2>" + ("Изменить роль" if row else "Новая роль") + "</h2>"
+    body += action_form(request, "role_save", target, fields, "Сохранить") + "</section>"
+    if row:
+        body += v.link("/roles", "Добавить другую роль")
+    return render(request, "Профессиональные роли и синонимы", body, "roles")
+
+
 async def catalog(request: web.Request) -> web.Response:
     identifier = UUID(request.match_info["identifier"])
     queries = request.app[STATE].queries
@@ -1118,6 +1182,7 @@ async def action(request: web.Request) -> web.Response:
     ):
         raise web.HTTPForbidden(text="Подпись формы неверна. Обновите страницу.")
     allowed = {
+        "role_save",
         "support_reply",
         "support_close",
         "support_reopen",
@@ -1186,7 +1251,9 @@ async def action(request: web.Request) -> web.Response:
         response.del_cookie(cookie_name(request))
         return response
     destination = (
-        "/support/" + target
+        "/roles"
+        if action_name == "role_save"
+        else "/support/" + target
         if action_name.startswith("support_")
         else "/groups/" + target
         if action_name.startswith("group_")
@@ -1222,10 +1289,12 @@ def create_app(settings: AdminSettings, engine: AsyncEngine | None = None) -> we
     app = web.Application(middlewares=[boundary, authenticate], client_max_size=32768)
     app[STATE] = State(settings, engine, AdminQueries(engine), external_engine)
     app.router.add_get("/healthz", health)
+    app.router.add_get("/favicon.ico", favicon)
     app.router.add_get("/login", login_get)
     app.router.add_post("/login", login_post)
     app.router.add_get("/", overview)
     app.router.add_get("/api/overview", api_overview)
+    app.router.add_get("/roles", professional_roles)
     app.router.add_get("/runtime", runtime)
     app.router.add_get("/analytics", ux_analytics)
     app.router.add_get("/groups/{identifier}/owner", owner_form)

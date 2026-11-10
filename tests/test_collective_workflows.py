@@ -86,6 +86,7 @@ async def test_worker_can_register_but_only_verified_chat_owner_can_create(engin
     assert "Создан коллектив" not in repeated.text
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_restriction_covers_commands_old_private_drafts_and_owner_requests(engine, world):
     send = client(engine)
     await send(f"/use_group {world.group.id}", actor=2, private=True)
@@ -142,6 +143,7 @@ async def test_restriction_blocks_service_mutations_and_cancel_preserves_roles(e
         assert not await uow.store.find(Outbox, support_kind="collective")
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_group_style_changes_all_views_without_mutating_setlist_or_pdf_settings(
     engine, world
 ):

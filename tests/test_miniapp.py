@@ -163,6 +163,7 @@ async def test_simultaneous_saves_are_serialized_and_do_not_overwrite(engine, wo
         assert current["version"] == initial["version"] + 1
 
 
+@pytest.mark.usefixtures("invited_member")
 @pytest.mark.parametrize("failure", ["owner", "role", "restricted", "epoch", "expired"])
 async def test_every_operation_rechecks_owner_roles_lifecycle_and_expiry(engine, world, failure):
     identifier, _ = await session(engine, world, member=True)
@@ -236,6 +237,7 @@ async def test_history_uses_latest_approval_per_past_performance_and_never_mutat
             await service.history(identifier, 2)
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_http_origin_identity_conflict_headers_and_real_restricted_database_role(
     engine, world
 ):
@@ -334,6 +336,26 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 },
             )
             assert launched.status == 200, await launched.text()
+            from test_miniapp_catalog import payload as catalog_payload
+
+            read_song = await client.get(
+                "/miniapp/api/song",
+                params={**query, "song_id": str(world.song.id)},
+                headers=headers,
+            )
+            assert read_song.status == 200 and (await read_song.json())["aliases"] == []
+            queued_song = await client.post(
+                "/miniapp/api/catalog_save",
+                json={**query, **catalog_payload(world, create=True)},
+                headers=headers,
+            )
+            assert queued_song.status == 200, await queued_song.text()
+            song_status = await client.get(
+                "/miniapp/api/catalog_status",
+                params={**query, "request": (await queued_song.json())["request"]},
+                headers=headers,
+            )
+            assert song_status.status == 200 and (await song_status.json())["status"] == "pending"
             for statement in (
                 "SELECT text FROM outbox",
                 "SELECT payload FROM outbox",
@@ -342,6 +364,9 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 "SELECT token_ciphertext FROM calendar_subscriptions",
                 "UPDATE setlists SET approved=true",
                 "UPDATE songs SET title='bad'",
+                "INSERT INTO song_aliases(id,group_id,song_id,title) "
+                "SELECT id,group_id,id,'bad' FROM songs",
+                "DELETE FROM song_aliases",
                 "UPDATE memberships SET role='admin'",
                 "UPDATE groups SET name='forbidden'",
                 "UPDATE groups SET owner_id=NULL",

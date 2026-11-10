@@ -66,6 +66,8 @@ class Catalog:
         data: dict[str, Any],
         song_id: UUID | None = None,
         expected: int | None = None,
+        *,
+        aliases: list[str] | None = None,
     ) -> Song | CatalogProposal:
         await self.groups.access(group_id)
         validate_song(data)
@@ -73,20 +75,56 @@ class Catalog:
         song = await self.song(group_id, song_id) if song_id else None
         if song:
             require(song.version == expected, "conflict")
+        if aliases is not None:
+            aliases = await self.validate_aliases(group_id, song_id, data["title"], aliases)
         member = (await self.store.find(Membership, group_id=group_id, user_id=self.user.id))[0]
         if member.role != "admin":
             proposal = CatalogProposal(
                 group_id=group_id,
                 author_id=self.user.id,
-                payload=data,
+                payload={**data, **({"aliases": aliases} if aliases is not None else {})},
                 song_id=song_id,
                 expected_version=expected,
             )
             self.store.add(proposal)
             return proposal
-        return await self._save(group_id, data, song)
+        return await self._save(group_id, data, song, aliases=aliases)
 
-    async def _save(self, group_id: UUID, data: dict[str, Any], song: Song | None) -> Song:
+    async def validate_aliases(
+        self, group_id: UUID, song_id: UUID | None, title: str, aliases: list[str]
+    ) -> list[str]:
+        """RU: Весь набор проверяем до записи. EN: Validate before any catalog mutation."""
+        require(isinstance(aliases, list) and len(aliases) <= 100, "song_input")
+        require(
+            all(isinstance(alias, str) and 0 < len(alias.strip()) <= 200 for alias in aliases),
+            "song_input",
+        )
+        values = [alias.strip() for alias in aliases]
+        keys = {normalize(alias) for alias in values}
+        require(len(keys) == len(values) and normalize(title) not in keys, "alias_collision")
+        other_titles = {
+            normalize(song.title)
+            for song in await self.store.find(Song, group_id=group_id)
+            if song.id != song_id
+        }
+        other_titles.update(
+            normalize(alias.title)
+            for alias in await self.store.find(SongAlias, group_id=group_id)
+            if alias.song_id != song_id
+        )
+        require(
+            not (keys & other_titles) and normalize(title) not in other_titles, "alias_collision"
+        )
+        return values
+
+    async def _save(
+        self,
+        group_id: UUID,
+        data: dict[str, Any],
+        song: Song | None,
+        *,
+        aliases: list[str] | None = None,
+    ) -> Song:
         created = song is None
         if song is None:
             song = Song(group_id=group_id, **data)
@@ -95,6 +133,13 @@ class Catalog:
             for key in SONG_FIELDS:
                 setattr(song, key, data.get(key, "" if key in ("lights", "comment") else None))
             song.version += 1
+        if aliases is not None:
+            for old in await self.store.find(SongAlias, group_id=group_id, song_id=song.id):
+                await self.store.delete(old)
+            # RU/EN: Flush deletions before reinserting unchanged aliases (unique constraint).
+            await self.store.flush()
+            for title in aliases:
+                self.store.add(SongAlias(group_id=group_id, song_id=song.id, title=title))
         await self.store.flush()
         record_activity(
             self.store,
@@ -103,7 +148,7 @@ class Catalog:
             song.id,
             group_id=str(group_id),
             version=song.version,
-            fields=sorted(data),
+            fields=sorted(data) + (["aliases"] if aliases is not None else []),
         )
         if self.refresh_cards:
             await queue_card_refreshes(self.store, group_id)
@@ -137,6 +182,9 @@ class Catalog:
         result: SongAlias | CatalogProposal
         if membership.role == "admin":
             result = SongAlias(group_id=group_id, song_id=song_id, title=title.strip())
+            # RU: Открытая форма не должна затереть добавленный другим человеком алиас.
+            # EN: Alias additions invalidate optimistic versions just like other song edits.
+            song.version += 1
         else:
             result = CatalogProposal(
                 group_id=group_id,
@@ -162,8 +210,14 @@ class Catalog:
                 assert song is not None
                 await self.alias(group_id, song.id, proposal.payload["alias"])
             else:
-                validate_song(proposal.payload)
-                await self._save(group_id, proposal.payload, song)
+                data = {key: value for key, value in proposal.payload.items() if key != "aliases"}
+                validate_song(data)
+                aliases = proposal.payload.get("aliases")
+                if aliases is not None:
+                    aliases = await self.validate_aliases(
+                        group_id, proposal.song_id, data["title"], aliases
+                    )
+                await self._save(group_id, data, song, aliases=aliases)
         proposal.status = "approved" if approve else "rejected"
 
     async def search(self, group_id: UUID, query: str) -> list[Song]:

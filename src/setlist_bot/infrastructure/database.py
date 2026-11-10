@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    ColumnElement,
     Date,
     DateTime,
     ForeignKey,
@@ -16,12 +17,13 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     MetaData,
+    Select,
     String,
     Table,
     Text,
     UniqueConstraint,
     Uuid,
-    case,
+    exists,
     or_,
     select,
     text,
@@ -31,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import registry
 
 from setlist_bot.domain import entities as e
+from setlist_bot.domain.participation import OPEN_INVITATIONS
 from setlist_bot.domain.rules import AppError
 
 metadata = MetaData(
@@ -42,6 +45,50 @@ metadata = MetaData(
         "pk": "pk_%(table_name)s",
     }
 )
+
+
+def current_invitation(
+    concerts: Table, user_id: UUID, *, confirmed_only: bool = False
+) -> Select[tuple[UUID]]:
+    invites = metadata.tables["gig_invitations"]
+    status = invites.c.status == "confirmed"
+    if not confirmed_only:
+        status = or_(
+            status, invites.c.status.in_(OPEN_INVITATIONS) & (invites.c.expires_at > e.now())
+        )
+    return (
+        select(invites.c.id)
+        .where(
+            invites.c.user_id == user_id,
+            invites.c.group_id == concerts.c.group_id,
+            invites.c.concert_id == concerts.c.id,
+            invites.c.date == concerts.c.date,
+            invites.c.concert_epoch == concerts.c.lifecycle_version,
+            status,
+        )
+        .correlate(concerts)
+    )
+
+
+def performance_access(
+    concerts: Table, user_id: UUID, *, admin_only: bool = False
+) -> ColumnElement[bool]:
+    members = metadata.tables["memberships"]
+    admin = exists(
+        select(members.c.user_id)
+        .where(
+            members.c.group_id == concerts.c.group_id,
+            members.c.user_id == user_id,
+            members.c.status == "active",
+            members.c.role == "admin",
+        )
+        .correlate(concerts)
+    )
+    if admin_only:
+        return admin
+    return or_(admin, exists(current_invitation(concerts, user_id)))
+
+
 mapper_registry = registry(metadata=metadata)
 
 Table(
@@ -103,6 +150,9 @@ table(
     col("language", String(2)),
     col("display_name", String(200)),
     col("export_settings", JSONB, server_default=text("'{}'::jsonb")),
+    col("profile", JSONB, server_default=text("'{}'::jsonb")),
+    col("profile_version", Integer, server_default="0"),
+    CheckConstraint("profile_version >= 0", name="profile_version"),
 )
 table(
     e.Group,
@@ -123,6 +173,8 @@ table(
 table(
     e.Membership,
     "memberships",
+    col("requested_roles", JSONB(none_as_null=True), nullable=True),
+    col("version", Integer, server_default="0"),
     tenant(),
     col("user_id", Uuid, ForeignKey("users.id")),
     col("role", String(10)),
@@ -567,6 +619,7 @@ table(
 table(
     e.LineupTemplate,
     "lineup_templates",
+    col("created_at", DateTime(timezone=True), server_default=text("now()")),
     col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), index=True),
     col("name", String(100)),
     col("name_key", String(100)),
@@ -577,6 +630,9 @@ table(
 table(
     e.StaffContact,
     "staff_contacts",
+    col("permanent", Boolean, server_default="false"),
+    col("priority", Integer, server_default="100"),
+    col("version", Integer, server_default="1"),
     col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), index=True),
     col("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE")),
     col("role_id", Uuid),
@@ -588,6 +644,7 @@ table(
     UniqueConstraint("group_id", "user_id", "role_id"),
     CheckConstraint("preference IN ('normal','preferred','hidden')", name="preference"),
     CheckConstraint("worked_count >= 0", name="worked_count"),
+    CheckConstraint("priority BETWEEN 0 AND 9999 AND version > 0", name="contact_version"),
 )
 table(
     e.GigSlot,
@@ -683,6 +740,26 @@ table(
 )
 
 
+table(
+    e.ProfessionalRole,
+    "professional_roles",
+    col("key", String(100), unique=True),
+    col("title", String(100)),
+    col("aliases", JSONB),
+    col("retired_aliases", JSONB),
+    col("version", Integer),
+    CheckConstraint("version > 0", name="role_version"),
+)
+table(
+    e.MemberBoard,
+    "member_boards",
+    col("group_id", Uuid, ForeignKey("groups.id", ondelete="CASCADE"), unique=True),
+    col("chat_id", BigInteger),
+    col("group_epoch", Integer),
+    col("message_ids", JSONB),
+)
+
+
 class PostgresStore:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -739,33 +816,44 @@ class PostgresStore:
             query = query.where(getattr(kind, key) == value)
         return list((await self.session.scalars(query)).all())
 
-    async def concerts_for_user(
-        self, user_id: UUID, current: date, *, offset: int, limit: int
-    ) -> list[tuple[e.Concert, e.Group]]:
-        """RU: Одна страница одним запросом. EN: Never scan another user's groups.
-
-        Предстоящие идут по возрастанию даты, затем прошедшие от новых к старым.
-        Filter membership and trash in SQL before pagination, without tenant-row locks.
-        """
-        concerts, groups, members = (
-            metadata.tables[name] for name in ("concerts", "groups", "memberships")
+    async def visible_concert_ids(self, user_id: UUID, group_id: UUID) -> set[UUID]:
+        concerts = metadata.tables["concerts"]
+        return set(
+            (
+                await self.session.scalars(
+                    select(concerts.c.id).where(
+                        concerts.c.group_id == group_id,
+                        concerts.c.deleted_at.is_(None),
+                        performance_access(concerts, user_id),
+                    )
+                )
+            ).all()
         )
+
+    async def concerts_for_user(
+        self,
+        user_id: UUID,
+        current: date,
+        *,
+        offset: int,
+        limit: int,
+        past: bool = False,
+        admin_only: bool = False,
+    ) -> list[tuple[e.Concert, e.Group]]:
+        concerts, groups = (metadata.tables[name] for name in ("concerts", "groups"))
         upcoming = concerts.c.date >= current
         query = (
             select(e.Concert, e.Group)
             .select_from(concerts)
             .join(groups, concerts.c.group_id == groups.c.id)
-            .join(members, members.c.group_id == groups.c.id)
             .where(
-                members.c.user_id == user_id,
-                members.c.status == "active",
+                performance_access(concerts, user_id, admin_only=admin_only),
                 groups.c.deleted_at.is_(None),
                 concerts.c.deleted_at.is_(None),
+                ~upcoming if past else upcoming,
             )
             .order_by(
-                case((upcoming, 0), else_=1),
-                case((upcoming, concerts.c.date)).asc(),
-                case((~upcoming, concerts.c.date)).desc(),
+                concerts.c.date.desc() if past else concerts.c.date.asc(),
                 groups.c.name,
                 concerts.c.id,
             )
@@ -796,6 +884,13 @@ class PostgresStore:
     async def expired[T: e.Entity](self, kind: type[T], field: str, before: datetime) -> list[T]:
         return list(
             (await self.session.scalars(select(kind).where(getattr(kind, field) <= before))).all()
+        )
+
+    async def lock_role_dictionary(self) -> None:
+        await self.session.execute(
+            text(
+                "SELECT pg_advisory_xact_lock(hashtextextended('professional-role-dictionary', 0))"
+            )
         )
 
     async def lock_chat(self, chat_id: int) -> None:

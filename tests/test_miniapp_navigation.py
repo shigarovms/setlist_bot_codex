@@ -47,6 +47,7 @@ async def test_average_pause_is_atomic_private_idempotent_and_keeps_explicit_pau
             await service.save(identifier, saved["version"], values, str(uuid4()), 10)
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_member_pause_is_private_and_unchanged_autosave_does_not_reset_group_default(
     engine, world
 ):
@@ -143,12 +144,12 @@ async def test_primary_buttons_open_editor_directly_and_legacy_menu_can_be_resto
         engine, bot_username="botToPract696_bot", miniapp_public_base_url="https://example.org"
     )
     shared = await processor.process(1, 1, -100, f"/use_concert {world.concert.id}", private=False)
-    assert shared.buttons[0][0] == "Предложить свой вариант"
+    assert shared.buttons[0][0] == "🎵 Открыть редактор"
     assert "?startapp=sl_" in shared.buttons[0][1]
     await processor.process(2, 1, 1, f"/use_group {world.group.id}", private=True)
     await processor.process(3, 1, 1, f"/use_concert {world.concert.id}", private=True)
     draft = await processor.process(4, 1, 1, "/suggestion Комета", private=True)
-    assert draft.buttons[0][0] == "Изменить" and "?startapp=sl_" in draft.buttons[0][1]
+    assert draft.buttons[0][0] == "🎵 Открыть редактор" and "?startapp=sl_" in draft.buttons[0][1]
     prompt = await processor.process(5, 1, 1, "/suggestion", private=True)
     assert len(prompt.buttons) == 1 and "?startapp=sl_" in prompt.buttons[0][1]
     processor.setlist_legacy_input_enabled = True

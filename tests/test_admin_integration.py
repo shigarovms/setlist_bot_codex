@@ -150,6 +150,7 @@ async def test_telegram_reply_invalidates_stale_web_reply_and_shows_actor(client
         assert len(logs) == 2 and {r.source for r in logs} == {"web", "telegram"}
 
 
+@pytest.mark.usefixtures("invited_member")
 @pytest.mark.parametrize("language", ["ru", "en"])
 async def test_queued_refresh_edits_shared_card_preserves_reply_binding_and_private_draft(
     engine, world, language
@@ -221,6 +222,7 @@ async def test_shared_operations_are_atomic_and_use_real_audit_actor(engine, wor
         assert len(await uow.store.find(AdminAudit, action="group_reminders")) == 2
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_refresh_never_opens_private_cards_even_with_forged_queue_payload(engine, world):
     from setlist_bot.domain.entities import Context
 

@@ -11,6 +11,7 @@ from uuid import UUID
 from setlist_bot.application.activity import record_activity
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
+from setlist_bot.application.role_dictionary import RoleDictionary
 from setlist_bot.domain.concerts import today
 from setlist_bot.domain.entities import (
     BusyPeriod,
@@ -27,22 +28,32 @@ from setlist_bot.domain.entities import (
     User,
     now,
 )
+from setlist_bot.domain.participation import OPEN_INVITATIONS
 from setlist_bot.domain.rules import normalize, require
+from setlist_bot.domain.staff_roles import RoleIndex
 
 REMINDER_COOLDOWN = timedelta(minutes=1)
 
-OPEN = {"pending", "conditional", "reconfirm", "accepted"}
+OPEN = OPEN_INVITATIONS
 
 
 class Staffing:
     def __init__(self, store: Store, user: User):
         self.store, self.user = store, user
         self.groups = Groups(store, user)
+        self._vocabulary: RoleIndex | None = None
+
+    async def vocabulary(self) -> RoleIndex:
+        if self._vocabulary is None:
+            self._vocabulary = await RoleDictionary(self.store).index()
+        return self._vocabulary
 
     async def event(self, identifier: UUID, *, admin: bool = True) -> Concert:
         event = await self.store.get(Concert, identifier)
-        await self.groups.access(event.group_id, admin=admin)
+        group = await self.groups.access(event.group_id, admin=admin)
         require(event.deleted_at is None, "in_trash")
+        if not admin and group.owner_id != self.user.id:
+            await self.groups.check_performance_visibility(event.group_id, event.id)
         return event
 
     async def role(self, group_id: UUID, name: str) -> StaffRole:
@@ -53,8 +64,23 @@ class Staffing:
         if found:
             # RU: Ключ нужен для поиска, а введённый регистр — для отображения.
             # EN: Reusing a normalized role must not discard the administrator's spelling.
-            found[0].name = name.strip()
+            if found[0].name != name.strip():
+                found[0].name = name.strip()
+                from setlist_bot.application.member_boards import queue_member_board
+
+                await self.store.flush()
+                await queue_member_board(self.store, group_id)
             return found[0]
+        vocabulary = await self.vocabulary()
+        canonical = vocabulary.key(name)
+        if not canonical.startswith("custom:"):
+            synonyms = [
+                r
+                for r in await self.store.find(StaffRole, group_id=group_id)
+                if vocabulary.key(r.name) == canonical
+            ]
+            if synonyms:
+                return min(synonyms, key=lambda r: r.id)
         row = StaffRole(group_id=group_id, name=name.strip(), name_key=key)
         self.store.add(row)
         await self.store.flush()
@@ -78,8 +104,147 @@ class Staffing:
             self.store.add(row)
         if preference is not None:
             row.preference = preference
+        row.version += 1
         record_activity(self.store, self.user, "staff_contact", row.id, preference=preference)
         return row
+
+    async def set_permanent(
+        self,
+        group_id: UUID,
+        role_id: UUID,
+        user_id: UUID,
+    ) -> StaffContact:
+        row = await self.contact(group_id, role_id, user_id)
+        if not row.permanent:
+            vocabulary = await self.vocabulary()
+            roles = {r.id: r for r in await self.store.find(StaffRole, group_id=group_id)}
+            previous = [
+                r.priority
+                for r in await self.store.find(StaffContact, group_id=group_id)
+                if r.permanent
+                and vocabulary.key(roles[r.role_id].name) == vocabulary.key(roles[role_id].name)
+            ]
+            row.priority = max(previous, default=-1) + 1
+        row.permanent = True
+        from setlist_bot.application.member_boards import queue_member_board
+
+        await self.store.flush()
+        await queue_member_board(self.store, group_id)
+        return row
+
+    async def change_contact(
+        self,
+        identifier: UUID,
+        expected: int,
+        *,
+        remove: bool = False,
+        priority: int | None = None,
+    ) -> StaffContact:
+        row = await self.store.get(StaffContact, identifier)
+        await self.groups.access(row.group_id, admin=True)
+        row = await self.store.get(StaffContact, identifier, lock=True)
+        require(row.version == expected, "input_expired")
+        if remove:
+            # RU: Убираем из постоянных, сохраняя знакомства и историю выступлений.
+            # EN: Removing a permanent assignment never cancels existing bookings.
+            row.permanent = False
+        if priority is not None:
+            require(type(priority) is int and 0 <= priority <= 9999, "input")
+            row.priority = priority
+        row.version += 1
+        record_activity(self.store, self.user, "permanent_performer", row.id, removed=remove)
+        from setlist_bot.application.member_boards import queue_member_board
+
+        await self.store.flush()
+        await queue_member_board(self.store, row.group_id)
+        return row
+
+    async def permanent_order(self, group_id: UUID, role_id: UUID) -> list[StaffContact]:
+        await self.groups.access(group_id, admin=True)
+        vocabulary = await self.vocabulary()
+        roles = {
+            r.id: vocabulary.key(r.name)
+            for r in await self.store.find(StaffRole, group_id=group_id)
+        }
+        require(role_id in roles, "forbidden")
+        return sorted(
+            (
+                contact
+                for contact in await self.store.find(StaffContact, group_id=group_id)
+                if contact.permanent and roles[contact.role_id] == roles[role_id]
+            ),
+            key=lambda contact: (
+                contact.preference == "hidden",
+                contact.priority,
+                contact.preference != "preferred",
+                -contact.worked_count,
+                contact.id,
+            ),
+        )
+
+    async def move_permanent(self, identifier: UUID, expected: int, step: int) -> StaffContact:
+        row = await self.store.get(StaffContact, identifier)
+        await self.groups.access(row.group_id, admin=True)
+        row = await self.store.get(StaffContact, identifier, lock=True)
+        order = await self.permanent_order(row.group_id, row.role_id)
+        require(step in (-1, 1) and row.version == expected and row.permanent, "input_expired")
+        visible = [item for item in order if item.preference != "hidden"]
+        require(row in visible, "input_expired")
+        index = visible.index(row)
+        require(0 <= index + step < len(visible), "input_expired")
+        visible[index], visible[index + step] = visible[index + step], visible[index]
+        for priority, performer in enumerate(visible):
+            performer.priority = priority
+            performer.version += 1
+        record_activity(self.store, self.user, "permanent_performer", row.id, reordered=True)
+        from setlist_bot.application.member_boards import queue_member_board
+
+        await self.store.flush()
+        await queue_member_board(self.store, row.group_id)
+        return row
+
+    async def lineup_people(self, group_id: UUID, identifiers: list[UUID]) -> list[UUID | None]:
+        await self.groups.access(group_id, admin=True)
+        roles = {r.id: r for r in await self.store.find(StaffRole, group_id=group_id)}
+        return self.select_defaults(
+            roles,
+            await self.store.find(StaffContact, group_id=group_id),
+            identifiers,
+            await self.vocabulary(),
+        )
+
+    @staticmethod
+    def select_defaults(
+        roles: dict[UUID, StaffRole],
+        contacts: list[StaffContact],
+        identifiers: list[UUID],
+        vocabulary: RoleIndex | None = None,
+    ) -> list[UUID | None]:
+        vocabulary = vocabulary or RoleIndex()
+        contacts = sorted(
+            (c for c in contacts if c.permanent and c.preference != "hidden"),
+            key=lambda c: (c.priority, c.preference != "preferred", -c.worked_count, c.id),
+        )
+        result: list[UUID | None] = []
+        used: dict[str, set[UUID]] = {}
+        # RU: Два вокала — два человека. Повтор роли не дублирует первого кандидата.
+        # EN: Consume a distinct default per occurrence of the same professional role.
+        for identifier in identifiers:
+            key = vocabulary.key(roles[identifier].name)
+            occupied = used.setdefault(key, set())
+            person = next(
+                (
+                    c.user_id
+                    for c in contacts
+                    if c.user_id not in occupied
+                    and vocabulary.matches(roles[identifier].name, roles[c.role_id].name)
+                ),
+                None,
+            )
+            result.append(person)
+            if person:
+                occupied.add(person)
+        return result
 
     async def template(
         self, group_id: UUID, name: str, values: list[dict[str, Any]]
@@ -91,7 +256,7 @@ class Staffing:
             require(role.group_id == group_id, "forbidden")
             if item.get("user_id"):
                 person = await self.store.get(User, UUID(item["user_id"]))
-                await self.contact(group_id, role.id, person.id)
+                await self.set_permanent(group_id, role.id, person.id)
         matches = await self.store.find(LineupTemplate, group_id=group_id, name_key=normalize(name))
         row = (
             matches[0]
@@ -135,7 +300,7 @@ class Staffing:
                     role = await self.store.get(StaffRole, UUID(item["role_id"]))
                     require(role.group_id == row.group_id, "forbidden")
                     if item.get("user_id"):
-                        await self.contact(row.group_id, role.id, UUID(item["user_id"]))
+                        await self.set_permanent(row.group_id, role.id, UUID(item["user_id"]))
                 row.slots = [dict(item) for item in values]
             row.version += 1
         record_activity(self.store, self.user, "lineup_edited", row.id, deleted=delete)
@@ -183,6 +348,67 @@ class Staffing:
         await self.notify(row.user_id, "invitation", row)
         return row
 
+    async def replace_uninvited_lineup(
+        self, event_id: UUID, expected: int, name: str, values: list[dict[str, Any]]
+    ) -> Concert:
+        """RU: Принимаем подготовленный состав без приглашений. EN: Atomic pre-invite save."""
+        event = await self.event(event_id)
+        require(
+            event.lineup_version == expected and len(values) <= 40 and len(name) <= 100,
+            "input_expired",
+        )
+        require(
+            not any(
+                row.status in OPEN | {"confirmed"}
+                for row in await self.store.find(GigInvitation, concert_id=event.id)
+            ),
+            "input_expired",
+        )
+        # RU: Сначала проверяем все ссылки; временный ввод не меняет живой состав.
+        # EN: Validate the whole plan before mutation. No notification is generated here.
+        for item in values:
+            if item.get("role_id"):
+                role = await self.store.get(StaffRole, UUID(item["role_id"]))
+                require(role.group_id == event.group_id, "forbidden")
+            else:
+                text = item.get("role_name", "")
+                require(
+                    0 < len(text.strip()) <= 100 and not any(ord(ch) < 32 for ch in text), "input"
+                )
+            if item.get("user_id"):
+                await self.store.get(User, UUID(item["user_id"]))
+        previous = sorted(
+            await self.store.find(GigSlot, concert_id=event.id, removed=False),
+            key=lambda slot: slot.position,
+        )
+        unchanged = [
+            {
+                "role_id": str(slot.role_id),
+                "user_id": str(slot.preferred_user_id) if slot.preferred_user_id else None,
+            }
+            for slot in previous
+        ]
+        if event.lineup_name == name and values == unchanged:
+            return event
+        for slot in previous:
+            await self.remove_slot(slot.id, slot.version)
+        await self.store.flush()
+        for item in values:
+            role = (
+                await self.store.get(StaffRole, UUID(item["role_id"]))
+                if item.get("role_id")
+                else await self.role(event.group_id, item["role_name"])
+            )
+            slot = await self.add_slot(event.id, role.id)
+            if item.get("user_id"):
+                slot.preferred_user_id = UUID(item["user_id"])
+                await self.contact(event.group_id, role.id, slot.preferred_user_id)
+        event.lineup_name = name
+        event.lineup_version += 1
+        record_activity(self.store, self.user, "lineup_prepared", event.id)
+        await self.store.flush()
+        return event
+
     async def apply_template(
         self,
         event_id: UUID,
@@ -206,13 +432,16 @@ class Staffing:
         event.lineup_name = template.name
         event.lineup_version += 1
         start = max((s.position for s in old), default=0)
+        defaults = await self.lineup_people(
+            event.group_id, [UUID(i["role_id"]) for i in template.slots]
+        )
         rows = []
         for position, item in enumerate(template.slots, 1):
             row = GigSlot(
                 group_id=event.group_id,
                 concert_id=event.id,
                 role_id=UUID(item["role_id"]),
-                preferred_user_id=UUID(item["user_id"]) if item.get("user_id") else None,
+                preferred_user_id=defaults[position - 1],
                 position=start + position,
             )
             self.store.add(row)
@@ -362,7 +591,7 @@ class Staffing:
 
     async def invite_defaults(
         self, event_id: UUID, versions: dict[str, int], *, force: bool = False
-    ) -> None:
+    ) -> int:
         slots = await self.store.find(GigSlot, concert_id=event_id)
         targets = [s for s in slots if str(s.id) in versions and s.preferred_user_id is not None]
         require(bool(targets) and len(targets) == len(versions), "input_expired")
@@ -370,9 +599,16 @@ class Staffing:
         # EN: Take the complete sorted reservation lock set before entering any tenant.
         await self.store.lock_people({s.preferred_user_id for s in targets if s.preferred_user_id})
         await self.event(event_id)
+        previous = {row.id for row in await self.store.find(GigInvitation, concert_id=event_id)}
+        recipients = set()
         for slot in targets:
             assert slot.preferred_user_id is not None
-            await self.invite(slot.id, slot.preferred_user_id, versions[str(slot.id)], force=force)
+            row = await self.invite(
+                slot.id, slot.preferred_user_id, versions[str(slot.id)], force=force
+            )
+            if row.id not in previous and row.user_id != self.user.id:
+                recipients.add(row.user_id)
+        return len(recipients)
 
     async def respond(
         self,
@@ -561,9 +797,51 @@ class Staffing:
         slot = await self.store.get(GigSlot, slot_id)
         event = await self.event(slot.concert_id)
         require(not slot.removed, "input_expired")
-        contacts = await self.store.find(StaffContact, group_id=slot.group_id, role_id=slot.role_id)
-        visible = [contact for contact in contacts if contact.preference != "hidden"]
-        people = {p.id: p for p in await self.store.get_many(User, {c.user_id for c in visible})}
+        return await self.role_candidates(event, slot.role_id, slot.preferred_user_id)
+
+    async def role_candidates(
+        self,
+        event: Concert,
+        role_id: UUID,
+        preferred: UUID | None = None,
+    ) -> list[tuple[StaffContact, User, int, int]]:
+        await self.event(event.id)
+        contacts = await self.store.find(StaffContact, group_id=event.group_id)
+        roles = {r.id: r for r in await self.store.find(StaffRole, group_id=event.group_id)}
+        vocabulary = await self.vocabulary()
+        required = roles[role_id].name
+        people = {p.id: p for p in await self.store.get_many(User, {c.user_id for c in contacts})}
+        by_person: dict[UUID, list[StaffContact]] = {}
+        for contact in contacts:
+            by_person.setdefault(contact.user_id, []).append(contact)
+        visible = []
+        for person in people.values():
+            local = by_person[person.id]
+            matching = [c for c in local if vocabulary.matches(required, roles[c.role_id].name)]
+            if any(c.preference == "hidden" for c in matching):
+                continue
+            eligible = [c for c in matching if c.preference != "hidden"]
+            if eligible:
+                contact = min(
+                    eligible,
+                    key=lambda c: (
+                        not c.permanent,
+                        c.priority,
+                        c.preference != "preferred",
+                        -c.worked_count,
+                    ),
+                )
+            elif any(c.preference != "hidden" for c in local) and any(
+                vocabulary.matches(required, skill) for skill in person.profile.get("roles", [])
+            ):
+                # RU: Чужие коллективы/контакты не ищем; навыки расширяют только местных знакомых.
+                # EN: A declared skill broadens matching, never the contact visibility boundary.
+                contact = StaffContact(group_id=event.group_id, role_id=role_id, user_id=person.id)
+            else:
+                continue
+            if person.profile.get("substitutions") is False and not contact.permanent:
+                continue
+            visible.append(contact)
         conflicts = await self.store.staffing_conflicts(set(people), event.date, event.id)
         result = [
             (contact, people[contact.user_id], *conflicts[contact.user_id])
@@ -572,10 +850,20 @@ class Staffing:
         ]
         result.sort(
             key=lambda row: (
+                not row[0].permanent,
+                row[0].priority,
                 row[2] > 0,
-                row[1].id != slot.preferred_user_id,
+                row[1].id != preferred,
                 row[0].preference != "preferred",
                 -row[0].worked_count,
+                next(
+                    (
+                        i
+                        for i, skill in enumerate(row[1].profile.get("roles", []))
+                        if vocabulary.matches(required, skill)
+                    ),
+                    100,
+                ),
                 row[1].display_name,
                 row[1].id,
             )

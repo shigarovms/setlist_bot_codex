@@ -143,10 +143,10 @@ async def test_unknown_person_preserves_input_and_resolves_before_writing_any_ro
     send = messenger(engine)
     await send(f"/use_group {world.group.id}", private=True, chat=1)
     team = await send("/team", private=True, chat=1)
-    await send(button(team, "Создать состав"), private=True, chat=1, remember=710)
-    unknown = await send(
-        "Большой\nВокал 2\nБэк-вокал: @new_guitarist", private=True, chat=1, reply=710
-    )
+    lineups = await send(button(team, "Составы"), private=True, chat=1)
+    await send(button(lineups, "Создать состав"), private=True, chat=1, remember=709)
+    await send("Большой", private=True, chat=1, reply=709, remember=710)
+    unknown = await send("Вокал 2\nБэк-вокал: @new_guitarist", private=True, chat=1, reply=710)
     assert "Ваш ввод сохранён" in unknown.text
     assert len(unknown.deliveries) == 1 and "Коллектив А" in unknown.deliveries[0][1].text
     async with PostgresUnitOfWork(engine) as uow:
@@ -170,8 +170,8 @@ async def test_creation_one_lineup_auto_applied_but_not_invited(engine, world):
     created = await send(
         next(a for _, a in preview.buttons if a.startswith("confirm ")), chat=-100, callback=True
     )
-    assert created.deliveries and created.deliveries[0][1].text == (
-        "Сейчас проверю занятость участников перед отправкой приглашений."
+    assert created.deliveries and created.deliveries[0][1].text.startswith(
+        "Проверьте состав, затем нажмите «Проверить занятость»."
     )
     async with PostgresUnitOfWork(engine) as uow:
         event = (await uow.store.find(Concert, title="Клуб Космос"))[0]
@@ -219,14 +219,15 @@ async def test_main_lineup_onboarding_and_groups_entry(engine, world):
     )
     assert "Настройте основной состав" in created.text
     assert created.deliveries and created.deliveries[0][1].buttons
-    await send(button(created, "Настроить основной"), chat=-300, remember=720)
+    await send(button(created, "Настроить основной"), chat=-300, remember=719)
+    await send("Основной", chat=-300, reply=719, remember=720)
     await send("Вокал: 2\nГитара", chat=-300, reply=720)
     async with PostgresUnitOfWork(engine) as uow:
         row = (await uow.store.find(LineupTemplate, name="Основной"))[0]
         group_id = row.group_id
     selected = await send(f"/use_group {group_id}", private=True, chat=1)
     assert selected.buttons[0][1] == f"group_concerts {group_id.hex}"
-    assert selected.buttons[1][0] == "Составы Новая группа"
+    assert selected.buttons[2][0] == "Составы Новая группа"
 
 
 async def test_admin_replace_confirmed_person_keeps_source_until_approval(engine, world):
@@ -246,7 +247,7 @@ async def test_admin_replace_confirmed_person_keeps_source_until_approval(engine
 async def test_busy_command_rename_visible_and_old_alias_hidden(engine, world):
     from setlist_bot.transport.commands import DESCRIPTIONS
 
-    assert "set_no_concert_days" in DESCRIPTIONS and "busy" not in DESCRIPTIONS
+    assert {"set_no_concert_days", "busy"}.isdisjoint(DESCRIPTIONS)
     send = messenger(engine)
     result = await send("/set_no_concert_days 31.12.2026", private=True, chat=1)
     assert "31.12" in result.text
@@ -256,6 +257,7 @@ async def test_saved_lineup_ui_copy_edit_remove_role_and_delete(engine, world):
     identifier, version = await template(engine, world)
     send = messenger(engine)
     menu = await send(f"sf_team {world.group.id.hex}", private=True, chat=1)
+    menu = await send(button(menu, "Составы"), private=True, chat=1)
     card = await send(button(menu, "Малый"), private=True, chat=1)
     copy_prompt = await send(button(card, "Копировать"), private=True, chat=1, remember=740)
     assert copy_prompt.force_reply
@@ -274,7 +276,8 @@ async def test_saved_lineup_ui_copy_edit_remove_role_and_delete(engine, world):
 async def test_empty_lineup_setup_during_creation_preserves_performance_fields(engine, world):
     send = messenger(engine)
     preview = await send("/concert 24.04 Клуб. Москва. 45 мин", chat=-100)
-    setup = await send(button(preview, "Настроить основной"), chat=-100, remember=750)
+    setup = await send(button(preview, "Настроить основной"), chat=-100, remember=749)
+    await send("Основной", chat=-100, reply=749, remember=750)
     assert setup.force_reply
     preview = await send("Бас-гитара: 2\nВокал", chat=-100, reply=750)
     assert "Клуб" in preview.text and "45мин" in preview.text and "Состав: Основной" in preview.text
@@ -366,6 +369,7 @@ async def test_large_saved_lineups_and_creation_choices_are_paginated(engine, wo
     second = await send(button(choices, "▶"), chat=-100)
     assert any(label == "Состав 16" for label, _ in second.buttons)
     menu = await send(f"sf_team {world.group.id.hex}", private=True, chat=1)
+    menu = await send(button(menu, "Составы"), private=True, chat=1)
     card = await send(button(menu, "Состав 00"), private=True, chat=1)
     assert len(card.text) < 4096
     assert len(card.text.splitlines()) == 41 and card.text.splitlines()[-1].startswith("40.")

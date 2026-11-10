@@ -79,6 +79,6 @@ async def test_back_to_performances_only_offers_group_switch_in_private(engine, 
     if private:
         await send(f"/use_group {world.group.id}", private=True)
     card = await send(f"/use_concert {world.concert.id}", private=private, remember=70)
-    returned = await send(action(card, "◀️ Назад к выступлениям"), private=private, source=70)
+    returned = await send(action(card, "◀️ К выступлениям"), private=private, source=70)
     assert returned.text == "Выступления Коллектив А:"
     assert any(callback == "groups" for _, callback in returned.buttons) is private

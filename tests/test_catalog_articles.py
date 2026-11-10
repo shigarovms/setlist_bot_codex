@@ -127,7 +127,7 @@ async def test_catalog_search_archive_and_tenant_permissions_remain_unchanged(en
     opened = await send(card.buttons[0][1])
     assert "KEY: Bbmin" in opened.text
     empty = await send("/catalog Неизвестная песня")
-    assert not empty.articles and "Пока пусто" in empty.text
+    assert not empty.articles and "Песни по этому запросу не найдены" in empty.text
     denied = await send("/catalog", actor=3)
     assert not denied.articles and not denied.buttons
     async with PostgresUnitOfWork(engine) as uow:
@@ -212,10 +212,8 @@ async def test_catalog_stays_and_song_card_is_reused_after_editing(engine, world
         assert not card.edit_message_ids and not catalog_ids & set(card.delete_message_ids)
         cancelled, _ = await send("/cancel")
         assert not (catalog_ids | {card_id}) & set(cancelled.delete_message_ids)
-        edit_action = next(
-            action for _, action in card.buttons if action.startswith("song_edit_menu ")
-        )
-        editing, _ = await send(edit_action, source=card_id)
+        # RU/EN: The new right-hand table action reuses this user's song panel.
+        editing, _ = await send(f"catalog_edit {world.song.id.hex}", source=pages[0].message_id)
         assert editing.edit_message_ids == [card_id]
         bpm = next(action for _, action in editing.buttons if action.endswith(" bpm"))
         question, prompt = await send(bpm, source=card_id)
@@ -326,3 +324,37 @@ async def test_native_song_callback_handles_expired_ack_without_hiding_real_erro
         assert "Комета" not in session.sent[-1].text
         assert "AnswerCallbackQuery" in caplog.text
         assert "PRIVATE_CAUSE" not in caplog.text
+
+
+async def test_repertoire_menu_and_row_edit_are_bound_to_the_original_band(engine, world):
+    send = sender(engine)
+    selected = await send(f"use_group {world.group.id}", private=True)
+    assert [label for label, _ in selected.buttons][:3] == [
+        "Выступления Коллектив А",
+        "Репертуар Коллектив А",
+        "Составы Коллектив А",
+    ]
+    repertoire = selected.buttons[1][1]
+    await send(f"use_group {world.other.id}", private=True)
+    catalog = await send(repertoire, private=True)
+    cells = catalog.articles[0].blocks[1]["cells"]
+    assert len(cells[0]) == 5
+    assert "Редактировать" not in [cell["text"] for cell in cells[0]]
+    open_action = cells[1][0]["text"]["button"]["callback_data"]
+    InputRichMessage.model_validate({"blocks": catalog.articles[0].blocks})
+    await send(f"use_group {world.other.id}", private=True)
+    opened = await send(open_action, private=True)
+    edit_action = next(
+        action for _, action in opened.buttons if action.startswith("song_edit_menu")
+    )
+    editor = await send(edit_action, private=True)
+    assert "Комета" in editor.text and "Чужая песня" not in editor.text
+    assert any(action.startswith("song_field ") for _, action in editor.buttons)
+    field = next(action for _, action in editor.buttons if action.endswith(" bpm"))
+    prompt = await send(field, private=True)
+    assert prompt.force_reply and "BPM" in prompt.text
+    # A valid UUID/button from another chat still cannot select another band's catalog.
+    denied = await send(f"catalog_edit {world.other_song.id.hex}")
+    assert not denied.buttons
+    denied = await send(edit_action, actor=3, private=True)
+    assert not denied.buttons

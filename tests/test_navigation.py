@@ -1,5 +1,7 @@
 import re
 
+import pytest
+
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.domain.entities import Outbox
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
@@ -47,6 +49,7 @@ async def test_edit_selected_song_without_identifiers_and_add_by_name(engine, wo
     assert "Комета новая" in result.text and "05:00" in result.text
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_published_draft_uses_buttons_and_applies_without_visible_ids(engine, world):
     processor = Processor(engine)
     await processor.process(1, 2, 2, f"/use_group {world.group.id}", private=True)
