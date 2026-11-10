@@ -147,9 +147,16 @@ async def api(request: web.Request) -> web.Response:
                 )
             elif request.method == "GET" and operation == "song":
                 result = await MiniCatalog(service).read(identifier, UUID(payload["song_id"]))
-            elif request.method == "POST" and operation in ("catalog_save", "duration_save"):
+            elif request.method == "POST" and operation in (
+                "catalog_save",
+                "catalog_archive",
+                "duration_save",
+            ):
                 result = await MiniCatalog(service).queue(
-                    identifier, payload, planned_duration=operation == "duration_save"
+                    identifier,
+                    payload,
+                    planned_duration=operation == "duration_save",
+                    archive=operation == "catalog_archive",
                 )
             elif request.method == "GET" and operation == "catalog_status":
                 result = await MiniCatalog(service).status(identifier, UUID(payload["request"]))

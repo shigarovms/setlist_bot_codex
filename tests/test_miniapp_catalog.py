@@ -279,6 +279,69 @@ async def test_catalog_edit_preserves_approved_history_and_trash_removes_receipt
 
 
 @pytest.mark.usefixtures("invited_member")
+@pytest.mark.parametrize("intervening_change", [None, "version", "role"])
+async def test_catalog_archive_rechecks_version_and_role_and_preserves_setlist(
+    engine, world, intervening_change
+):
+    request = {
+        "request_id": str(uuid4()),
+        "song_id": str(world.song.id),
+        "expected": world.song.version,
+    }
+    async with PostgresUnitOfWork(engine) as uow:
+        lists = Setlists(uow.store, world.admin)
+        await lists.edit_songs(world.group.id, world.concert.id, 0, ["Комета"])
+        await lists.approve(world.group.id, world.concert.id, 1)
+        approved = await lists.read(world.group.id, world.concert.id)
+    member, _ = await session(engine, world, member=True)
+    async with PostgresUnitOfWork(engine) as uow:
+        catalog = MiniCatalog(MiniDrafts(uow.store, world.member))
+        with pytest.raises(AppError, match="admin_only"):
+            await catalog.queue(member, request, archive=True)
+        if intervening_change == "role":
+            (await uow.store.find(Membership, user_id=world.member.id))[0].role = "admin"
+    actor = world.member if intervening_change == "role" else world.admin
+    identifier = member if intervening_change == "role" else (await session(engine, world))[0]
+    async with PostgresUnitOfWork(engine) as uow:
+        catalog = MiniCatalog(MiniDrafts(uow.store, actor))
+        queued = await catalog.queue(identifier, request, archive=True)
+        assert await catalog.queue(identifier, request, archive=True) == queued
+        assert not (await uow.store.get(Song, world.song.id)).archived
+        assert len(await uow.store.find(Outbox, support_kind="catalog")) == 1
+        if intervening_change == "role":
+            (await uow.store.find(Membership, user_id=actor.id))[0].role = "member"
+        if intervening_change == "version":
+            await Catalog(uow.store, actor).alias(world.group.id, world.song.id, "Другой вариант")
+    async with Bot("123456:TEST", session=FakeTelegram()) as bot:
+        assert await deliver_one_outbox(bot, engine) is (intervening_change is None)
+    async with PostgresUnitOfWork(engine) as uow:
+        drafts = MiniDrafts(uow.store, actor)
+        catalog = MiniCatalog(drafts)
+        receipt = await catalog.status(identifier, UUID(queued["request"]))
+        stored = await uow.store.get(Song, world.song.id)
+        assert stored.archived is (intervening_change is None)
+        if intervening_change is None:
+            assert receipt["status"] == "saved" and receipt["archived"]
+            assert await catalog.queue(identifier, request, archive=True) == receipt
+            assert str(world.song.id) not in {
+                row["id"] for row in (await drafts.state(identifier))["catalog"]
+            }
+            assert (
+                await Setlists(uow.store, world.admin).read(world.group.id, world.concert.id)
+                == approved
+            )
+            await Catalog(uow.store, actor).archive(
+                world.group.id, world.song.id, stored.version, archived=False
+            )
+            assert not stored.archived
+        else:
+            assert receipt["status"] == "failed"
+            assert receipt["error"] == (
+                "admin_only" if intervening_change == "role" else "conflict"
+            )
+
+
+@pytest.mark.usefixtures("invited_member")
 @pytest.mark.parametrize(("value", "seconds"), [("45", 2700), ("1:15", 4500), ("-", None)])
 async def test_planned_duration_uses_versioned_worker_and_keeps_draft(
     engine, world, value, seconds
