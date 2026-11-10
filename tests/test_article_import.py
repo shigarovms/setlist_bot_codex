@@ -190,7 +190,7 @@ async def test_article_refuses_unrelated_prompt_and_revoked_admin_rights(engine,
         assert not await uow.store.find(Song, title="Новая")
 
 
-async def test_router_accepts_addressed_article_and_catalog_button_callback(engine, world):
+async def test_router_accepts_addressed_article_and_native_table_callback(engine, world):
     session = ArticleTelegram()
     ids = count(100001)
     async with Bot("123456:TEST_ONLY_NOT_A_REAL_TELEGRAM_TOKEN", session=session) as bot:
@@ -231,8 +231,9 @@ async def test_router_accepts_addressed_article_and_catalog_button_callback(engi
         assert "новых — 1" in session.sent[-1].text
         await send(text="/catalog")
         method = session.rich_sent[-1]
-        title_button = method.reply_markup.inline_keyboard[0][0]
-        assert "Комета" in title_button.text
+        assert method.reply_markup is None
+        title_button = method.rich_message.blocks[1].cells[1][0].text.button
+        assert title_button.style == "link"
         await send(
             {"blocks": method.rich_message.model_dump(exclude_none=True)["blocks"]},
             callback=title_button.callback_data,

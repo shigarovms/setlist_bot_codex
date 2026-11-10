@@ -848,7 +848,16 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
             await delete_selection_message(bot, chat_id, response.previous_keyboard_id)
     if response.articles:
         messages = []
-        shared_buttons = response.buttons if response.articles_keyboard else []
+        batches = (
+            [
+                markup
+                async for markup in keyboards(
+                    response.buttons, response.button_columns, response.web_apps
+                )
+            ]
+            if response.articles_keyboard
+            else []
+        )
         for index, page in enumerate(response.articles):
             if (
                 index == 0
@@ -867,14 +876,7 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
             identifier = (
                 response.edit_message_ids[index] if index < len(response.edit_message_ids) else None
             )
-            markup = await anext(
-                keyboards(
-                    (page.buttons if page.show_buttons else []) + shared_buttons,
-                    response.button_columns,
-                    response.web_apps,
-                ),
-                None,
-            )
+            markup = batches[0] if batches else None
             article = InputRichMessage.model_validate(
                 {"blocks": page.blocks, "skip_entity_detection": True}
             )
@@ -921,7 +923,7 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
                         chat_id,
                         Response(
                             page.text,
-                            page.buttons + shared_buttons,
+                            page.buttons + (response.buttons if response.articles_keyboard else []),
                             edit_message_ids=[identifier] if identifier is not None else [],
                         ),
                     )
