@@ -4,7 +4,7 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:17
@@ -37,4 +37,10 @@ jobs:
           node-version: "24"
       - run: node tests/miniapp-model.test.mjs
       - run: node tests/miniapp-persistence.test.mjs
+      - name: Select Chrome for browser tests
+        run: |
+          chrome=$(command -v google-chrome)
+          mkdir -p "$RUNNER_TEMP/browser-bin"
+          ln -s "$chrome" "$RUNNER_TEMP/browser-bin/chromium"
+          echo "$RUNNER_TEMP/browser-bin" >> "$GITHUB_PATH"
       - run: uv run pytest -q
