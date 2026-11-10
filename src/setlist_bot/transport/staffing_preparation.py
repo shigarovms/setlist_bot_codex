@@ -147,17 +147,13 @@ async def labels(c: Controller, values: list[dict[str, Any]]) -> list[str]:
 
 
 async def review(c: Controller, row: Confirmation, data: dict[str, Any]) -> Response:
-    text = (
-        c.t("staff_creation_check").rstrip(".:")
-        + ":\n\n"
-        + "\n".join(await labels(c, data["values"]))
-    )
+    text = c.t("staff_creation_check") + "\n\n" + "\n".join(await labels(c, data["values"]))
     return Response(
         text,
         [
             (c.t("staff_check_send"), button(c, row, data, "invite")),
             (c.t("staff_edit_preparation"), button(c, row, data, "edit")),
-            (c.t("menu_back"), button(c, row, data, "choose")),
+            (c.t("staff_to_lineups"), button(c, row, data, "choose")),
         ],
     )
 
@@ -182,7 +178,7 @@ async def edit_view(
         [
             (c.t("staff_add_participant"), button(c, row, data, "add")),
             (c.t("staff_confirm_preparation"), button(c, row, data, "save")),
-            (c.t("menu_back"), button(c, row, data, "discard")),
+            (c.t("menu_back"), button(c, row, data, "leave")),
         ]
     )
     text = "\n".join(f"{i + 1}. {line}" for i, line in enumerate(lines)) or c.t(
@@ -251,6 +247,20 @@ async def preparation_action(c: Controller, op: str, args: dict[str, Any]) -> Re
         data["stage"] = "edit"
         write(row, data)
         return await edit_view(c, row, data)
+    if operation == "leave":
+        require(data["stage"] == "edit", "input_expired")
+        if data["values"] == data["base"]:
+            data["stage"] = "review"
+            write(row, data)
+            return await review(c, row, data)
+        return Response(
+            c.t("staff_unsaved_preparation"),
+            [
+                (c.t("staff_confirm_preparation"), button(c, row, data, "save")),
+                (c.t("staff_discard_preparation"), button(c, row, data, "discard")),
+                (c.t("staff_edit_preparation"), button(c, row, data, "page", page=0)),
+            ],
+        )
     if operation in ("review", "discard"):
         if operation == "discard":
             require(data["stage"] == "edit", "input_expired")

@@ -81,15 +81,17 @@ async def requests(engine):
         ]
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_three_levels_variants_refresh_and_no_context_changes_during_navigation(
     engine, world
 ):
     send = sender(engine)
     empty = await send(f"/use_concert {world.concert.id}", remember=40)
     assert [label for label, _ in empty.buttons] == [
-        "Предложить свой вариант",
+        "🎵 Открыть редактор",
+        "👥 Состав выступления",
         "⚙️ Опции",
-        "◀️ Назад к выступлениям",
+        "◀️ К выступлениям",
     ]
     assert "📋 Варианты" not in dict((await options(send, empty)).buttons)
     assert (
@@ -109,17 +111,18 @@ async def test_three_levels_variants_refresh_and_no_context_changes_during_navig
     assert "Новый год" in original.text and original.text.count("Комета") == 1
     assert all(len(callback.encode()) <= 64 for _, callback in choices.buttons)
     back = await send(action(choices, "◀️ Назад"))
-    main = await send(action(back, "◀️ Назад"))
+    main = await send(action(back, "◀️ К выступлению"))
     assert main.markup_only and main.text == ""
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_admin_approves_immediately_reopen_requires_one_time_confirmation(engine, world):
     send = sender(engine)
     card = await prepared(send, world)
     result = await send(action(card, "✅ Утвердить"), source=50, remember=50)
     assert await approved(engine, world)
-    assert result.edit_message_ids == [50] and "Одобрен:" in result.text
-    edit = action(result, "✏️ Редактировать")
+    assert result.edit_message_ids == [50] and "Утверждён" in result.text
+    edit = action(result, "Вернуть в работу")
     question = await send(edit, source=50)
     assert question.markup_only and "Статус „Утверждён“ будет снят" in question.text
     yes = action(question, "✅ Да, вернуть")
@@ -136,6 +139,7 @@ async def test_admin_approves_immediately_reopen_requires_one_time_confirmation(
     assert "2. Комета" in reply.text
 
 
+@pytest.mark.usefixtures("invited_member")
 @pytest.mark.parametrize("accept", [True, False])
 async def test_member_approval_request_is_private_to_admin_deduplicated_and_idempotent(
     engine, world, accept
@@ -157,16 +161,17 @@ async def test_member_approval_request_is_private_to_admin_deduplicated_and_idem
     assert await approved(engine, world) == accept
     if accept:
         assert result.deliveries[0][0] == -100
-        assert "✏️ Редактировать" in dict(result.deliveries[0][1].buttons)
+        assert "Вернуть в работу" in dict(result.deliveries[0][1].buttons)
     assert (await send(decision, private=True)).callback_notice
     assert await approved(engine, world) == accept
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_member_reopen_request_keeps_approved_until_admin_accepts(engine, world):
     send = sender(engine)
     card = await prepared(send, world)
     confirmed = await send(action(card, "✅ Утвердить"), source=50, remember=50)
-    proposal = action(confirmed, "✏️ Редактировать")
+    proposal = action(confirmed, "Вернуть в работу")
     await send(proposal, actor=2, source=50)
     assert await approved(engine, world)
     async with PostgresUnitOfWork(engine) as uow:
@@ -179,6 +184,7 @@ async def test_member_reopen_request_keeps_approved_until_admin_accepts(engine, 
     assert not await approved(engine, world)
 
 
+@pytest.mark.usefixtures("invited_member")
 @pytest.mark.parametrize("change", ["version", "catalog", "membership"])
 async def test_request_revalidates_exact_version_catalog_and_permissions(engine, world, change):
     send = sender(engine)
@@ -200,17 +206,21 @@ async def test_request_revalidates_exact_version_catalog_and_permissions(engine,
             )[0]
             member.role = "member"
     assert (await send(event.buttons[0][1], private=True)).callback_notice
-    assert not await approved(engine, world)
+    async with PostgresUnitOfWork(engine) as uow:
+        from setlist_bot.domain.entities import Setlist
+
+        assert not (await uow.store.find(Setlist, concert_id=world.concert.id))[0].approved
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_private_draft_menus_cannot_approve_or_expose_other_owners_data(engine, world):
     send = sender(engine)
     await send(f"/use_group {world.group.id}", actor=2, private=True)
     card = await send(f"/use_concert {world.concert.id}", actor=2, private=True)
     assert [label for label, _ in card.buttons] == [
-        "Изменить",
+        "🎵 Открыть редактор",
         "⚙️ Опции",
-        "◀️ Назад к выступлениям",
+        "◀️ К выступлениям",
     ]
     assert (await send(action(card, "⚙️ Опции"), private=True)).callback_notice
     forged = f"slact {card.menu_card_id.hex} approve"
@@ -297,7 +307,7 @@ async def test_navigation_uses_only_edit_reply_markup_and_export_keeps_setlist_t
             next(
                 r[0].callback_data
                 for r in root.reply_markup.inline_keyboard
-                if r[0].text == "Экспорт"
+                if r[0].text == "📄 Скачать PDF"
             ),
             source,
         )
@@ -305,6 +315,7 @@ async def test_navigation_uses_only_edit_reply_markup_and_export_keeps_setlist_t
         assert source.text == root.text and len(session.markups) == 4
 
 
+@pytest.mark.usefixtures("invited_member")
 @pytest.mark.parametrize("blocked", [False, True])
 async def test_admin_request_outbox_delivers_or_reports_unavailable_dm(engine, world, blocked):
     class Delivery(FakeTelegram):
@@ -332,6 +343,7 @@ async def test_admin_request_outbox_delivers_or_reports_unavailable_dm(engine, w
         )
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_cancel_does_not_remove_cards_or_administrator_requests(engine, world):
     send = sender(engine)
     card = await prepared(send, world, actor=2)
@@ -360,6 +372,7 @@ async def test_cached_export_survives_card_approval_without_replacing_new_menu(e
     assert repeated.markup_only
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_permanent_concert_purge_removes_menu_snapshots_and_requests(engine, world):
     from datetime import timedelta
 
@@ -387,6 +400,7 @@ async def test_permanent_concert_purge_removes_menu_snapshots_and_requests(engin
         )
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_private_admin_decision_updates_original_group_card_through_router(engine, world):
     from setlist_bot.domain.entities import SetlistMessage
 
@@ -421,6 +435,26 @@ async def test_private_admin_decision_updates_original_group_card_through_router
     assert await approved(engine, world)
     edit = session.edits[-1]
     assert edit.chat_id == -100 and edit.message_id == 50
-    assert "✏️ Редактировать" in str(edit.reply_markup)
+    assert "Вернуть в работу" in str(edit.reply_markup)
     async with PostgresUnitOfWork(engine) as uow:
         assert not await uow.store.find(SetlistMessage, chat_id=-100, message_id=50)
+
+
+@pytest.mark.usefixtures("invited_member")
+async def test_private_shared_card_requests_approval_without_posting_in_group(engine, world):
+    send = sender(engine)
+    await send(f"/use_concert {world.concert.id}")
+    await send("/suggestion Комета")
+    await send(f"/use_group {world.group.id}", actor=2, private=True)
+    await send(f"/use_concert {world.concert.id}", actor=2, private=True)
+    shared = await send("/shared", actor=2, private=True)
+    pending = await send(action(shared, "Запросить утверждение"), actor=2, private=True)
+    assert pending.callback_notice and not await approved(engine, world)
+    async with PostgresUnitOfWork(engine) as uow:
+        rows = await uow.store.find(Outbox, concert_id=world.concert.id)
+        request = next(row for row in rows if any(a.startswith("slreq ") for _, a in row.buttons))
+        assert request.chat_id == world.admin.telegram_id
+        assert not any(row.chat_id == -100 for row in rows)
+    accepted = await send(request.buttons[0][1], private=True)
+    assert await approved(engine, world)
+    assert [chat_id for chat_id, _ in accepted.deliveries] == [world.member.telegram_id]

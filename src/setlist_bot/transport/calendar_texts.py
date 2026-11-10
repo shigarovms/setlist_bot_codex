@@ -2,7 +2,7 @@
 
 TEXTS = {
     "ru": {
-        "calendar_menu": "📅 Подписка на выступления\n\nВыберите все свои коллективы или один. События на весь день; время начала и окончания укажите в дополнительной информации выступления. Изменения делаются в боте и появляются в календаре после его обновления.",
+        "calendar_menu": "📅 Подписка на выступления\n\nВыберите календарь. В календаре коллективов видны ваши действующие приглашения и все выступления коллективов, которыми вы управляете. События на весь день; время начала и окончания укажите в дополнительной информации выступления. Изменения делаются в боте и появляются в календаре после его обновления.",
         "calendar_all": "Сводный календарь всех коллективов",
         "calendar_entry": "📅 Подключить календарь",
         "calendar_links": "Мои подписки",
@@ -28,7 +28,7 @@ TEXTS = {
         "calendar_confirm_disable": "Отключить эту подписку? Ссылка перестанет работать. Выступления и сет-листы в боте останутся.",
     },
     "en": {
-        "calendar_menu": "📅 Subscribe to performances\n\nChoose all your groups or one. Events are all-day; put start and finish times in the performance's extra information. Make changes in the bot; your calendar displays them after refreshing.",
+        "calendar_menu": "📅 Subscribe to performances\n\nChoose a calendar. Band calendars include your current invitations and all performances of bands you manage. Events are all-day; put start and finish times in the performance's extra information. Make changes in the bot; your calendar displays them after refreshing.",
         "calendar_all": "Combined calendar for all groups",
         "calendar_entry": "📅 Connect a calendar",
         "calendar_links": "My subscriptions",

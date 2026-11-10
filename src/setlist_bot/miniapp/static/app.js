@@ -4,26 +4,35 @@ const tg = window.Telegram?.WebApp,
   $ = (id) => document.getElementById(id);
 const words = {
   ru: {
-    heading: "Личный черновик",
-    planned: "Выступаем",
-    unknown: "не задано",
+    heading: "Ваш черновик",
+    planned: "Плановая длительность",
+    plannedHint: "45 — минуты, 1:15 — час и 15 минут, - — очистить",
+    plannedSaved: "Плановая длительность сохранена.",
+    plannedQueued: "Запрос в очереди. Нажмите, чтобы проверить результат.",
+    plannedConflict: "Данные выступления изменились. Проверьте текущую длительность и повторите правку.",
+    unknown: "Не задано",
     current: "Текущий черновик",
     catalog: "Репертуар",
     search: "Поиск песни",
     private:
       "Черновик сохраняется автоматически. Отправка группе — только по кнопке.",
-    publish: "📤 Предложить в группу и закрыть",
+    publish: "📤 Предложить группе",
     publishing: "Отправляем предложение в группу…",
     queued: "Предложение в очереди. Нажмите ещё раз, чтобы проверить отправку.",
     failed:
       "Не удалось отправить предложение. Черновик сохранён. Можно повторить.",
-    save: "Сохранить черновик",
+    save: "Повторить сохранение",
+    saveOk: "Сохранено", savePending: "Сохраняем…", saveFailed: "Не удалось сохранить",
+    historyEmpty: "Пока нет доступных версий или прошлых выступлений.",
+    backDraft: "К черновику", undoLabel: "Отменить последнее действие",
+    shorter: "запас", longer: "дольше на", onTarget: "ровно по плану",
+    repertoireSong: "Песня в репертуаре",
     back: "Вернуться к боту",
     pause: "пауза",
     addPause: "＋ Пауза",
     addPauseBottom: "+ пауза",
-    older: "← прошлые",
-    undo: "↶ Отменить",
+    older: "История",
+    undo: "↶ Undo",
     empty:
       "Добавьте песни из репертуара ниже или возьмите прошлый сет-лист за основу.",
     use: "Взять за основу",
@@ -57,7 +66,7 @@ const words = {
     seconds: "сек",
     averageTitle: "Средняя пауза между песнями",
     averageHint: "В секундах. 0 — без пауз. Отдельные паузы сохраняются.",
-    averageGroupHint: "В секундах. Сохранится и для новых сет-листов коллектива. Отдельные паузы не изменятся.",
+    averageGroupHint: "В секундах. Для этого черновика и новых сет-листов коллектива. Уже созданные списки не изменятся.",
     averagePrivateHint: "В секундах. Изменится только ваш черновик. Паузу для новых выступлений задаёт администратор.",
     apply: "Применить",
     requestAccess: "Запросить права у владельца",
@@ -66,7 +75,7 @@ const words = {
     songTitle: "Название *", songDuration: "Длительность ММ:СС *",
     songLights: "Цвета / свет", songComment: "Комментарий",
     songAliases: "Альтернативные названия — по одному на строку",
-    songScope: "Изменения относятся к репертуару коллектива. Правки участника требуют одобрения администратора.",
+    songScope: "Меняется запись репертуара, поэтому правка отразится во всех её вхождениях в рабочих сет-листах. Правки участника требуют одобрения администратора.",
     songSave: "Сохранить", songPending: "Запрос сохраняется ботом…",
     songQueued: "Запрос в очереди. Проверьте сохранение перед новым изменением песни.",
     close: "Закрыть",
@@ -76,23 +85,32 @@ const words = {
   },
   en: {
     heading: "Private draft",
-    planned: "Planned",
-    unknown: "unknown",
+    planned: "Planned duration",
+    plannedHint: "45 means minutes, 1:15 means 1 hour and 15 minutes, - clears the duration",
+    plannedSaved: "Planned duration saved.",
+    plannedQueued: "Request queued. Press to check the result.",
+    plannedConflict: "The performance changed. Review the current duration and retry.",
+    unknown: "Not set",
     current: "Current draft",
     catalog: "Repertoire",
     search: "Find a song",
     private:
       "Draft saved automatically. Only the publish button sends it to the group.",
-    publish: "📤 Propose to group and close",
+    publish: "📤 Suggest to the band",
     publishing: "Sending your proposal…",
     queued: "Proposal queued. Press again to check delivery.",
     failed: "Delivery failed. Your draft is saved; you can retry.",
-    save: "Save draft",
+    save: "Retry save",
+    saveOk: "Saved", savePending: "Saving…", saveFailed: "Could not save",
+    historyEmpty: "No versions or past performances are available yet.",
+    backDraft: "Back to draft", undoLabel: "Undo last action",
+    shorter: "remaining", longer: "over by", onTarget: "on target",
+    repertoireSong: "Song in repertoire",
     back: "Back to bot",
     pause: "pause",
     addPause: "＋ Pause",
     addPauseBottom: "+ pause",
-    older: "← past",
+    older: "History",
     undo: "↶ Undo",
     empty: "Add songs below or use a previous performance as a starting point.",
     use: "Use as starting point",
@@ -134,7 +152,7 @@ const words = {
     songTitle: "Title *", songDuration: "Duration MM:SS *",
     songLights: "Colors / lighting", songComment: "Comment",
     songAliases: "Alternative titles — one per line",
-    songScope: "Changes apply to the group repertoire. Member edits require administrator approval.",
+    songScope: "This updates the repertoire entry and all its occurrences in working setlists. Member edits require administrator approval.",
     songSave: "Save", songPending: "The bot is saving your request…",
     songQueued: "Request queued. Check its result before editing another song.",
     close: "Close",
@@ -149,7 +167,6 @@ let lang = "ru",
   defaultPause = 5,
   undos = [],
   preview = null,
-  historyIndex = -1,
   catalogPage = 0,
   busy = false,
   latest = null,
@@ -278,7 +295,7 @@ function render() {
     .join(" · ");
   $("catalog").inert = busy;
   $("setlist").inert = busy;
-  $("older").disabled = busy || (preview && historyIndex + 1 >= preview.count);
+  $("older").disabled = busy;
   $("average-pause").disabled = busy || !!preview;
   $("average-pause").textContent = t("averageShort");
   $("average-pause").setAttribute("aria-label", `${t("average")}: ${preview?.default_pause_seconds ?? defaultPause}${t("seconds")}`);
@@ -351,24 +368,34 @@ function render() {
     row.append(remove);
     $("setlist").append(row);
   });
-  $("total").textContent = clock(
-    preview ? preview.seconds : total(current, defaultPause),
-  );
-  $("planned").textContent =
-    `${t("planned")}: ${state.planned_seconds ? clock(state.planned_seconds) : t("unknown")}`;
+  const seconds = preview ? preview.seconds : total(current, defaultPause);
+  const target = state.planned_seconds;
+  const delta = target - seconds;
+  const plan = target ? clock(target) : t("unknown");
+  const canEdit = state.can_set_group_default;
+  $("planned").textContent = canEdit ? "" : plan;
+  $("planned").hidden = canEdit;
+  $("planned-edit").hidden = !canEdit;
+  $("planned-edit").textContent = plan;
+  $("planned-edit").setAttribute("aria-label", `${t("planned")}: ${plan}`);
+  $("planned-delta").textContent = !target ? "" : delta === 0
+    ? `· ${t("onTarget")}`
+    : `· ${t(delta > 0 ? "shorter" : "longer")} ${clock(Math.abs(delta))}`;
+  $("total").textContent = clock(seconds);
   $("empty").hidden = items.length > 0;
   $("empty").textContent = t("empty");
   $("history-label").textContent = preview
     ? `${preview.label} · ${clock(preview.seconds)}`
     : t("current");
-  $("newer").disabled = historyIndex < 0 || busy;
+  $("newer").hidden = !preview;
+  $("newer").disabled = busy;
   $("use-history").hidden = !preview;
   $("catalog").hidden = !!preview;
   $("undo").disabled = !undos.length || !!preview || busy;
   $("add-pause").disabled = !!preview || busy;
   $("add-pause-bottom").disabled = !!preview || busy;
   $("add-pause-bottom").hidden = !!preview;
-  $("save").disabled = !!preview || !dirty() || busy;
+  renderSaveStatus();
   $("publish").disabled =
     !!preview || !current.length || busy || !!saver?.blocked;
   dirty()
@@ -524,33 +551,40 @@ function startDrag(event, source) {
   handle.addEventListener("pointercancel", cancel);
   scrollFrame = requestAnimationFrame(auto);
 }
-async function browse(index) {
-  // RU: История — отдельный preview. Текущий ввод заменяется только кнопкой ниже.
-  // EN: Browsing past performances must not overwrite current edits.
-  if (busy) return;
-  if (index < 0) {
-    preview = null;
-    historyIndex = -1;
-    render();
-    return;
-  }
+$("older").addEventListener("click", async () => {
+  if (busy || !state) return;
+  const dialog = $("history-dialog"), list = $("history-sources");
+  list.textContent = t("loading");
+  dialog.showModal();
   try {
-    busy = true;
-    render();
-    const source = await api("history", { index });
-    preview = source;
-    historyIndex = index;
-    render();
-    status(t("ready"));
+    const { sources } = await api("history_menu");
+    list.replaceChildren();
+    for (const source of sources) {
+      const label = `${source.label} · ${clock(source.seconds)}`;
+      list.append(button(label, label, async () => {
+        if (busy) return;
+        busy = true;
+        render();
+        try {
+          preview = await api("history", { index: source.index });
+          dialog.close();
+        } catch (error) {
+          list.prepend(node("p", error.message, "error"));
+        } finally {
+          busy = false;
+          render();
+        }
+      }));
+    }
+    if (!sources.length) list.textContent = t("historyEmpty");
   } catch (error) {
-    status(error.message, true);
-  } finally {
-    busy = false;
-    render();
+    list.textContent = error.message;
   }
-}
-$("older").addEventListener("click", () => browse(historyIndex + 1));
-$("newer").addEventListener("click", () => browse(historyIndex - 1));
+});
+$("newer").addEventListener("click", () => {
+  preview = null;
+  render();
+});
 $("use-history").addEventListener("click", () => {
   if (!preview) return;
   if (dirty() && !confirm(t("replace"))) return;
@@ -569,7 +603,6 @@ $("use-history").addEventListener("click", () => {
   });
   const gap = preview.default_pause_seconds;
   preview = null;
-  historyIndex = -1;
   change(withKeys(replacement), gap);
 });
 $("undo").addEventListener("click", () => {
@@ -698,7 +731,7 @@ async function openSong(id = null) {
     fillSong(editingSong);
     lockSongFields(false);
     $("song-error").textContent = "";
-    $("song-dialog-title").textContent = t(id ? "editSong" : "addSong");
+    $("song-dialog-title").textContent = t(id ? "repertoireSong" : "addSong");
     $("song-submit").textContent = t("songSave");
     $("song-reload").hidden = true;
     $("song-dialog").showModal();
@@ -871,7 +904,84 @@ $("pause-form").addEventListener("submit", async (event) => {
     if (serial === pauseDialogSerial) $("pause-submit").disabled = false;
   }
 });
+let plannedAttempt = null, plannedRequest = null;
+$("planned-edit").addEventListener("click", () => {
+  if (!state?.can_set_group_default) return;
+  if (!plannedAttempt) {
+    $("planned-value").value = "";
+    $("planned-status").textContent = "";
+    $("planned-submit").textContent = t("songSave");
+    $("planned-value").readOnly = false;
+  }
+  $("planned-dialog").showModal();
+});
+$("planned-close").addEventListener("click", () => $("planned-dialog").close());
+$("planned-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const submit = $("planned-submit"), input = $("planned-value"), resultText = $("planned-status");
+  if (submit.disabled) return;
+  plannedAttempt ??= {
+    request_id: crypto.randomUUID(), expected: state.metadata_version, value: input.value.trim(),
+  };
+  submit.disabled = input.readOnly = true;
+  resultText.textContent = t("songPending");
+  try {
+    let result = plannedRequest
+      ? await api("catalog_status", { request: plannedRequest })
+      : await api("duration_save", plannedAttempt, "POST");
+    plannedRequest = result.request;
+    for (let i = 0; result.status === "pending" && i < 10; i++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      result = await api("catalog_status", { request: plannedRequest });
+    }
+    if (result.status === "pending") {
+      resultText.textContent = t("plannedQueued");
+      return;
+    }
+    plannedAttempt = plannedRequest = null;
+    if (result.status === "failed") {
+      const error = new Error(result.message);
+      error.data = result;
+      throw error;
+    }
+    if (result.metadata_version >= state.metadata_version) {
+      state.metadata_version = result.metadata_version;
+      state.planned_seconds = result.planned_seconds;
+    }
+    $("planned-dialog").close();
+    render();
+    status(t("plannedSaved"));
+  } catch (error) {
+    if (!plannedRequest && error.data && error.data.error !== "unavailable") plannedAttempt = null;
+    resultText.textContent = error.message;
+    if (error.data?.error === "conflict") {
+      resultText.textContent = t("plannedConflict");
+      try {
+        const latestState = await api("state");
+        state.metadata_version = latestState.metadata_version;
+        state.planned_seconds = latestState.planned_seconds;
+        render();
+      } catch (refreshError) {
+        resultText.textContent = refreshError.message;
+      }
+    }
+  } finally {
+    submit.disabled = false;
+    input.readOnly = !!plannedAttempt;
+    submit.textContent = t(plannedAttempt ? "songCheck" : "songSave");
+  }
+});
+function renderSaveStatus() {
+  const failed = !!saver?.lastError;
+  const retry = $("save");
+  $("save-status").textContent = saver
+    ? t(failed ? "saveFailed" : dirty() ? "savePending" : "saveOk")
+    : "";
+  retry.hidden = !failed || !!saver?.blocked;
+  retry.disabled = !dirty() || busy || !!preview;
+}
 function saveError(error) {
+  renderSaveStatus();
   if (error.data?.latest) {
     saver.blocked = true;
     saver.lastError = error;
@@ -888,6 +998,10 @@ function persistence() {
     current,
     (payload) => api("save", payload, "POST"),
     (saved, unchanged) => {
+      if (saved.metadata_version < state.metadata_version) {
+        saved.metadata_version = state.metadata_version;
+        saved.planned_seconds = state.planned_seconds;
+      }
       state = { ...state, ...saved };
       if (unchanged) {
         current = withKeys(saved.entries);
@@ -1018,6 +1132,13 @@ function labels() {
     "add-pause": "addPause",
     "add-pause-bottom": "addPauseBottom",
     older: "older",
+    newer: "backDraft",
+    "history-title": "older",
+    "history-close": "close",
+    "planned-title": "planned",
+    "planned-hint": "plannedHint",
+    "planned-close": "close",
+    "planned-submit": "songSave",
     undo: "undo",
     "use-history": "use",
     "load-latest": "loadLatest",
@@ -1034,6 +1155,7 @@ function labels() {
     "average-submit": "apply",
   }))
     $(id).textContent = t(key);
+  $("undo").setAttribute("aria-label", t("undoLabel"));
   $("search").placeholder = t("search");
   document.documentElement.lang = lang;
 }

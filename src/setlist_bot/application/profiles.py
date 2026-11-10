@@ -30,10 +30,13 @@ class Profiles:
         roles = values.get("roles", [])
         require(isinstance(roles, list) and all(isinstance(r, str) for r in roles), "input")
         if roles:
-            roles = (await RoleDictionary(self.store).index()).parse("\n".join(roles))
-        user.profile = {**values, "roles": roles}
+            index = await RoleDictionary(self.store).index()
+            roles = index.local_names("\n".join(roles))
         if values.get("name"):
             user.display_name = values["name"]
+        elif user.profile.get("name") == user.display_name:
+            user.display_name = ""
+        user.profile = {**values, "roles": roles}
         user.profile_version += 1
         record_activity(self.store, self.user, "profile_saved", user.id, fields=sorted(values))
         from setlist_bot.application.member_boards import queue_member_board

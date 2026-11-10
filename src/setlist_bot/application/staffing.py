@@ -28,12 +28,13 @@ from setlist_bot.domain.entities import (
     User,
     now,
 )
+from setlist_bot.domain.participation import OPEN_INVITATIONS
 from setlist_bot.domain.rules import normalize, require
 from setlist_bot.domain.staff_roles import RoleIndex
 
 REMINDER_COOLDOWN = timedelta(minutes=1)
 
-OPEN = {"pending", "conditional", "reconfirm", "accepted"}
+OPEN = OPEN_INVITATIONS
 
 
 class Staffing:
@@ -49,8 +50,10 @@ class Staffing:
 
     async def event(self, identifier: UUID, *, admin: bool = True) -> Concert:
         event = await self.store.get(Concert, identifier)
-        await self.groups.access(event.group_id, admin=admin)
+        group = await self.groups.access(event.group_id, admin=admin)
         require(event.deleted_at is None, "in_trash")
+        if not admin and group.owner_id != self.user.id:
+            await self.groups.check_performance_visibility(event.group_id, event.id)
         return event
 
     async def role(self, group_id: UUID, name: str) -> StaffRole:
@@ -150,6 +153,50 @@ class Staffing:
             row.priority = priority
         row.version += 1
         record_activity(self.store, self.user, "permanent_performer", row.id, removed=remove)
+        from setlist_bot.application.member_boards import queue_member_board
+
+        await self.store.flush()
+        await queue_member_board(self.store, row.group_id)
+        return row
+
+    async def permanent_order(self, group_id: UUID, role_id: UUID) -> list[StaffContact]:
+        await self.groups.access(group_id, admin=True)
+        vocabulary = await self.vocabulary()
+        roles = {
+            r.id: vocabulary.key(r.name)
+            for r in await self.store.find(StaffRole, group_id=group_id)
+        }
+        require(role_id in roles, "forbidden")
+        return sorted(
+            (
+                contact
+                for contact in await self.store.find(StaffContact, group_id=group_id)
+                if contact.permanent and roles[contact.role_id] == roles[role_id]
+            ),
+            key=lambda contact: (
+                contact.preference == "hidden",
+                contact.priority,
+                contact.preference != "preferred",
+                -contact.worked_count,
+                contact.id,
+            ),
+        )
+
+    async def move_permanent(self, identifier: UUID, expected: int, step: int) -> StaffContact:
+        row = await self.store.get(StaffContact, identifier)
+        await self.groups.access(row.group_id, admin=True)
+        row = await self.store.get(StaffContact, identifier, lock=True)
+        order = await self.permanent_order(row.group_id, row.role_id)
+        require(step in (-1, 1) and row.version == expected and row.permanent, "input_expired")
+        visible = [item for item in order if item.preference != "hidden"]
+        require(row in visible, "input_expired")
+        index = visible.index(row)
+        require(0 <= index + step < len(visible), "input_expired")
+        visible[index], visible[index + step] = visible[index + step], visible[index]
+        for priority, performer in enumerate(visible):
+            performer.priority = priority
+            performer.version += 1
+        record_activity(self.store, self.user, "permanent_performer", row.id, reordered=True)
         from setlist_bot.application.member_boards import queue_member_board
 
         await self.store.flush()
@@ -544,7 +591,7 @@ class Staffing:
 
     async def invite_defaults(
         self, event_id: UUID, versions: dict[str, int], *, force: bool = False
-    ) -> None:
+    ) -> int:
         slots = await self.store.find(GigSlot, concert_id=event_id)
         targets = [s for s in slots if str(s.id) in versions and s.preferred_user_id is not None]
         require(bool(targets) and len(targets) == len(versions), "input_expired")
@@ -552,9 +599,16 @@ class Staffing:
         # EN: Take the complete sorted reservation lock set before entering any tenant.
         await self.store.lock_people({s.preferred_user_id for s in targets if s.preferred_user_id})
         await self.event(event_id)
+        previous = {row.id for row in await self.store.find(GigInvitation, concert_id=event_id)}
+        recipients = set()
         for slot in targets:
             assert slot.preferred_user_id is not None
-            await self.invite(slot.id, slot.preferred_user_id, versions[str(slot.id)], force=force)
+            row = await self.invite(
+                slot.id, slot.preferred_user_id, versions[str(slot.id)], force=force
+            )
+            if row.id not in previous and row.user_id != self.user.id:
+                recipients.add(row.user_id)
+        return len(recipients)
 
     async def respond(
         self,

@@ -163,6 +163,7 @@ async def test_simultaneous_saves_are_serialized_and_do_not_overwrite(engine, wo
         assert current["version"] == initial["version"] + 1
 
 
+@pytest.mark.usefixtures("invited_member")
 @pytest.mark.parametrize("failure", ["owner", "role", "restricted", "epoch", "expired"])
 async def test_every_operation_rechecks_owner_roles_lifecycle_and_expiry(engine, world, failure):
     identifier, _ = await session(engine, world, member=True)
@@ -236,6 +237,7 @@ async def test_history_uses_latest_approval_per_past_performance_and_never_mutat
             await service.history(identifier, 2)
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_http_origin_identity_conflict_headers_and_real_restricted_database_role(
     engine, world
 ):

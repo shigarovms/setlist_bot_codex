@@ -127,7 +127,7 @@ async def test_catalog_search_archive_and_tenant_permissions_remain_unchanged(en
     opened = await send(card.buttons[0][1])
     assert "KEY: Bbmin" in opened.text
     empty = await send("/catalog Неизвестная песня")
-    assert not empty.articles and "Пока пусто" in empty.text
+    assert not empty.articles and "Песни по этому запросу не найдены" in empty.text
     denied = await send("/catalog", actor=3)
     assert not denied.articles and not denied.buttons
     async with PostgresUnitOfWork(engine) as uow:

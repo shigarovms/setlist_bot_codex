@@ -38,7 +38,8 @@ def recommendation_key(
 async def suggested_titles(store: Store, user: User, concert: Concert) -> Suggestion:
     songs = await Catalog(store, user).list_songs(concert.group_id)
     active = {str(song.id): song for song in songs}
-    concerts = await store.find(Concert, group_id=concert.group_id, deleted_at=None)
+    visible = await store.visible_concert_ids(user.id, concert.group_id)
+    concerts = await store.get_many(Concert, visible)
     active_concerts = {c.id for c in concerts}
     past = {c.id: c for c in concerts if c.date < today() and c.id != concert.id}
     counts: Counter[str] = Counter()

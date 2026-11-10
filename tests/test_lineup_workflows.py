@@ -171,7 +171,7 @@ async def test_creation_one_lineup_auto_applied_but_not_invited(engine, world):
         next(a for _, a in preview.buttons if a.startswith("confirm ")), chat=-100, callback=True
     )
     assert created.deliveries and created.deliveries[0][1].text.startswith(
-        "Сейчас проверю занятость участников перед отправкой приглашений:"
+        "Проверьте состав, затем нажмите «Проверить занятость»."
     )
     async with PostgresUnitOfWork(engine) as uow:
         event = (await uow.store.find(Concert, title="Клуб Космос"))[0]
@@ -247,7 +247,7 @@ async def test_admin_replace_confirmed_person_keeps_source_until_approval(engine
 async def test_busy_command_rename_visible_and_old_alias_hidden(engine, world):
     from setlist_bot.transport.commands import DESCRIPTIONS
 
-    assert "set_no_concert_days" in DESCRIPTIONS and "busy" not in DESCRIPTIONS
+    assert {"set_no_concert_days", "busy"}.isdisjoint(DESCRIPTIONS)
     send = messenger(engine)
     result = await send("/set_no_concert_days 31.12.2026", private=True, chat=1)
     assert "31.12" in result.text

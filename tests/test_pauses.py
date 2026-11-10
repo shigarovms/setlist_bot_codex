@@ -13,6 +13,7 @@ def test_human_pause_input(value, seconds):
     assert parse_pause(value) == seconds
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_pause_rows_duplicates_and_private_cancel_are_atomic(engine, world):
     async with PostgresUnitOfWork(engine) as uow:
         service = Setlists(uow.store, world.member)

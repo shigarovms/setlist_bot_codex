@@ -69,9 +69,10 @@ async def test_team_menu_has_only_sections_and_back_to_selected_group(engine, wo
     assert selected.buttons[0][0] == "Выступления Коллектив А"
     team = await send(button(selected, "Составы "), private=True, chat=1)
     assert [label for label, _ in team.buttons] == [
-        "Участники коллектива",
+        "Постоянная команда",
         "Знакомые исполнители",
         "Составы",
+        "Участники и права",
         "◀️ Назад",
     ]
     back = await send(button(team, "Назад"), private=True, chat=1, callback=True)
@@ -106,16 +107,16 @@ async def test_new_saved_lineup_name_and_members_are_separate_force_replies(engi
 
 async def test_preview_back_discards_changes_and_keeps_real_roster_and_queue(engine, world):
     review = await prepared(engine, world)
-    assert review.text.startswith(
-        "Сейчас проверю занятость участников перед отправкой приглашений:"
-    )
+    assert review.text.startswith("Проверьте состав, затем нажмите «Проверить занятость».")
     assert "Гитара — 2" in review.text and "Вокал — 3" in review.text
     original = await active_slots(engine, world)
     send = messenger(engine)
     changed = await change_first(send, review)
     assert "Гитара — 3" in changed.text
     assert (await active_slots(engine, world))[0].preferred_user_id == world.member.id
-    discarded = await send(button(changed, "Назад"), private=True, chat=1)
+    choice = await send(button(changed, "Назад"), private=True, chat=1)
+    assert "несохранённые" in choice.text
+    discarded = await send(button(choice, "Отменить изменения"), private=True, chat=1)
     assert discarded.text == review.text
     assert [slot.id for slot in await active_slots(engine, world)] == [slot.id for slot in original]
     async with PostgresUnitOfWork(engine) as uow:
@@ -127,7 +128,7 @@ async def test_confirm_saves_once_without_invites_then_availability_send_invites
     review = await prepared(engine, world)
     send = messenger(engine)
     changed = await change_first(send, review)
-    callback = button(changed, "Подтвердить состав")
+    callback = button(changed, "Сохранить состав")
     saved = await send(callback, private=True, chat=1)
     slots = await active_slots(engine, world)
     assert slots[0].preferred_user_id == world.stranger.id
@@ -138,7 +139,7 @@ async def test_confirm_saves_once_without_invites_then_availability_send_invites
     async with PostgresUnitOfWork(engine) as uow:
         assert not await uow.store.find(GigInvitation, concert_id=world.concert.id)
     available = await send(button(saved, "Проверить занятость"), private=True, chat=1)
-    await send(button(available, "Пригласить основной состав"), private=True, chat=1)
+    await send(button(available, "Пригласить ·"), private=True, chat=1)
     async with PostgresUnitOfWork(engine) as uow:
         invites = await uow.store.find(GigInvitation, concert_id=world.concert.id)
         assert len(invites) == 2 and all(row.user_id == world.stranger.id for row in invites)
@@ -149,7 +150,7 @@ async def test_old_availability_send_is_invalid_after_returning_to_edit(engine, 
     review = await prepared(engine, world)
     send = messenger(engine)
     availability = await send(button(review, "Проверить занятость"), private=True, chat=1)
-    old_send = button(availability, "Пригласить основной состав")
+    old_send = button(availability, "Пригласить ·")
     back = await send(button(availability, "Отмена"), private=True, chat=1)
     await send(button(back, "Изменить состав"), private=True, chat=1)
     denied = await send(old_send, private=True, chat=1)
@@ -171,7 +172,7 @@ async def test_add_and_remove_are_temporary_until_confirm_and_labels_explain_sco
     assert "Вокал" not in removed.text and "Танцоры" in removed.text
     async with PostgresUnitOfWork(engine) as uow:
         assert not await uow.store.find(StaffRole, name="Танцоры")
-    await send(button(removed, "Подтвердить состав"), private=True, chat=1)
+    await send(button(removed, "Сохранить состав"), private=True, chat=1)
     async with PostgresUnitOfWork(engine) as uow:
         rows = await uow.store.find(StaffRole, name="Танцоры")
         assert len(rows) == 1
@@ -189,11 +190,11 @@ async def test_back_to_choice_can_select_other_lineup_or_choose_later_without_du
             world.group.id, "DJ set", [{"role_id": str(role.id), "user_id": str(world.member.id)}]
         )
     send = messenger(engine)
-    choices = await send(button(review, "Назад"), private=True, chat=1)
+    choices = await send(button(review, "К составам"), private=True, chat=1)
     assert any(label == "Выбрать состав позже" for label, _ in choices.buttons)
     new = await send(button(choices, "DJ set"), private=True, chat=1)
     assert "DJ — 2" in new.text and "Гитара" not in new.text
-    choices = await send(button(new, "Назад"), private=True, chat=1)
+    choices = await send(button(new, "К составам"), private=True, chat=1)
     await send(button(choices, "Выбрать состав позже"), private=True, chat=1)
     async with PostgresUnitOfWork(engine) as uow:
         assert len(await uow.store.find(Concert)) == 3
@@ -227,7 +228,7 @@ async def test_unmodified_confirm_does_not_replace_slots(engine, world):
     original = await active_slots(engine, world)
     send = messenger(engine)
     editor = await send(button(review, "Изменить состав"), private=True, chat=1)
-    await send(button(editor, "Подтвердить состав"), private=True, chat=1)
+    await send(button(editor, "Сохранить состав"), private=True, chat=1)
     assert [s.id for s in await active_slots(engine, world)] == [s.id for s in original]
 
 
@@ -243,7 +244,8 @@ async def test_unknown_candidate_can_be_retried_without_writing_temp_role(engine
         assert not await uow.store.find(StaffRole, name="Танцоры")
     editor = await send(button(unknown, "Повторить"), private=True, chat=1)
     assert "Танцоры" in editor.text
-    back = await send(button(editor, "Назад"), private=True, chat=1)
+    choice = await send(button(editor, "Назад"), private=True, chat=1)
+    back = await send(button(choice, "Отменить изменения"), private=True, chat=1)
     assert back.text == review.text
     async with PostgresUnitOfWork(engine) as uow:
         assert not await uow.store.find(StaffRole, name="Танцоры")

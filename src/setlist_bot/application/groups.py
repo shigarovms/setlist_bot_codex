@@ -46,6 +46,16 @@ class Groups:
         require(deleted or group.deleted_at is None, "in_trash")
         return group
 
+    async def performance_access(self, group_id: UUID, concert_id: UUID) -> None:
+        await self.access(group_id)
+        await self.check_performance_visibility(group_id, concert_id)
+
+    async def check_performance_visibility(self, group_id: UUID, concert_id: UUID) -> None:
+        require(
+            concert_id in await self.store.visible_concert_ids(self.user.id, group_id),
+            "performance_forbidden",
+        )
+
     async def check_creation_chat(self, chat_id: int) -> None:
         await self.store.lock_chat(chat_id)
         require(not await self.store.find(ChatBinding, chat_id=chat_id), "already_bound")

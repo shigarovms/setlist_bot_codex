@@ -2,6 +2,17 @@
 
 TEXTS = {
     "ru": {
+        "staff_to_lineups": "◀️ К составам",
+        "staff_unsaved_preparation": (
+            "В составе есть несохранённые изменения. Сохраните их или отмените."
+        ),
+        "staff_discard_preparation": "Отменить изменения",
+        "staff_invite_count": "Пригласить · {count} чел.",
+        "staff_invite_count_force": "Пригласить несмотря на пересечения · {count}",
+        "staff_invites_queued": "Приглашения для {count} чел. поставлены в очередь.",
+        "staff_delivery_wait": "приглашение в очереди отправки",
+        "staff_delivery_unsent": "приглашение не доставлено",
+        "staff_self_confirm": "Подтвердить своё участие",
         "staff_more": "ещё {count}",
         "staff_all_invites": "Все приглашения",
         "staff_invite_defaults": "Пригласить основной состав",
@@ -33,8 +44,14 @@ TEXTS = {
             "25.12\nПричины не нужны: другие видят только занятость.\n/cancel — "
             "отмена."
         ),
-        "staff_my": "🎸 Мои выступления и приглашения",
-        "staff_busy_menu": "📅 Моя занятость",
+        "staff_my": "Моё расписание",
+        "staff_invitations": "📩 Приглашения",
+        "staff_assignments": "✅ Подтверждённые участия",
+        "staff_admin_events": "🎸 Выступления моих коллективов",
+        "staff_invitation_history": "История приглашений",
+        "staff_history_inactive": "приглашение больше не действует",
+        "staff_schedule_empty": "В этом разделе пока нет записей.",
+        "staff_busy_menu": "🚫 Недоступные даты",
         "staff_busy_add": "＋ Отметить занятость",
         "staff_busy_remove": "Снять отметку",
         "staff_candidates": "Выбрать исполнителя",
@@ -114,6 +131,15 @@ TEXTS = {
         "staff_personal_calendar": "Мои подтверждённые участия",
     },
     "en": {
+        "staff_to_lineups": "◀️ To lineups",
+        "staff_unsaved_preparation": "The lineup has unsaved changes. Save or discard them.",
+        "staff_discard_preparation": "Discard changes",
+        "staff_invite_count": "Invite · {count} people",
+        "staff_invite_count_force": "Invite despite conflicts · {count}",
+        "staff_invites_queued": "Invitations for {count} people are queued.",
+        "staff_delivery_wait": "invitation queued",
+        "staff_delivery_unsent": "invitation undelivered",
+        "staff_self_confirm": "Confirm my assignment",
         "staff_more": "{count} more",
         "staff_all_invites": "All invitations",
         "staff_invite_defaults": "Invite default performers",
@@ -142,8 +168,14 @@ TEXTS = {
             "Enter a date or inclusive range:\n22.12\n22.12 — 25.12\nNo reason is "
             "required; others only see that you are busy.\n/cancel — cancel."
         ),
-        "staff_my": "🎸 My performances and invitations",
-        "staff_busy_menu": "📅 My availability",
+        "staff_my": "My schedule",
+        "staff_invitations": "📩 Invitations",
+        "staff_assignments": "✅ Confirmed assignments",
+        "staff_admin_events": "🎸 My bands’ performances",
+        "staff_invitation_history": "Invitation history",
+        "staff_history_inactive": "invitation no longer active",
+        "staff_schedule_empty": "There are no entries in this section yet.",
+        "staff_busy_menu": "🚫 Unavailable dates",
         "staff_busy_add": "＋ Mark busy",
         "staff_busy_remove": "Remove busy period",
         "staff_candidates": "Choose performer",
@@ -259,7 +291,7 @@ TEXTS["ru"].update(
         "staff_wait_person": "ждём {name}",
         "staff_invite_person": "пригласить",
         "staff_add_participant": "+ участник",
-        "staff_check_send": "Проверить занятость и пригласить",
+        "staff_check_send": "Проверить занятость",
         "staff_group_lineups": "Составы {name}",
         "staff_rename": "Изменить название",
         "staff_copy": "Копировать состав",
@@ -313,7 +345,7 @@ TEXTS["ru"].update(
         "staff_creation_none": (
             "Состав пока не настроен. Его можно задать сейчас или после создания выступления."
         ),
-        "staff_creation_check": "Сейчас проверю занятость участников перед отправкой приглашений.",
+        "staff_creation_check": "Проверьте состав, затем нажмите «Проверить занятость».",
     }
 )
 
@@ -349,7 +381,7 @@ TEXTS["en"].update(
         "staff_wait_person": "waiting for {name}",
         "staff_invite_person": "invite",
         "staff_add_participant": "+ participant",
-        "staff_check_send": "Check availability and invite",
+        "staff_check_send": "Check availability",
         "staff_group_lineups": "Lineups · {name}",
         "staff_rename": "Rename",
         "staff_copy": "Copy lineup",
@@ -398,7 +430,7 @@ TEXTS["en"].update(
         "staff_without_lineup": "Choose lineup later",
         "staff_creation_selected": "Lineup: {name}",
         "staff_creation_none": "No lineups yet. Set one up now or after creating the performance.",
-        "staff_creation_check": "I will check participant availability before sending invitations.",
+        "staff_creation_check": "Review the lineup, then tap Check availability.",
     }
 )
 
@@ -447,7 +479,7 @@ TEXTS["ru"].update(
         "staff_remove_event_role": "Удалить роль из выступления",
         "staff_invite_or_remove": "пригласить/удалить",
         "staff_edit_preparation": "Изменить состав выступления",
-        "staff_confirm_preparation": "Подтвердить состав",
+        "staff_confirm_preparation": "Сохранить состав",
         "staff_choose_later": "Выбрать состав позже",
         "staff_no_candidates": (
             "Пока не указаны исполнители. Измените состав и выберите кандидатов."
@@ -477,7 +509,7 @@ TEXTS["en"].update(
         "staff_remove_event_role": "Remove role from performance",
         "staff_invite_or_remove": "invite/remove",
         "staff_edit_preparation": "Edit performance lineup",
-        "staff_confirm_preparation": "Confirm lineup",
+        "staff_confirm_preparation": "Save lineup",
         "staff_choose_later": "Choose lineup later",
         "staff_no_candidates": "No performers selected yet. Edit the lineup and choose candidates.",
         "staff_enter_person": "Enter @username or Telegram ID",

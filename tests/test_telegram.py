@@ -19,8 +19,10 @@ from aiogram.methods import (
     SendRichMessage,
 )
 from aiogram.types import CallbackQuery, Chat, ChatMemberOwner, Message, Update, User
+from conftest import invite_fixture_member
 
 from setlist_bot.domain.entities import Concert, Group, Membership, Song
+from setlist_bot.domain.entities import User as DbUser
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.transport.telegram import Processor, make_router
 
@@ -153,7 +155,11 @@ async def test_aiogram_end_to_end_with_fake_telegram_and_real_postgres(engine, t
             song = (await uow.store.find(Song))[0]
             concert = (await uow.store.find(Concert))[0]
             assert len(await uow.store.find(Group)) == 1
-            assert len(await uow.store.find(Membership, status="active")) == 2
+            members = await uow.store.find(Membership, status="active", role="member")
+            assert len(members) == 1
+            await invite_fixture_member(
+                uow.store, concert, await uow.store.get(DbUser, members[0].user_id)
+            )
         await send(f"/use_concert {concert.id}", actor=2)
         assert "Комета" in (await send(f"/add {song.id}", actor=2)).text
         assert "Подводка:" not in (await send("/add Комета", actor=2)).text
@@ -167,7 +173,7 @@ async def test_aiogram_end_to_end_with_fake_telegram_and_real_postgres(engine, t
         approved = await send(
             approve.reply_markup.inline_keyboard[0][0].callback_data, callback=True
         )
-        assert "Одобрен:" in approved.text and "03:38" in approved.text
+        assert "Утверждён" in approved.text and "03:38" in approved.text
         previous = len(session.sent)
         await send("/help@another_bot")
         assert len(session.sent) == previous
@@ -211,6 +217,7 @@ async def test_backup_is_sent_as_zip_document_through_telegram_transport(engine,
         assert json.loads(archive.read("data.json"))["group"]["name"] == world.group.name
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_router_accepts_only_replies_to_its_working_messages_and_persists_prompt(
     engine, world
 ):
@@ -366,7 +373,7 @@ async def test_pdf_export_submenu_sends_both_a4_documents_through_aiogram(engine
         button = next(
             row[0].callback_data
             for row in options.reply_markup.inline_keyboard
-            if row[0].text == "Экспорт"
+            if row[0].text == "📄 Скачать PDF"
         )
         menu = await send(button, callback=True)
         all_files = next(
@@ -381,7 +388,7 @@ async def test_pdf_export_submenu_sends_both_a4_documents_through_aiogram(engine
         assert event.document.filename.endswith(".pdf")
         pdf = PdfReader(BytesIO(event.document.data))
         assert "Комета" in pdf.pages[0].extract_text()
-        assert "Одобрен:" not in pdf.pages[0].extract_text()
+        assert "Утверждён" not in pdf.pages[0].extract_text()
         assert "Создано с помощью" in pdf.pages[0].extract_text()
 
 

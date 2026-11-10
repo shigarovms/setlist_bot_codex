@@ -133,9 +133,7 @@ class SongSelection:
         require(data["stage"] == "method", "selection_expired")
         group_id = UUID(data["group_id"])
         counts: Counter[str] = Counter()
-        concerts = {
-            c.id for c in await self.store.find(Concert, group_id=group_id, deleted_at=None)
-        }
+        concerts = await self.store.visible_concert_ids(self.user.id, group_id)
         for setlist in await self.store.find(Setlist, group_id=group_id):
             if setlist.concert_id not in concerts or setlist.approved_revision_id is None:
                 continue

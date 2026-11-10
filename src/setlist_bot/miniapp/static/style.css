@@ -227,7 +227,8 @@ ol {
   border: 0;
   background: transparent;
   color: var(--danger);
-  min-width: 34px;
+  flex: 0 0 44px;
+  min-height: 44px;
   padding: 6px;
   font-size: 22px;
 }
@@ -393,11 +394,27 @@ pre {
   border: 0;
   background: transparent;
   color: var(--button);
-  flex-shrink: 0;
-  width: 32px;
+  flex: 0 0 44px;
+  min-height: 44px;
   padding: 4px;
+}
+#history-sources {
+  display: grid;
+  gap: 4px;
+  overflow-y: auto;
+  max-height: 50dvh;
+  margin-block: 12px;
+}
+#save-status {
+  color: var(--hint);
+  min-height: 1.3em;
 }
 #add-song { width: 100%; margin-top: 8px; }
 #add-pause-bottom.drop-after { border-color: var(--button); background: var(--panel); }
 #song-error { color: var(--danger); white-space: pre-wrap; }
 #song-scope { color: var(--hint); font-size: 13px; }
+
+#planned-edit {
+  padding: 4px 8px;
+  font-variant-numeric: tabular-nums;
+}

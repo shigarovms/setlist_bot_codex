@@ -25,6 +25,7 @@ from setlist_bot.domain.entities import (
     Concert,
     Group,
     Item,
+    Membership,
     PersonalDraft,
     Revision,
     Setlist,
@@ -100,6 +101,7 @@ class Setlists:
         concert = await self.store.get(Concert, concert_id)
         require(concert.group_id == group_id, "not_found")
         require(concert.deleted_at is None, "in_trash")
+        await self.groups.check_performance_visibility(group_id, concert_id)
         return (await self.store.find(Setlist, group_id=group_id, concert_id=concert_id))[0]
 
     async def _working(self, setlist: Setlist) -> Document:
@@ -210,7 +212,20 @@ class Setlists:
         content = flat_content(draft.content) if draft else await self._working(setlist)
         blocks = content["blocks"]
         if operation == "default_pause":
-            content["default_pause_seconds"] = pause_seconds(args[0])
+            seconds = pause_seconds(args[0])
+            if (
+                draft
+                and seconds != content["default_pause_seconds"]
+                and await self.store.find(
+                    Membership,
+                    group_id=group_id,
+                    user_id=self.user.id,
+                    role="admin",
+                    status="active",
+                )
+            ):
+                await self.groups.set_default_pause(group_id, args[0])
+            content["default_pause_seconds"] = seconds
         else:
             index = int(args[0]) - 1
             require(0 <= index < len(blocks), "setlist_input")

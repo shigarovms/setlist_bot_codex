@@ -20,6 +20,7 @@ from setlist_bot.domain.entities import (
     Group,
     LineupTemplate,
     Membership,
+    Outbox,
     StaffContact,
     StaffReplacement,
     StaffRole,
@@ -240,6 +241,7 @@ async def team_view(c: Controller, group_id: UUID) -> Response:
             (c.t("permanent_title"), action(c, "permanent", group_id=str(group_id))),
             (c.t("staff_contacts"), action(c, "contacts", group_id=str(group_id))),
             (c.t("staff_templates"), action(c, "templates", group_id=str(group_id))),
+            (c.t("membership_permissions"), action(c, "permissions", group_id=str(group_id))),
             (
                 c.t("menu_back"),
                 f"use_group {group_id}"
@@ -316,6 +318,23 @@ async def invitation_view(
     status_key = (
         "staff_conditional_status" if row.status == "conditional" else "staff_" + row.status
     )
+    if admin and not own and row.status in ("pending", "reconfirm"):
+        if row.notified_at is None:
+            deliveries = await c.store.find(
+                Outbox, support_kind="staffing", concert_id=event.id, chat_id=person.telegram_id
+            )
+            current = [
+                item
+                for item in deliveries
+                if item.payload.get("invite_id") == str(row.id)
+                and item.payload.get("kind") in ("invitation", "date_changed")
+            ]
+            if current:
+                status_key = (
+                    "staff_delivery_wait"
+                    if any(not item.sent for item in current)
+                    else "staff_delivery_unsent"
+                )
     text = (
         f"{group.name} · {button_date(event.date)}\n{event.title} · {event.city}\n"
         f"{role.name} · {person.display_name or person.telegram_id}\n{c.t(status_key)}"
@@ -528,18 +547,47 @@ async def handle(c: Controller, command: str, args: str) -> Response:
         return await invitation_view(c, UUID(args))
     if command == "busy":
         return await prompt(c, "busy") if not args else await busy_input(c, args)
+    if command == "my_gigs" and not args:
+        buttons = [
+            (c.t("staff_invitations"), "my_gigs invitations"),
+            (c.t("staff_assignments"), "my_gigs confirmed"),
+        ]
+        memberships = await c.store.find(
+            Membership, user_id=c.user.id, role="admin", status="active"
+        )
+        if any(
+            g.deleted_at is None
+            for g in await c.store.get_many(Group, {m.group_id for m in memberships})
+        ):
+            buttons.append((c.t("staff_admin_events"), "all_my_concerts admin"))
+        buttons.append((c.t("staff_busy_menu"), action(c, "busy")))
+        if c.calendar_public_base_url:
+            buttons.append((c.t("calendar_entry"), "calendar"))
+        return Response(c.t("staff_my"), buttons)
     if command == "my_gigs":
-        page = int(args or "0")
+        fields = args.split()
+        # Numeric callbacks from old keyboards open the invitations page.
+        scope = fields.pop(0) if not fields[0].isdigit() else "invitations"
+        require(scope in ("invitations", "confirmed", "history") and len(fields) <= 1, "input")
+        page = int(fields[0]) if fields else 0
         require(page >= 0, "input")
         rows = await c.store.find(GigInvitation, user_id=c.user.id)
         events = {e.id: e for e in await c.store.get_many(Concert, {r.concert_id for r in rows})}
         groups = {g.id: g for g in await c.store.get_many(Group, {r.group_id for r in rows})}
-        rows = [
-            r
+        active_ids = {
+            r.id
             for r in rows
             if r.status in OPEN | {"confirmed"}
             and service.valid(r, events.get(r.concert_id), groups.get(r.group_id))
-        ]
+        }
+        if scope == "history":
+            rows = [r for r in rows if r.id not in active_ids]
+        else:
+            rows = [
+                r
+                for r in rows
+                if r.id in active_ids and (r.status == "confirmed") == (scope == "confirmed")
+            ]
         rows.sort(
             key=lambda r: (
                 r.date < today(),
@@ -547,29 +595,72 @@ async def handle(c: Controller, command: str, args: str) -> Response:
                 r.id,
             )
         )
-        buttons = [
-            (
-                (
-                    f"{button_date(r.date)} · {groups[r.group_id].name} · "
-                    + c.t(
-                        "staff_conditional_status"
-                        if r.status == "conditional"
-                        else "staff_" + r.status
-                    )
-                ),
-                f"sf_view {r.id.hex}",
+        statuses = [
+            c.t(
+                "staff_history_inactive"
+                if r.status in OPEN and r.id not in active_ids
+                else "staff_conditional_status"
+                if r.status == "conditional"
+                else "staff_" + r.status
             )
             for r in rows[page * 15 : (page + 1) * 15]
         ]
+        shown = rows[page * 15 : (page + 1) * 15]
+        buttons = []
+        if scope == "history":
+            history_slots = {
+                slot.id: slot
+                for slot in await c.store.get_many(GigSlot, {row.slot_id for row in shown})
+            }
+            history_roles = {
+                role.id: role.name
+                for role in await c.store.get_many(
+                    StaffRole, {slot.role_id for slot in history_slots.values()}
+                )
+            }
+            lines = [
+                " · ".join(
+                    part
+                    for part in (
+                        button_date(r.date),
+                        groups[r.group_id].name,
+                        history_roles.get(history_slots[r.slot_id].role_id)
+                        if r.slot_id in history_slots
+                        else None,
+                        status,
+                    )
+                    if part
+                )
+                for r, status in zip(shown, statuses, strict=True)
+            ]
+        else:
+            lines = []
+            buttons = [
+                (
+                    f"{button_date(r.date)} · {groups[r.group_id].name} · {status}",
+                    f"sf_view {r.id.hex}",
+                )
+                for r, status in zip(shown, statuses, strict=True)
+            ]
+        prefix = f"my_gigs {scope}"
         if page:
-            buttons.append(("◀", f"my_gigs {page - 1}"))
+            buttons.append(("◀", f"{prefix} {page - 1}"))
         if (page + 1) * 15 < len(rows):
-            buttons.append(("▶", f"my_gigs {page + 1}"))
-        buttons += [
-            (c.t("staff_busy_menu"), action(c, "busy")),
-            (c.t("staff_personal_calendar"), "cal_scope personal"),
-        ]
-        return Response(c.t("staff_my"), buttons)
+            buttons.append(("▶", f"{prefix} {page + 1}"))
+        if scope == "invitations":
+            buttons.append((c.t("staff_invitation_history"), "my_gigs history"))
+        buttons.append((c.t("menu_back"), "my_gigs"))
+        title = c.t(
+            {
+                "invitations": "staff_invitations",
+                "confirmed": "staff_assignments",
+                "history": "staff_invitation_history",
+            }[scope]
+        )
+        return Response(
+            "\n".join([title, *(lines or ([c.t("staff_schedule_empty")] if not shown else []))]),
+            buttons,
+        )
     if command in ("sf_guest", "sf_pdf", "sf_pdf_m", "sf_pdf_l"):
         row = await c.store.get(GigInvitation, UUID(args))
         event, group = (
@@ -764,16 +855,23 @@ async def handle(c: Controller, command: str, args: str) -> Response:
 
                 _, preparation, _ = await load_preparation(c, data)
                 require(preparation["stage"] == "review", "input_expired")
-            await service.invite_defaults(
+            queued = await service.invite_defaults(
                 UUID(data["event_id"]), data["versions"], force=data.get("force", False)
             )
-            return await lineup_view(c, UUID(data["event_id"]))
+            response = await lineup_view(c, UUID(data["event_id"]))
+            if queued:
+                response.text = c.t("staff_invites_queued", count=queued) + "\n\n" + response.text
+            return response
         event = await service.event(UUID(data["event_id"]))
         slots = await c.store.find(GigSlot, concert_id=event.id)
-        filled = {
-            row.slot_id
-            for row in await c.store.find(GigInvitation, concert_id=event.id, status="confirmed")
-        }
+        group = await c.store.get(Group, event.group_id)
+        active_invites = [
+            row
+            for row in await c.store.find(GigInvitation, concert_id=event.id)
+            if row.status in OPEN | {"confirmed"} and service.valid(row, event, group)
+        ]
+        filled = {row.slot_id for row in active_invites if row.status == "confirmed"}
+        waiting = {(row.slot_id, row.user_id) for row in active_invites}
         targets = [
             slot
             for slot in slots
@@ -781,6 +879,7 @@ async def handle(c: Controller, command: str, args: str) -> Response:
             and slot.required
             and slot.preferred_user_id
             and slot.id not in filled
+            and (slot.id, slot.preferred_user_id) not in waiting
         ]
         people = {
             p.id: p
@@ -794,20 +893,31 @@ async def handle(c: Controller, command: str, args: str) -> Response:
         for slot in targets:
             assert slot.preferred_user_id is not None
             person = people[slot.preferred_user_id]
-            busy, _ = conflicts[person.id]
+            busy, tentative = conflicts[person.id]
             busy_any |= busy > 0
             role = roles[slot.role_id]
             lines.append(
                 f"{role.name[:32]} · {(person.display_name or str(person.telegram_id))[:24]} · "
-                + c.t("staff_conflicts" if busy else "staff_unknown")
+                + c.t(
+                    "staff_conflicts"
+                    if busy
+                    else "staff_tentative"
+                    if tentative
+                    else "staff_unknown"
+                )
             )
             versions[str(slot.id)] = slot.version
         require(bool(versions), "staff_filled")
+        count = len(set(people) - {c.user.id})
+        if count:
+            label = "staff_invite_count_force" if busy_any else "staff_invite_count"
+        else:
+            label = "staff_force_yes" if busy_any else "staff_self_confirm"
         return Response(
             "\n".join(lines),
             [
                 (
-                    c.t("staff_force_invite" if busy_any else "staff_invite_defaults"),
+                    c.t(label, count=count),
                     action(
                         c,
                         "defaults_send",
@@ -821,6 +931,13 @@ async def handle(c: Controller, command: str, args: str) -> Response:
                 (c.t("cancel_button"), data.get("back") or f"sf_lineup {event.id.hex}"),
             ],
         )
+    if op == "permissions":
+        group_id = UUID(data["group_id"])
+        await c.groups.access(group_id, admin=True)
+        if c.private:
+            current = await c.groups.context(c.chat_id, True)
+            current.group_id, current.concert_id, current.observed_version = group_id, None, None
+        return await c.execute("members")
     if op in ("contacts", "contact", "preference"):
         if op == "contacts":
             return await contacts_view(c, UUID(data["group_id"]), data.get("page", 0))

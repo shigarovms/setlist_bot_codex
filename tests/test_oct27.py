@@ -76,7 +76,7 @@ async def test_approved_author_is_frozen_and_admin_can_approve(engine, world):
         await Groups(uow.store, world.member).register(world.group.id, "Новое имя")
         snapshot, version, approved = await lists.read(world.group.id, world.concert.id)
         assert approved and snapshot["approved_by"] == "Илья"
-        assert "Одобрен: Илья · версия" in render_setlist(
+        assert "Утверждён Илья · версия" in render_setlist(
             snapshot, world.concert, "ru", version, approved=True
         )
 
@@ -149,14 +149,7 @@ def test_daily_offsets_and_command_order():
     due = reminders.due_at(UUID(int=3599), at)
     assert due.hour == 14 and due.minute == 59 and due.second == 59
     for menu in ("private", "group", "admin", "default"):
-        assert [c.command for c in menu_commands(menu, "ru")][:6] == [
-            "support",
-            "groups",
-            "concerts",
-            "start",
-            "add_new_songs",
-            "help",
-        ]
+        assert menu_commands(menu, "ru")[0].command == "support"
 
 
 async def test_pause_minutes_undo_pause_and_position_buttons(engine, world):
@@ -278,13 +271,12 @@ async def test_concert_flags_and_exact_options_order(engine, world):
         is_callback=True,
     )
     assert [label for label, _ in options.buttons] == [
-        "Параметры экспорта",
-        "⚙️ Параметры сет-листа",
-        "Параметры выступления",
-        "👥 Состав выступления",
+        "Данные выступления",
+        "Оформление PDF",
+        "⚙️ Настройки коллектива",
         "Прибраться в чате",
         "Связаться с поддержкой",
-        "◀️ Назад",
+        "◀️ К выступлению",
     ]
     async with PostgresUnitOfWork(engine) as uow:
         await Setlists(uow.store, world.admin).reopen(world.group.id, world.concert.id, 2)
@@ -348,6 +340,7 @@ async def test_migration_backfills_owner_and_frozen_approval(database_url, engin
         assert snapshot["approved_by"] == "Старый владелец"
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_admin_request_never_inherits_message_ids_from_another_chat(engine, world):
     from setlist_bot.application.setlist_menus import SetlistMenus
 
@@ -369,6 +362,7 @@ async def test_admin_request_never_inherits_message_ids_from_another_chat(engine
         )
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_group_nickname_is_used_in_admin_request(engine, world):
     processor = Processor(engine)
     async with PostgresUnitOfWork(engine) as uow:

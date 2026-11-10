@@ -16,26 +16,26 @@
     <main>
       <header>
         <div class="eyebrow">setListBot</div>
-        <h1 id="heading">Личный черновик</h1>
+        <h1 id="heading">Ваш черновик</h1>
         <p id="event"></p>
         <div class="timing">
-          <strong id="total">00:00</strong><span id="planned"></span>
+          <strong id="total">00:00</strong><span aria-hidden="true">/</span><span id="planned"></span>
+          <button id="planned-edit" type="button" hidden aria-haspopup="dialog"></button>
+          <span id="planned-delta"></span>
         </div>
       </header>
       <p id="status" role="status" aria-live="polite">Загрузка…</p>
       <button id="access-request" hidden>Запросить права у владельца</button>
       <nav id="history" aria-label="Версии и прошлые выступления">
-        <button id="older" aria-label="Предыдущий сет-лист">← прошлые</button
-        ><span id="history-label"></span
-        ><button id="newer" aria-label="Следующий сет-лист" disabled>
-          →
-        </button>
+        <button id="older" aria-haspopup="dialog">История</button>
+        <span id="history-label"></span>
+        <button id="newer" hidden>К черновику</button>
       </nav>
       <button id="use-history" hidden>Взять за основу</button>
       <div class="toolbar">
-        <button id="undo" disabled>↶ Отменить</button
-        ><button id="average-pause" disabled>Сред. пауза</button
-        ><button id="add-pause">＋ Пауза</button>
+        <button id="undo" aria-label="Отменить последнее действие" disabled>↶ Undo</button>
+        <button id="average-pause" disabled>Сред. пауза</button>
+        <button id="add-pause">＋ Пауза</button>
       </div>
       <div class="workspace">
         <section aria-label="Ваш сет-лист">
@@ -65,12 +65,30 @@
       <footer>
         <p id="private-note">Сохраняется только личный черновик.</p>
         <button id="publish" class="primary" disabled>
-          📤 Предложить в группу и закрыть
+          📤 Предложить группе
         </button>
-        <button id="save" disabled>Сохранить черновик</button
-        ><button id="back-bot">Вернуться к боту</button>
+        <p id="save-status" role="status"></p>
+        <button id="save" hidden disabled>Повторить сохранение</button>
+        <button id="back-bot">Вернуться к боту</button>
       </footer>
     </main>
+    <dialog id="planned-dialog" aria-labelledby="planned-title">
+      <form id="planned-form">
+        <h2 id="planned-title">Плановая длительность</h2>
+        <label for="planned-value" id="planned-hint">45 — минуты, 1:15 — час и 15 минут</label>
+        <input id="planned-value" maxlength="80" required />
+        <p id="planned-status" role="status"></p>
+        <div class="toolbar">
+          <button id="planned-close" type="button">Закрыть</button>
+          <button id="planned-submit" type="submit" class="primary">Сохранить</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="history-dialog" aria-labelledby="history-title">
+      <h2 id="history-title">История</h2>
+      <div id="history-sources"></div>
+      <form method="dialog"><button id="history-close">Закрыть</button></form>
+    </dialog>
     <dialog id="song-dialog">
       <form id="song-form">
         <h2 id="song-dialog-title">Редактировать песню</h2>

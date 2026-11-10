@@ -57,6 +57,7 @@ async def test_aliases_fuzzy_search_and_collision(engine, world):
             await catalog.alias(world.group.id, other.id, "Комета")
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_approved_snapshot_is_immutable_and_members_cannot_approve(engine, world):
     async with PostgresUnitOfWork(engine) as uow:
         admin = Setlists(uow.store, world.admin)
@@ -100,6 +101,7 @@ async def test_approved_snapshot_is_immutable_and_members_cannot_approve(engine,
         )
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_concurrent_edits_do_not_overwrite(engine, world):
     async def edit(user):
         try:
@@ -119,6 +121,7 @@ async def test_concurrent_edits_do_not_overwrite(engine, world):
         assert version == 1 and len(snapshot["blocks"][0]["items"]) == 1
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_personal_drafts_are_persistent_private_and_separate(engine, world):
     async with PostgresUnitOfWork(engine) as uow:
         member = Setlists(uow.store, world.member)
@@ -179,6 +182,7 @@ async def test_database_rejects_cross_group_song_reference(engine, world):
             )
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_restore_order_records_new_revision(engine, world):
     async with PostgresUnitOfWork(engine) as uow:
         service = Setlists(uow.store, world.member)
@@ -221,6 +225,7 @@ async def test_confirmation_bound_to_actor_chat_group_and_concert(engine, world)
     assert "Подтверждение" in wrong.text
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_processor_conflict_returns_current_setlist(engine, world):
     processor = Processor(engine)
     for update, actor in ((1, 1), (2, 2)):
@@ -233,6 +238,7 @@ async def test_processor_conflict_returns_current_setlist(engine, world):
     assert "Версия 1" in conflict.text
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_private_publish_is_explicit_and_uses_outbox(engine, world):
     processor = Processor(engine)
     await processor.process(1, 2, 2, f"/use_group {world.group.id}", private=True)
@@ -246,6 +252,7 @@ async def test_private_publish_is_explicit_and_uses_outbox(engine, world):
         assert len(events) == 1 and events[0].chat_id == -100 and "Комета" in events[0].text
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_unknown_identifiers_do_not_leak_other_group(engine, world):
     processor = Processor(engine)
     await processor.process(1, 2, -100, f"/use_concert {world.concert.id}", private=False)

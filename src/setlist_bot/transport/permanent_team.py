@@ -84,15 +84,37 @@ async def input_value(c: Controller, data: dict[str, Any], value: str) -> Respon
 async def handle(c: Controller, operation: str, data: dict[str, Any]) -> Response | None:
     if operation == "permanent":
         return await view(c, UUID(data["group_id"]), data.get("page", 0))
-    if operation not in ("permanent_card", "permanent_remove", "permanent_remove_yes"):
+    if operation not in (
+        "permanent_card",
+        "permanent_remove",
+        "permanent_remove_yes",
+        "permanent_move",
+        "permanent_preference",
+    ):
         return None
-    row = await c.store.get(StaffContact, UUID(data["contact_id"]))
+    identifier = UUID(data["contact_id"])
+    row = await c.store.get(StaffContact, identifier)
     await c.groups.access(row.group_id, admin=True)
+    row = await c.store.get(StaffContact, identifier, lock=True)
     require(
         str(row.group_id) == data["group_id"] and row.version == data["version"] and row.permanent,
         "input_expired",
     )
     target = {"group_id": str(row.group_id), "contact_id": str(row.id), "version": row.version}
+    service = Staffing(c.store, c.user)
+    if operation == "permanent_move":
+        await service.move_permanent(row.id, row.version, data["step"])
+        target["version"] = row.version
+        return await handle(c, "permanent_card", target)
+    if operation == "permanent_preference":
+        await service.contact(
+            row.group_id,
+            row.role_id,
+            row.user_id,
+            "normal" if row.preference == "hidden" else "hidden",
+        )
+        target["version"] = row.version
+        return await handle(c, "permanent_card", target)
     if operation == "permanent_remove_yes":
         await Staffing(c.store, c.user).change_contact(row.id, row.version, remove=True)
         return await view(c, row.group_id)
@@ -106,9 +128,30 @@ async def handle(c: Controller, operation: str, data: dict[str, Any]) -> Respons
         )
     user = await c.store.get(User, row.user_id)
     role = await c.store.get(StaffRole, row.role_id)
-    text = f"{role.name}: {user.display_name or user.telegram_id}\n" + c.t(
-        "permanent_priority", value=row.priority
-    )
+    ordered = await service.permanent_order(row.group_id, row.role_id)
+    people = {
+        person.id: person
+        for person in await c.store.get_many(User, {contact.user_id for contact in ordered})
+    }
+    names = []
+    active = [contact for contact in ordered if contact.preference != "hidden"]
+    for number, contact in enumerate(active, start=1):
+        person = people[contact.user_id]
+        primary = " · " + c.t("permanent_primary") if number == 1 else ""
+        names.append(f"{number}. {person.display_name or person.telegram_id}{primary}")
+    for contact in ordered:
+        if contact.preference == "hidden":
+            person = people[contact.user_id]
+            names.append(
+                f"{person.display_name or person.telegram_id} · " + c.t("staff_hidden_label")
+            )
+    text = f"{role.name} · {user.display_name or user.telegram_id}\n\n" + "\n".join(names)
+    movement = []
+    if row in active:
+        position = active.index(row)
+        for step, label in ((-1, "permanent_up"), (1, "permanent_down")):
+            if 0 <= position + step < len(active):
+                movement.append((c.t(label), action(c, "permanent_move", step=step, **target)))
     if user.profile:
         from setlist_bot.transport.profiles import summary
 
@@ -117,7 +160,11 @@ async def handle(c: Controller, operation: str, data: dict[str, Any]) -> Respons
         text,
         [
             (c.t("permanent_edit"), action(c, "prompt", field="permanent", **target)),
-            (c.t("permanent_order"), action(c, "prompt", field="permanent_priority", **target)),
+            *movement,
+            (
+                c.t("staff_normal" if row.preference == "hidden" else "staff_hidden_label"),
+                action(c, "permanent_preference", **target),
+            ),
             (c.t("permanent_remove"), action(c, "permanent_remove", **target)),
             (c.t("menu_back"), action(c, "permanent", group_id=str(row.group_id))),
         ],

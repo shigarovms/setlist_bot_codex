@@ -227,13 +227,12 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.js("document.getElementById('average-pause').textContent")
                 == "Сред. пауза"
             )
-            assert await browser.js("document.getElementById('older').textContent") == "← прошлые"
-            assert await browser.js("""(()=>{
-                const o=document.getElementById('older'), n=document.getElementById('newer');
-                const label=document.getElementById('history-label');
-                return Math.abs(o.getBoundingClientRect().width-n.getBoundingClientRect().width)<1
-                  && getComputedStyle(o).fontSize===getComputedStyle(label).fontSize;
-            })()""")
+            assert await browser.js("document.getElementById('older').textContent") == "История"
+            assert await browser.js("document.getElementById('newer').hidden")
+            assert await browser.js("document.getElementById('save').hidden")
+            assert await browser.js(
+                "document.getElementById('undo').ariaLabel === 'Отменить последнее действие'"
+            )
             assert not await browser.js("!!document.querySelector('#remove-zone, [data-remove]')")
             assert (
                 await browser.js("document.getElementById('add-pause-bottom').textContent")
@@ -419,9 +418,12 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             assert await browser.js("document.documentElement.dataset.theme") == "dark"
             assert await browser.js(transparent_pause)
             await browser.js("window.scrollTo(0,0)")
+            await browser.js("new Promise(resolve => setTimeout(resolve, 180))")
             screenshot = await browser.call("Page.captureScreenshot", {"format": "png"})
             (tmp_path / "miniapp-dark.png").write_bytes(base64.b64decode(screenshot["data"]))
             await browser.js("document.getElementById('older').click()")
+            await browser.wait("document.querySelectorAll('#history-sources button').length > 0")
+            await browser.js("document.querySelector('#history-sources button').click()")
             await browser.wait("!document.getElementById('use-history').hidden")
             assert await browser.js("document.querySelectorAll('#setlist li').length") == 1
             await browser.js("document.getElementById('newer').click()")
@@ -430,13 +432,14 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             await browser.js("document.querySelector('#setlist li:first-child .remove').click()")
             assert await browser.js("document.querySelectorAll('#setlist li').length") == 2
             await browser.js("document.getElementById('undo').click()")
-            await browser.js("document.getElementById('save').click()")
             await browser.wait(
-                "document.getElementById('save').disabled && "
+                "document.getElementById('save').hidden && "
+                "document.getElementById('save-status').textContent === 'Сохранено' && "
                 "!document.getElementById('publish').disabled"
             )
             await browser.js("window.Telegram.WebApp.colorScheme='light'; window.themeChange()")
             assert await browser.js("document.documentElement.dataset.theme") == "light"
+            await browser.js("new Promise(resolve => setTimeout(resolve, 180))")
             screenshot = await browser.call("Page.captureScreenshot", {"format": "png"})
             (tmp_path / "miniapp-light.png").write_bytes(base64.b64decode(screenshot["data"]))
             assert await browser.js("document.documentElement.scrollWidth<=innerWidth")
@@ -486,6 +489,12 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             await catalog_acknowledgement()
             assert await browser.js("document.querySelectorAll('#setlist li').length") == 3
             # Every occurrence is refreshed; order and blank pause are preserved.
+            assert await browser.js("""['#setlist .song-edit', '#setlist .remove'].every(
+                selector => {
+                    const box = document.querySelector(selector).getBoundingClientRect();
+                    return box.width >= 44 && box.height >= 44;
+                }
+            )""")
             await browser.js("document.querySelector('#setlist .song-edit').click()")
             await browser.wait("document.getElementById('song-dialog').open")
             await browser.js("""
@@ -533,6 +542,29 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             await browser.js("document.getElementById('add-pause-bottom').click()")
             assert await browser.js("document.getElementById('pause-dialog').open")
             await browser.js("document.getElementById('pause-cancel').click()")
+            await browser.js("""
+                document.getElementById('planned-edit').click();
+                document.getElementById('planned-value').value='1:15';
+                document.getElementById('planned-form').requestSubmit();
+            """)
+            await browser.wait("document.getElementById('planned-dialog').open")
+            for _ in range(80):
+                async with PostgresUnitOfWork(engine) as uow:
+                    requests = await uow.store.find(Outbox, support_kind="catalog", sent=False)
+                if requests:
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("Planned duration request was not queued")
+            async with Bot("123456:TEST", session=FakeTelegram()) as bot:
+                assert await deliver_one_outbox(bot, engine)
+            await browser.wait("!document.getElementById('planned-dialog').open")
+            assert (
+                await browser.js("document.getElementById('planned-edit').textContent") == "75:00"
+            )
+            assert "запас" in await browser.js(
+                "document.getElementById('planned-delta').textContent"
+            )
             await browser.js("document.getElementById('publish').click()")
             for _ in range(50):
                 async with PostgresUnitOfWork(engine) as uow:

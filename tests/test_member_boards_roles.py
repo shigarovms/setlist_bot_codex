@@ -66,7 +66,7 @@ async def test_profile_is_first_even_without_bands(engine, world):
         assert response.buttons[0] == ("👤 Мой профиль", "profile")
     assert "profile" in [c.command for c in menu_commands("private", "ru")]
     response = await send("/profile", actor=3, private=True)
-    assert response.force_reply and "Как вас зовут" in response.text
+    assert not response.force_reply and "Как вас зовут" in response.text
 
 
 async def test_role_request_is_prompt_bound_and_requires_admin_approval(engine, world):

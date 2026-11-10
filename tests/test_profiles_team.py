@@ -55,16 +55,19 @@ async def test_profile_questionnaire_exact_replies_confirmation_and_repeat(engin
     welcome = await send("/start", private=True)
     assert ("👤 Мой профиль", "profile") in welcome.buttons
     first = await send("profile", private=True, remember=100)
-    assert first.force_reply
+    assert not first.force_reply
     assert first.text.count("/cancel") == 1
-    assert first.text.startswith(
+    assert first.text.startswith("Имя · шаг 1 из 5")
+    assert (
         "Как вас зовут или как бы вы хотели, чтобы вас представляли в конце выступления?"
+        in first.text
     )
     roles = await send("Илья Сценический", private=True, reply=100, remember=101)
     assert "Какие роли" in roles.text
-    invalid = await send("звук", private=True, reply=101, remember=102)
-    assert invalid.force_reply and "FOH" in invalid.text
-    city = await send("FOH, MON, звуковой техник", private=True, reply=102, remember=103)
+    clarify = await send("звук, MON, звуковой техник", private=True, reply=101, remember=102)
+    assert not clarify.force_reply and "Какую позицию" in clarify.text
+    foh = next(action for label, action in clarify.buttons if "FOH" in label)
+    city = await send(foh, private=True, remember=103)
     assert "городе" in city.text
     available = await send("Москва", private=True, reply=103, remember=104)
     enabled = await send(available.buttons[0][1], private=True, remember=105)
@@ -115,7 +118,7 @@ async def test_profile_cancel_stale_version_and_other_user_cannot_save(engine, w
         session = next(r for r in rows if json.loads(r.command).get("kind") == "profile_input")
         session.expires_at = now() - timedelta(seconds=1)
     denied = await send("Поздний ответ", private=True, reply=122)
-    assert not denied.force_reply
+    assert denied is None or not denied.force_reply
 
 
 async def test_permanent_defaults_are_group_scoped_and_do_not_rewrite_existing_gigs(engine, world):
@@ -168,9 +171,10 @@ async def test_new_team_menu_permanent_workflow_and_template_order(engine, world
     send = sender(engine)
     team = await send("/team")
     assert [name for name, _ in team.buttons] == [
-        "Участники коллектива",
+        "Постоянная команда",
         "Знакомые исполнители",
         "Составы",
+        "Участники и права",
         "◀️ Назад",
     ]
     members = await send(team.buttons[0][1])
@@ -254,9 +258,12 @@ async def test_profile_fields_can_be_kept_and_admin_views_stay_group_scoped(engi
         role = await staff.role(world.group.id, "FOH")
         await staff.set_permanent(world.group.id, role.id, world.member.id)
     send = sender(engine)
-    await send("profile", actor=2, private=True, remember=171)
-    next_question = await send("=", actor=2, private=True, reply=171, remember=172)
-    assert "FOH" in next_question.text
+    profile = await send("profile", actor=2, private=True, remember=171)
+    assert "FOH" in profile.text and "Пермь" in profile.text
+    city = next(action for label, action in profile.buttons if label == "Изменить город")
+    await send(city, actor=2, private=True, remember=172)
+    same = await send("=", actor=2, private=True, reply=172)
+    assert "FOH" in same.text and "Пермь" in same.text
     await send("/cancel", actor=2, private=True)
     team = await send("/team")
     people = await send(team.buttons[0][1])
@@ -268,3 +275,62 @@ async def test_profile_fields_can_be_kept_and_admin_views_stay_group_scoped(engi
     assert "Готов работать в туре" not in denied.text
     async with PostgresUnitOfWork(engine) as uow:
         assert (await uow.store.get(User, world.member.id)).profile["name"] == "Имя со сцены"
+
+
+async def test_profile_resumes_after_navigation_and_edits_one_field_with_custom_roles(
+    engine, world
+):
+    from setlist_bot.transport.telegram import Processor
+
+    send = sender(engine)
+    first = await send("/profile", private=True)
+    processor = Processor(engine)
+    role_step = await processor.process(
+        90000, 1, 1, "Илья", private=True, message_id=91, is_callback=False
+    )
+    assert not role_step.force_reply and "шаг 2" in role_step.text
+    await send("/groups", private=True)
+    assert (
+        await processor.process(
+            90001, 1, 1, "Посторонний текст", private=True, message_id=92, is_callback=False
+        )
+        is None
+    )
+    stale = await send(first.buttons[0][1], private=True)
+    assert "устарел" in stale.text
+    roles = await send("/profile", private=True, remember=100)
+    assert "шаг 2" in roles.text
+    sound = await send("басист, звукорежиссер, сценограф", private=True, reply=100)
+    custom = await send(next(a for label, a in sound.buttons if "Оставить" in label), private=True)
+    city = await send(next(a for label, a in custom.buttons if "Добавить" in label), private=True)
+    avail = await send(city.buttons[0][1], private=True)
+    about = await send(next(a for label, a in avail.buttons if label == "Далее"), private=True)
+    confirm = await send(about.buttons[0][1], private=True)
+    saved = await send(confirm.buttons[0][1], private=True)
+    card = await send(saved.buttons[0][1], private=True)
+    assert "Бас-гитара, Звукорежиссёр, сценограф" in card.text
+    edit = await send(
+        next(a for label, a in card.buttons if label == "Изменить город"),
+        private=True,
+        remember=101,
+    )
+    assert not edit.force_reply and "шаг" not in edit.text
+    updated = await send("Казань", private=True, reply=101)
+    assert "Казань" in updated.text and "Бас-гитара, Звукорежиссёр, сценограф" in updated.text
+
+
+async def test_permanent_order_changes_primary_and_rejects_a_stale_move(engine, world):
+    async with PostgresUnitOfWork(engine) as uow:
+        service = Staffing(uow.store, world.admin)
+        role = await service.role(world.group.id, "Бас")
+        first = await service.set_permanent(world.group.id, role.id, world.member.id)
+        second = await service.set_permanent(world.group.id, role.id, world.stranger.id)
+        before = second.version
+        assert await service.lineup_people(world.group.id, [role.id]) == [world.member.id]
+        await service.move_permanent(second.id, before, -1)
+        assert await service.lineup_people(world.group.id, [role.id]) == [world.stranger.id]
+        with pytest.raises(AppError, match="input_expired"):
+            await service.move_permanent(second.id, before, 1)
+        await service.contact(world.group.id, role.id, world.stranger.id, "hidden")
+        assert await service.lineup_people(world.group.id, [role.id]) == [world.member.id]
+        assert first.permanent and second.permanent

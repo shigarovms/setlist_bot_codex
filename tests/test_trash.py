@@ -72,6 +72,7 @@ async def seed_concert(uow, world):
     )
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_concert_delete_confirmation_hides_all_variants_and_restores_private_drafts(
     engine, world
 ):
@@ -104,6 +105,7 @@ async def test_concert_delete_confirmation_hides_all_variants_and_restores_priva
         assert all(event.sent for event in await uow.store.find(e.Outbox, group_id=world.group.id))
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_group_delete_has_backup_two_confirmations_and_preserves_other_groups(engine, world):
     async with PostgresUnitOfWork(engine) as uow:
         await seed_concert(uow, world)
@@ -138,6 +140,7 @@ async def test_group_delete_has_backup_two_confirmations_and_preserves_other_gro
         assert len(await uow.store.find(e.Song, group_id=world.other.id)) == 1
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_delete_preview_is_rejected_when_data_changes(engine, world):
     send = sender(engine)
     await send(f"/use_concert {world.concert.id}")
@@ -170,6 +173,7 @@ async def test_chat_can_be_reused_but_restoration_cannot_overwrite_new_group(eng
         assert (await uow.store.find(e.ChatBinding, chat_id=-100))[0].group_id == world.group.id
 
 
+@pytest.mark.usefixtures("invited_member")
 @pytest.mark.parametrize("scope", ["concert", "group"])
 async def test_purge_removes_expired_tree_only_and_keeps_accounts(engine, world, scope):
     async with PostgresUnitOfWork(engine) as uow:

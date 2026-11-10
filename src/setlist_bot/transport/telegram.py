@@ -5,6 +5,7 @@ from asyncio import Lock
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 from weakref import WeakValueDictionary
 
 from aiogram import Bot, F, Router
@@ -48,7 +49,7 @@ from setlist_bot.domain.entities import (
     User,
     now,
 )
-from setlist_bot.domain.rules import AppError, SuggestionRestricted
+from setlist_bot.domain.rules import AppError, SuggestionRestricted, require
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.infrastructure.telemetry import Monitor
 from setlist_bot.infrastructure.ux_analytics import UXBuffer, action_name
@@ -216,6 +217,48 @@ class Processor:
             input_reply_id = None
             try:
                 async with uow.session.begin_nested():
+                    if private:
+                        head = (
+                            command.lstrip().split(maxsplit=1)[0].split("@")[0].lower()
+                            if command.strip()
+                            else ""
+                        )
+                        for profile_session in await uow.store.find(
+                            Confirmation, user_id=user.id, chat_id=chat_id
+                        ):
+                            profile_data = json.loads(profile_session.command)
+                            if profile_data.get("kind") != "profile_input" or not profile_data.get(
+                                "active"
+                            ):
+                                continue
+                            if article is None and not is_callback and not head.startswith("/"):
+                                if (
+                                    profile_session.expires_at > now()
+                                    and profile_data.get("waiting")
+                                    and (
+                                        reply_message_id is None
+                                        or reply_message_id in profile_data.get("message_ids", [])
+                                    )
+                                ):
+                                    from setlist_bot.transport.profiles import (
+                                        reply as profile_reply,
+                                    )
+
+                                    return await profile_reply(
+                                        controller, profile_session, command, reply_message_id
+                                    )
+                            elif (
+                                head not in ("pf_go", "/profile", "profile", "/cancel", "cancel")
+                                and command.strip() != "/start profile"
+                            ):
+                                profile_session.command = json.dumps(
+                                    {
+                                        **profile_data,
+                                        "active": False,
+                                        "waiting": False,
+                                        "version": profile_data["version"] + 1,
+                                    }
+                                )
                     if article is not None:
                         source = article_table_source(article)
                         heading = article_heading(article)
@@ -247,18 +290,6 @@ class Processor:
                                 Confirmation, user_id=user.id, chat_id=chat_id
                             ):
                                 staff_data = json.loads(staff_session.command)
-                                if staff_data.get(
-                                    "kind"
-                                ) == "profile_input" and reply_message_id in staff_data.get(
-                                    "message_ids", []
-                                ):
-                                    from setlist_bot.transport.profiles import (
-                                        reply as profile_reply,
-                                    )
-
-                                    return await profile_reply(
-                                        controller, staff_session, command, reply_message_id
-                                    )
                                 if staff_data.get(
                                     "kind"
                                 ) == "staff_input" and reply_message_id in staff_data.get(
@@ -438,6 +469,7 @@ class Processor:
                         "input_expired",
                         "conflict",
                         "forbidden",
+                        "performance_forbidden",
                         "admin_only",
                         "chat_admin",
                         "group_only",
@@ -481,6 +513,50 @@ class Processor:
                     "export_file",
                 ):
                     response.callback_notice = response.text
+                    if code == "menu_expired" and command.split()[0] in (
+                        "slmenu",
+                        "slact",
+                        "slopt",
+                        "slrev",
+                        "sldraft",
+                        "slformat",
+                    ):
+                        try:
+                            card_id = UUID(command.split()[1])
+                            rows = await uow.store.find(Confirmation, id=card_id, chat_id=chat_id)
+                            if rows:
+                                payload = SetlistMenus.data(rows[0])
+                                if (
+                                    payload.get("kind") == CARD
+                                    and payload.get("owner_id") in (None, str(user.id))
+                                    and (message_id is None or message_id in payload["message_ids"])
+                                ):
+                                    group_id = UUID(payload["group_id"])
+                                    concert_id = UUID(payload["concert_id"])
+                                    if not private:
+                                        require(
+                                            bool(
+                                                await uow.store.find(
+                                                    ChatBinding, group_id=group_id, chat_id=chat_id
+                                                )
+                                            ),
+                                            "forbidden",
+                                        )
+                                    await controller.setlists.load(group_id, concert_id)
+                                    return Response(
+                                        response.text,
+                                        [
+                                            (
+                                                tr(controller.language, "open_setlist"),
+                                                f"my_concert {concert_id.hex}"
+                                                if private
+                                                else f"use_concert {concert_id}",
+                                            )
+                                        ],
+                                        callback_notice=response.callback_notice,
+                                    )
+                        except (AppError, ValueError, IndexError, KeyError):
+                            pass
                     return response
                 if code == "conflict":
                     try:

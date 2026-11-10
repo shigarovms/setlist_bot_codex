@@ -243,6 +243,10 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
                                 user_id=UUID(request_data["requester_id"]),
                                 status="active",
                             )
+                            and event.concert_id
+                            in await uow.store.visible_concert_ids(
+                                UUID(request_data["requester_id"]), group.id
+                            )
                         ):
                             if (
                                 request_data.get("kind") == REQUEST
@@ -288,7 +292,7 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
                             event.payload["setlist_snapshot"],
                             concert,
                             event.payload["setlist_version"],
-                            private=True,
+                            proposal=True,
                             prefix=event.text[: event.monospace_offset],
                         )
                 sent_messages = await send_response(bot, event.chat_id, response)

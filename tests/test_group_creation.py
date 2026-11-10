@@ -205,7 +205,7 @@ async def test_concurrent_admins_can_create_only_one_group_in_same_chat(engine, 
 
 def test_group_menu_has_requested_description_and_remains_admin_scoped():
     commands = {command.command: command.description for command in menu_commands("admin", "ru")}
-    assert commands["new_band"] == "Создать новый коллектив"
+    assert commands["new_band"] == "Подключить коллектив"
     assert "group" not in commands
     assert "new_band" not in [command.command for command in menu_commands("private", "ru")]
 
@@ -228,8 +228,11 @@ async def test_start_has_three_steps_with_valid_public_commands_and_fits_descrip
     assert commands == {"new_band", "register", "concerts", "calendar", "help", "support"}
     assert commands <= DESCRIPTIONS.keys()
     help_response = await send("/help", private=True, chat=1)
-    assert "/new_band" in help_response.text
-    assert "group" not in re.findall(r"/([a-z_]+)", help_response.text)
+    assert len(help_response.buttons) == 6
+    topic = await send(help_response.buttons[0][1], private=True, chat=1, callback=True)
+    assert "/new_band" in topic.text and "/register" in topic.text
+    assert "group" not in re.findall(r"/([a-z_]+)", topic.text)
+    assert topic.buttons[0][1] == "help"
 
 
 @pytest.mark.parametrize("language", ["ru", "en"])

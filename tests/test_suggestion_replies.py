@@ -46,6 +46,7 @@ def copy_button(response):
     return next(data for _, data in response.buttons if data.startswith("copy_list "))
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_empty_concert_button_and_reply_create_first_variant_for_another_member(
     engine, world
 ):
@@ -64,6 +65,7 @@ async def test_empty_concert_button_and_reply_create_first_variant_for_another_m
         assert not await uow.store.find(Outbox)
 
 
+@pytest.mark.usefixtures("invited_member")
 @pytest.mark.parametrize("body", ["Комета\nКомета", "/suggestion\nКомета\nКомета"])
 async def test_reply_to_working_message_uses_original_concert_after_switch(engine, world, body):
     send = messenger(engine)
@@ -96,6 +98,7 @@ async def test_command_without_list_prompts_and_command_reply_keeps_anchor(engin
     assert "Не удалось" in (await send("/suggest")).text
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_stale_reply_and_stale_button_show_current_original_concert_without_overwrite(
     engine, world
 ):
@@ -115,6 +118,7 @@ async def test_stale_reply_and_stale_button_show_current_original_concert_withou
         assert (await service.read(world.group.id, world.concert2.id))[1] == 0
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_private_reply_changes_only_owners_draft_and_does_not_publish(engine, world):
     send = messenger(engine)
     await send(f"/use_group {world.group.id}", actor=2, private=True)
@@ -122,7 +126,7 @@ async def test_private_reply_changes_only_owners_draft_and_does_not_publish(engi
     prompt = await send(copy_button(shown), actor=2, private=True, remember=101)
     assert "/publish" not in prompt.text
     own = await send("Комета\nКомета", actor=2, private=True, reply=101)
-    assert "Личный черновик" in own.text
+    assert "Ваш черновик · виден только вам" in own.text
     async with PostgresUnitOfWork(engine) as uow:
         service = Setlists(uow.store, world.member)
         assert (await service.read(world.group.id, world.concert.id, private=True))[1] == 1
@@ -132,6 +136,7 @@ async def test_private_reply_changes_only_owners_draft_and_does_not_publish(engi
     assert await send("Комета", reply=101) is None
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_reply_checks_membership_approval_expiry_and_ignores_unrelated_messages(
     engine, world
 ):
@@ -156,6 +161,7 @@ async def test_reply_checks_membership_approval_expiry_and_ignores_unrelated_mes
         assert not await uow.store.find(SetlistMessage, chat_id=-100, message_id=100)
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_invalid_reply_is_atomic_and_can_be_corrected_on_same_prompt(engine, world):
     send = messenger(engine)
     await send(f"/use_concert {world.concert.id}")

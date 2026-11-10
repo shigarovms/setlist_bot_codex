@@ -79,13 +79,13 @@ SETLIST_SANDBOX_DIR="$PWD" bash scripts/backup-sandbox.sh
 "${compose[@]}" run --rm --no-deps --entrypoint .venv/bin/setlist-bot migrate --check
 if [[ "$calendar_enabled" == true ]]; then
   "${compose[@]}" exec -T db psql -X -U setlist -d setlist_sandbox -v ON_ERROR_STOP=1 \
-    -c 'GRANT SELECT(scope) ON calendar_subscriptions TO setlist_calendar_reader; GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch) ON gig_invitations TO setlist_calendar_reader;'
+    -c 'GRANT SELECT(scope) ON calendar_subscriptions TO setlist_calendar_reader; GRANT SELECT(role) ON memberships TO setlist_calendar_reader; GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch,expires_at) ON gig_invitations TO setlist_calendar_reader;'
 fi
 if [[ "$miniapp_enabled" == true ]]; then
   # RU: Средняя и чтение алиасов; запись каталога выполняет только bot через outbox.
   # EN: Keep catalog writes denied to the HTTP role; apply read access before restart.
   "${compose[@]}" exec -T db psql -X -U setlist -d setlist_sandbox -v ON_ERROR_STOP=1 \
-    -c 'GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp; GRANT SELECT ON song_aliases,professional_roles TO setlist_miniapp;'
+    -c 'GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp; GRANT SELECT ON song_aliases,professional_roles TO setlist_miniapp; GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch,expires_at) ON gig_invitations TO setlist_miniapp;'
 fi
 "${compose[@]}" up -d --no-build --no-deps admin
 "${compose[@]}" exec -T admin .venv/bin/python - <<'PY'

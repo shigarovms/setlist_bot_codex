@@ -14,8 +14,8 @@ from setlist_bot.calendar.settings import CalendarSettings, public_base_url
 from setlist_bot.domain.entities import (
     CalendarSubscription,
     DeploymentIdentity,
+    GigInvitation,
     Group,
-    Membership,
     now,
 )
 from setlist_bot.domain.rules import AppError
@@ -45,7 +45,10 @@ async def client_for(engine):
         yield client
 
 
-async def test_feed_only_contains_active_memberships_and_no_personal_or_account_data(engine, world):
+@pytest.mark.usefixtures("invited_member")
+async def test_feed_only_contains_invited_performances_and_no_personal_or_account_data(
+    engine, world
+):
     _, token, _ = await issue(engine, world.member)
     async with PostgresUnitOfWork(engine) as uow:
         await ConcertDetails(uow.store, world.admin).update(
@@ -83,6 +86,7 @@ async def test_group_subscription_scope_and_member_can_subscribe_but_cannot_edit
             )
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_etag_refreshes_metadata_and_revoked_access_never_gets_cached_304(engine, world):
     _, token, _ = await issue(engine, world.member)
     path = f"/calendar/{token}.ics"
@@ -99,8 +103,8 @@ async def test_etag_refreshes_metadata_and_revoked_access_never_gets_cached_304(
         assert "Казань" in await changed.text()
         etag = changed.headers["ETag"]
         async with PostgresUnitOfWork(engine) as uow:
-            row = (await uow.store.find(Membership, user_id=world.member.id))[0]
-            row.status = "pending"
+            for row in await uow.store.find(GigInvitation, user_id=world.member.id):
+                row.status = "cancelled"
         denied = await client.get(path, headers={"If-None-Match": etag})
         assert denied.status == 200 and "BEGIN:VEVENT" not in await denied.text()
         assert len(client.server.app[CACHE]) >= 1

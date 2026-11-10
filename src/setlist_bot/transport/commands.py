@@ -39,130 +39,34 @@ Menu = Literal["default", "private", "group", "admin"]
 # Only user-facing commands belong here; callbacks and commands requiring opaque
 # identifiers are intentionally excluded. Backend permissions remain authoritative.
 DESCRIPTIONS: dict[str, tuple[str, str]] = {
-    "team": ("Составы и знакомые исполнители (админ)", "Lineups and known performers (admin)"),
-    "lineup": ("Состав выбранного выступления", "Selected performance lineup"),
-    "my_gigs": ("Мои участия и приглашения", "My assignments and invitations"),
-    "set_no_concert_days": ("Отметить личную занятость", "Mark a private busy period"),
-    "reminders": ("Настроить напоминания о сет-листах", "Setlist reminders"),
-    "start": ("Начать работу с ботом", "Start using the bot"),
-    "support": ("Связаться с поддержкой", "Contact support"),
-    "help": ("Команды и примеры использования", "Commands and examples"),
-    "profile": ("Мой профиль и профессиональные роли", "My profile and professional roles"),
-    "groups": ("Выбрать музыкальный коллектив", "Select a musical group"),
-    "register": (
-        "Вступить в коллектив и указать роли",
-        "Join a band and specify your roles",
-    ),
-    "catalog": ("Репертуар и поиск песен", "Repertoire and song search"),
-    "archived": ("Архивные песни", "Archived songs"),
-    "concerts": ("Выбрать выступление", "Select a concert"),
-    "calendar": ("Подписка на календарь выступлений", "Subscribe to performance calendars"),
-    "all_my_concerts": (
-        "Все мои выступления во всех коллективах",
-        "My performances across all groups",
-    ),
-    "setlist": ("Сет-лист выбранного выступления", "Setlist for the selected concert"),
-    "shared": ("Показать общий сет-лист", "Show the shared setlist"),
-    "export": ("PDF утверждённого сет-листа", "Approved setlist PDFs"),
-    "add": ("Добавить песни в сет-лист", "Add songs to the setlist"),
-    "suggestion": (
-        "Создать свой вариант из списка песен",
-        "Create your variant from a list of songs",
-    ),
-    "versions": ("Варианты сет-листа и история", "Setlist variants and history"),
-    "history": ("История изменений сет-листа", "Setlist change history"),
-    "pause": ("Настроить среднюю паузу между песнями", "Set the average pause between songs"),
-    "move": ("Переставить: /move откуда куда", "Reorder: /move from to"),
-    "remove": ("Убрать песню: /remove позиция", "Remove a song: /remove position"),
-    "add_new_songs": (
-        "Добавить новые песни или вставить таблицу",
-        "Add new songs or paste a table",
-    ),
-    "edit": ("Изменить песню или предложить правку", "Edit a song or propose a change"),
-    "copy": ("Создать независимую копию песни", "Create an independent song copy"),
-    "alias": ("Добавить альтернативное название песни", "Add an alternative song title"),
-    "archive": ("Архивировать песню (админ)", "Archive a song (admin)"),
-    "unarchive": ("Восстановить песню из архива (админ)", "Restore an archived song (admin)"),
-    "publish": ("Предложить личный черновик группе", "Publish your personal draft to the group"),
-    "language": ("Личный язык интерфейса: ru или en", "Personal interface language: ru or en"),
-    "cancel": ("Отменить ожидающие подтверждения", "Cancel pending confirmations"),
-    "new_band": ("Создать новый коллектив", "Create a new musical group"),
-    "members": (
-        "Заявки и участники коллектива (админ)",
-        "Membership applications and members (admin)",
-    ),
-    "proposals": ("Предложения по каталогу (админ)", "Catalog proposals (admin)"),
-    "concert": (
-        "Создать новое выступление (админ)",
-        "Create a concert: date  title (admin)",
-    ),
-    "approve": ("Утвердить общий сет-лист (админ)", "Approve the shared setlist (admin)"),
-    "reopen": ("Вернуть сет-лист в работу (админ)", "Reopen the shared setlist (admin)"),
-    "group_language": ("Язык коллектива: ru или en (админ)", "Group language: ru or en (admin)"),
-    "group_pause": (
-        "Пауза для новых выступлений (админ)",
-        "Default pause for new concerts (admin)",
-    ),
-    "backup": ("Скачать общие данные ZIP (админ)", "Download shared data as ZIP (admin)"),
-    "delete_concert": (
-        "Удалить выбранное выступление (админ)",
-        "Delete the selected concert (admin)",
-    ),
-    "delete_group": (
-        "Удалить выбранный коллектив (админ)",
-        "Delete the selected musical group (admin)",
-    ),
-    "trash": ("Корзина и восстановление (админ)", "Trash and restoration (admin)"),
+    "support": ("Поддержка", "Support"),
+    "groups": ("Мои коллективы", "My bands"),
+    "concerts": ("Выступления коллектива", "Band performances"),
+    "my_gigs": ("Моё расписание", "My schedule"),
+    "catalog": ("Репертуар", "Repertoire"),
+    "profile": ("Мой профиль", "My profile"),
+    "calendar": ("Подключить календарь", "Connect a calendar"),
+    "help": ("Помощь", "Help"),
+    "register": ("Вступить в коллектив", "Join the band"),
+    "new_band": ("Подключить коллектив", "Connect a band"),
+    "add_new_songs": ("Добавить песни", "Add songs"),
+    "concert": ("Создать выступление", "Create a performance"),
 }
-COMMON = (
-    "support",
-    "groups",
-    "concerts",
-    "start",
-    "add_new_songs",
-    "help",
-    "catalog",
-    "setlist",
-    "shared",
-    "export",
-    "add",
-    "suggestion",
-    "versions",
-    "history",
-    "pause",
-    "move",
-    "remove",
-    "edit",
-    "copy",
-    "alias",
-    "archived",
-    "cancel",
-    "lineup",
-)
-ADMIN = (
-    "reminders",
-    "members",
-    "team",
-    "proposals",
-    "concert",
-    "group_language",
-    "group_pause",
-    "archive",
-    "unarchive",
-    "backup",
-    "delete_concert",
-    "delete_group",
-    "trash",
-)
+GROUP = ("support", "concerts", "catalog", "register", "help", "new_band")
 MENUS: dict[Menu, tuple[str, ...]] = {
-    "default": COMMON[:6],
-    "private": COMMON[:6]
-    + ("profile", "all_my_concerts", "calendar", "my_gigs", "set_no_concert_days")
-    + COMMON[6:]
-    + ("publish", "language")
-    + ADMIN,
-    "group": COMMON + ("register", "new_band"),
-    "admin": COMMON + ("register", "new_band", "approve", "reopen") + ADMIN,
+    "default": ("support", "help"),
+    "private": (
+        "support",
+        "groups",
+        "concerts",
+        "my_gigs",
+        "catalog",
+        "profile",
+        "calendar",
+        "help",
+    ),
+    "group": GROUP,
+    "admin": GROUP + ("add_new_songs", "concert"),
 }
 GLOBAL_SCOPES: tuple[tuple[BotCommandScopeUnion, Menu], ...] = (
     (BotCommandScopeDefault(), "default"),
@@ -174,25 +78,10 @@ GLOBAL_SCOPES: tuple[tuple[BotCommandScopeUnion, Menu], ...] = (
 
 def menu_commands(menu: Menu, language: str) -> list[BotCommand]:
     descriptions = 1 if language == "en" else 0
-    result = [
+    return [
         BotCommand(command=name, description=DESCRIPTIONS[name][descriptions])
         for name in MENUS[menu]
     ]
-    if menu == "private":
-        result = [
-            BotCommand(
-                command=c.command,
-                description=(
-                    "Мой черновик выбранного выступления"
-                    if language != "en"
-                    else "My draft for the selected concert"
-                )
-                if c.command == "setlist"
-                else c.description,
-            )
-            for c in result
-        ]
-    return result
 
 
 def scope_key(scope: BotCommandScopeUnion) -> str:

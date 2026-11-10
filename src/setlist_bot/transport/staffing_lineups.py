@@ -114,7 +114,7 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
                 action(c, "templates", group_id=str(group.id), event_id=str(event.id)),
             )
         )
-    buttons.append((c.t("menu_back"), f"use_concert {event.id}"))
+    buttons.append((c.t("back_performance"), f"use_concert {event.id}"))
     return Response("\n".join(lines) or c.t("staff_empty_lineup"), buttons)
 
 

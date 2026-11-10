@@ -49,8 +49,8 @@ def test_support_public_but_setup_hidden():
     assert "set_support_chat" not in DESCRIPTIONS
     assert all("set_support_chat" not in commands for commands in MENUS.values())
     for language in ("ru", "en"):
-        assert "/support" in tr(language, "help")
-        assert "set_support_chat" not in tr(language, "help")
+        assert "/support" in tr(language, "help_intro")
+        assert "set_support_chat" not in tr(language, "help_intro")
 
 
 async def test_owner_bootstrap_and_numeric_identity(engine, world):

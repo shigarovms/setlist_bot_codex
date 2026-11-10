@@ -25,7 +25,7 @@ def test_numeric_button_dates_do_not_change_human_setlist_dates():
     assert button_date(date(2027, 1, 1)) == "01.01.2027"
     assert date_label(date(2026, 7, 26)) == "26 июля"
     assert date_label(date(2002, 3, 13)) == "2002 год 13 марта"
-    assert "all_my_concerts" in MENUS["private"]
+    assert "all_my_concerts" not in MENUS["private"]
     assert "all_my_concerts" not in MENUS["group"]
 
 
@@ -72,6 +72,7 @@ async def test_all_groups_need_no_selected_group_and_private_list_does_not_creat
         assert context.concert_id == world.other_concert.id
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_cross_group_list_does_not_leak_into_chats_or_to_nonmembers(engine, world):
     send = sender(engine)
     member = await send("/all_my_concerts", private=True, actor=2)
@@ -91,6 +92,7 @@ async def test_cross_group_list_does_not_leak_into_chats_or_to_nonmembers(engine
     assert "личном чате" in public_callback.text
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_trash_and_membership_changes_invalidate_list_and_old_selection(engine, world):
     send = sender(engine)
     first = await send("/all_my_concerts", private=True, actor=2)
@@ -98,6 +100,10 @@ async def test_trash_and_membership_changes_invalidate_list_and_old_selection(en
     async with PostgresUnitOfWork(engine) as uow:
         member = (await uow.store.find(Membership, user_id=world.member.id))[0]
         member.status = "pending"
+        from setlist_bot.domain.entities import GigInvitation
+
+        for invitation in await uow.store.find(GigInvitation, user_id=world.member.id):
+            invitation.status = "cancelled"
         group = await uow.store.get(Group, world.other.id)
         from setlist_bot.domain.entities import now
 

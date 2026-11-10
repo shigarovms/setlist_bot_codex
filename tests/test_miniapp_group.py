@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from test_miniapp import settings, signed, song
 
@@ -28,6 +29,7 @@ async def template(engine, world, private=False):
         return row.id
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_public_launch_is_personal_and_target_is_taken_from_signed_telegram_data(
     engine, world
 ):
@@ -70,6 +72,7 @@ async def test_public_launch_is_personal_and_target_is_taken_from_signed_telegra
         assert not await uow.store.find(Submission) and not await uow.store.find(Outbox)
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_method_menu_has_editor_first_and_text_list_is_sent_only_once(engine, world):
     p = Processor(
         engine,
@@ -96,6 +99,7 @@ async def test_method_menu_has_editor_first_and_text_list_is_sent_only_once(engi
     assert group_text.force_reply and not group_text.deliveries
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_publish_is_explicit_idempotent_and_waits_for_worker_delivery(engine, world):
     from aiogram import Bot
     from test_miniapp import session

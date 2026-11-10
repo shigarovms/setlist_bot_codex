@@ -71,6 +71,7 @@ async def test_exact_user_add_list_is_atomic_ordered_and_single_numbered(engine,
     assert "пауза" in before.text and "00:30" in before.text
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_suggestions_replace_whole_setlist_and_number_each_proposer(engine, world):
     await repertoire(engine, world)
     send = messenger(engine)
@@ -108,6 +109,7 @@ async def test_suggestions_replace_whole_setlist_and_number_each_proposer(engine
     }
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_private_suggestion_stays_private_until_explicit_publish_and_apply(engine, world):
     await repertoire(engine, world)
     send = messenger(engine)
@@ -115,7 +117,7 @@ async def test_private_suggestion_stays_private_until_explicit_publish_and_apply
     await send(f"/use_concert {world.concert.id}", actor=2, private=True)
     await send("/add\nКомета\nРадуга", actor=2, private=True)
     own = await send("/suggestion\n" + SONG_LIST, actor=2, private=True)
-    assert "Личный черновик" in own.text and "6. VIBY" in own.text
+    assert "Ваш черновик · виден только вам" in own.text and "6. VIBY" in own.text
     async with PostgresUnitOfWork(engine) as uow:
         common, version, _ = await Setlists(uow.store, world.admin).read(
             world.group.id, world.concert.id
@@ -159,6 +161,7 @@ async def test_invalid_or_ambiguous_line_leaves_entire_setlist_untouched(engine,
         )
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_batch_alias_normalization_limits_rbac_and_approval(engine, world):
     async with PostgresUnitOfWork(engine) as uow:
         catalog = Catalog(uow.store, world.admin)
@@ -195,6 +198,7 @@ async def test_batch_alias_normalization_limits_rbac_and_approval(engine, world)
         assert (await service.read(world.group.id, world.concert.id))[0] == approved
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_concurrent_batch_replacements_produce_one_version_and_one_conflict(engine, world):
     async def replace(user):
         try:

@@ -82,8 +82,8 @@ def grants():
         "GRANT SELECT(id,owner_id,group_id,token_hash,language,enabled,version,created_at,scope) "
         f"ON calendar_subscriptions TO {ROLE};\n"
         f"GRANT SELECT(id,name,deleted_at) ON groups TO {ROLE};\n"
-        f"GRANT SELECT(group_id,user_id,status) ON memberships TO {ROLE};\n"
-        "GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch) "
+        f"GRANT SELECT(group_id,user_id,status,role) ON memberships TO {ROLE};\n"
+        "GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch,expires_at) "
         f"ON gig_invitations TO {ROLE};\n"
         f"ALTER ROLE {ROLE} SET default_transaction_read_only = on;\n"
     )

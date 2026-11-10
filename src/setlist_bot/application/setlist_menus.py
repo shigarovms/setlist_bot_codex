@@ -56,6 +56,7 @@ class SetlistMenus:
             and concert.lifecycle_version == data["concert_epoch"],
             "menu_expired",
         )
+        await Groups(self.store, self.user).check_performance_visibility(group_id, concert_id)
         if fresh:
             snapshot, version, approved = await Setlists(self.store, self.user).read(
                 group_id, concert_id, private=data["personal"]
@@ -95,7 +96,7 @@ class SetlistMenus:
     async def request(
         self, card: Confirmation, data: dict[str, Any], operation: str
     ) -> tuple[Confirmation, User, bool]:
-        require(not data["personal"] and self.chat_id < 0, "group_only")
+        require(not data["personal"], "group_only")
         await self.validate(data, fresh=True)
         require(
             operation in ("approve", "reopen") and data["approved"] == (operation == "reopen"),
@@ -161,25 +162,20 @@ class SetlistMenus:
         )
         await Groups(self.store, self.user).access(UUID(data["group_id"]), admin=True)
         await self.validate(data, fresh=True)
-        require(
-            bool(
-                await self.store.find(
-                    ChatBinding, group_id=UUID(data["group_id"]), chat_id=data["source_chat_id"]
-                )
-            ),
-            "menu_expired",
-        )
-        require(
-            bool(
-                await self.store.find(
-                    Membership,
-                    group_id=UUID(data["group_id"]),
-                    user_id=UUID(data["requester_id"]),
-                    status="active",
-                )
-            ),
-            "menu_expired",
-        )
+        group_id = UUID(data["group_id"])
+        requester = await self.store.get(User, UUID(data["requester_id"]))
+        if data["private_chat"]:
+            require(data["source_chat_id"] == requester.telegram_id, "menu_expired")
+        else:
+            require(
+                bool(
+                    await self.store.find(
+                        ChatBinding, group_id=group_id, chat_id=data["source_chat_id"]
+                    )
+                ),
+                "menu_expired",
+            )
+        await Groups(self.store, requester).performance_access(group_id, UUID(data["concert_id"]))
         if accept:
             service = Setlists(self.store, self.user)
             operation = service.approve if data["operation"] == "approve" else service.reopen

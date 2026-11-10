@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from itertools import count
 
+import pytest
 from aiogram.types import Chat, Message
 from test_calendars import KEY
 
@@ -84,6 +85,7 @@ async def test_calendar_ui_issues_link_only_in_private_and_confirms_rotation_can
     assert "cal_scope all" in dict((await send("/start calendar")).buttons).values()
 
 
+@pytest.mark.usefixtures("invited_member")
 async def test_subscriptions_can_be_created_by_members_and_deep_link_rechecks_access(engine, world):
     send = sender(engine)
     created = await send(f"cal_create {world.group.id.hex}", actor=2)

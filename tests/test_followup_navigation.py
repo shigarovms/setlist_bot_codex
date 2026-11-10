@@ -40,7 +40,7 @@ async def test_deletion_retires_shared_and_private_setlist_buttons_without_resen
     deleted = await send(confirm)
     assert [label for label, _ in deleted.buttons] == [
         "Связаться с поддержкой",
-        "◀️ Назад к выступлениям",
+        "◀️ К выступлениям",
     ]
     async with PostgresUnitOfWork(engine) as uow:
         assert len(await uow.store.find(Outbox, support_kind="retire", sent=False)) == 2
@@ -54,7 +54,7 @@ async def test_deletion_retires_shared_and_private_setlist_buttons_without_resen
     for request in session.markups:
         assert [row[0].text for row in request.reply_markup.inline_keyboard] == [
             "Связаться с поддержкой",
-            "◀️ Назад к выступлениям",
+            "◀️ К выступлениям",
         ]
     stale = await send(public.buttons[0][1], source=100)
     assert not stale.suggestion_template_id

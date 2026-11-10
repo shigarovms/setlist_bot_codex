@@ -112,10 +112,10 @@ if [[ "$public_enabled" == true ]]; then
   # RU: Публичный календарь читает назначения, но не личную занятость и предпочтения.
   # EN: Narrow read grants only; no access to private availability or contact preferences.
   "${compose[@]}" exec -T db psql -X -U setlist -d setlist -v ON_ERROR_STOP=1 \
-    -c 'GRANT SELECT(scope) ON calendar_subscriptions TO setlist_calendar_reader; GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch) ON gig_invitations TO setlist_calendar_reader;'
+    -c 'GRANT SELECT(scope) ON calendar_subscriptions TO setlist_calendar_reader; GRANT SELECT(role) ON memberships TO setlist_calendar_reader; GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch,expires_at) ON gig_invitations TO setlist_calendar_reader;'
   # RU/EN: Existing Mini App deployments need the pause setting and alias read grant.
   "${compose[@]}" exec -T db psql -X -U setlist -d setlist -v ON_ERROR_STOP=1 \
-    -c 'GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp; GRANT SELECT ON song_aliases,professional_roles TO setlist_miniapp;'
+    -c 'GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp; GRANT SELECT ON song_aliases,professional_roles TO setlist_miniapp; GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch,expires_at) ON gig_invitations TO setlist_miniapp;'
   "${compose[@]}" up -d --no-build --no-deps calendar miniapp
   "${compose[@]}" exec -T miniapp .venv/bin/python - <<'PY'
 import time

@@ -592,13 +592,22 @@ class Controller:
                 private=self.private,
             )
             return await self._show(context)
-        if command in ("start", "help"):
-            if command == "start" and args == "groups":
-                return await self.execute("groups")
-            if command == "start" and args == "all_my_concerts":
-                return await self.execute("all_my_concerts")
+        if command == "help":
+            topics = ("start", "events", "catalog", "setlists", "team", "calendar")
+            if args in topics:
+                return Response(
+                    self.t("help_" + args),
+                    [(self.t("help_back"), "help")],
+                )
             return Response(
-                self.t("welcome" if command == "start" else "help"),
+                self.t("help_intro"),
+                [(self.t("help_title_" + topic), "help " + topic) for topic in topics],
+            )
+        if command == "start":
+            if args in ("groups", "all_my_concerts"):
+                return await self.execute(args)
+            return Response(
+                self.t("welcome"),
                 [
                     (
                         self.t("profile_button"),
@@ -606,9 +615,7 @@ class Controller:
                         if self.private
                         else f"https://t.me/{self.bot_username}?start=profile",
                     )
-                ]
-                if command == "start"
-                else [],
+                ],
             )
         if command == "language":
             if not args:
@@ -768,7 +775,7 @@ class Controller:
             groups = [await self.store.get(Group, m.group_id) for m in memberships]
             groups = [g for g in groups if g.deleted_at is None]
             return Response(
-                self.t("choose_group") if groups else self.t("empty"),
+                self.t("choose_group") if groups else self.t("no_bands"),
                 [(self.t("profile_button"), "profile")]
                 + [(g.name, f"use_group {g.id}") for g in groups],
             )
@@ -784,14 +791,18 @@ class Controller:
                     ],
                 )
             fields = args.split()
+            admin_only = bool(fields and fields[0] == "admin")
+            if admin_only:
+                fields = fields[1:]
             past = bool(fields and fields[0] == "past")
             if past:
                 fields = fields[1:]
             require(len(fields) <= 1, "input")
             page = int(fields[0]) if fields else 0
             overview = PersonalPerformances(self.store, self.user)
-            performances, more = await overview.page(page, past=past)
-            performance_prefix = "all_my_concerts past" if past else "all_my_concerts"
+            performances, more = await overview.page(page, past=past, admin_only=admin_only)
+            overview_action = "all_my_concerts admin" if admin_only else "all_my_concerts"
+            performance_prefix = overview_action + (" past" if past else "")
             buttons = [
                 (
                     " ".join(part for part in (button_date(c.date), g.name, c.title) if part),
@@ -799,14 +810,16 @@ class Controller:
                 )
                 for c, g in performances
             ]
-            if not past and await overview.has_past():
-                buttons.insert(0, (self.t("past_concerts"), "all_my_concerts past"))
+            if not past and await overview.has_past(admin_only=admin_only):
+                buttons.insert(0, (self.t("past_concerts"), overview_action + " past"))
             if page:
                 buttons.append((self.t("music_prev"), f"{performance_prefix} {page - 1}"))
             if more:
                 buttons.append((self.t("music_next"), f"{performance_prefix} {page + 1}"))
             if past:
-                buttons.append((self.t("back_concerts"), "all_my_concerts"))
+                buttons.append((self.t("back_concerts"), overview_action))
+            elif admin_only:
+                buttons.append((self.t("staff_my"), "my_gigs"))
             if self.calendar_public_base_url:
                 buttons.append((self.t("calendar_entry"), "calendar"))
             return Response(
@@ -814,18 +827,35 @@ class Controller:
                 if past
                 else self.t("all_my_concerts_title")
                 if performances
-                else self.t("empty"),
+                else self.t("no_visible_performances"),
                 buttons,
             )
         if command == "my_concert":
             require(self.private, "private_only")
             concert = await self.store.get(Concert, UUID(args))
-            # RU: Старая кнопка не обходит отзыв доступа. EN: Reuse normal access checks.
+            # Session performers open their own invitation without selecting a band.
+            if not await self.store.find(
+                Membership, group_id=concert.group_id, user_id=self.user.id, status="active"
+            ):
+                from setlist_bot.application.staffing import OPEN, Staffing
+                from setlist_bot.domain.entities import GigInvitation
+                from setlist_bot.transport.staffing import invitation_view
+
+                group = await self.store.get(Group, concert.group_id, lock=True)
+                invitations = await self.store.find(
+                    GigInvitation, concert_id=concert.id, group_id=group.id, user_id=self.user.id
+                )
+                for invitation in sorted(invitations, key=lambda row: row.status != "confirmed"):
+                    if invitation.status in OPEN | {"confirmed"} and Staffing.valid(
+                        invitation, concert, group
+                    ):
+                        return await invitation_view(self, invitation.id)
+                require(False, "performance_forbidden")
             await self.setlists.load(concert.group_id, concert.id)
             context = await self.groups.context(self.chat_id, True)
             context.group_id, context.concert_id = concert.group_id, concert.id
             context.observed_version, context.selected_song_id = None, None
-            return await self._show(context)
+            return await self._show(context, prefer_approved=True)
         context = await self.groups.context(self.chat_id, self.private)
         if command == "use_group":
             require(self.private, "private_only")
@@ -1206,7 +1236,10 @@ class Controller:
             response = Response(
                 group.name
                 + "\n\n"
-                + ("\n\n".join(self._song_card(s) for s in songs) or self.t("empty")),
+                + (
+                    "\n\n".join(self._song_card(s) for s in songs)
+                    or self.t("catalog_no_matches" if args else "catalog_empty_state")
+                ),
                 [(self.t("song_open", name=s.title), f"show_song {s.id}") for s in songs],
             )
             response.articles = catalog_articles(
@@ -1296,6 +1329,11 @@ class Controller:
             selected_field_song = await self.catalog.song(group_id, context.selected_song_id)
             field = command.removeprefix("edit_")
             data = {key: getattr(selected_field_song, key) for key in SONG_FIELDS}
+            if field == "bpm" and args != "-":
+                require(
+                    args.isascii() and args.isdigit() and len(args) <= 4 and 1 <= int(args) <= 1000,
+                    "song_bpm",
+                )
             data[field] = (
                 (None if args == "-" else int(args))
                 if field == "bpm"
@@ -1339,6 +1377,16 @@ class Controller:
                 provided = len(parts)
                 parts += [""] * (5 - len(parts))
                 parts[2:] = ["" if part == "-" else part for part in parts[2:]]
+                require(bool(parts[0]), "song_title_missing")
+                bpm = parts[2]
+                require(
+                    not bpm
+                    or bpm.isascii()
+                    and bpm.isdigit()
+                    and len(bpm) <= 4
+                    and 1 <= int(bpm) <= 1000,
+                    "song_bpm",
+                )
                 data = {
                     "title": parts[0],
                     "duration_seconds": duration(parts[1]),
@@ -1521,10 +1569,11 @@ class Controller:
             return self._concert_settings(concert)
         if command in ("concerts", "past_concerts"):
             past = command == "past_concerts"
+            visible = await self.store.visible_concert_ids(self.user.id, group_id)
             concerts = sorted(
                 [
                     c
-                    for c in await self.store.find(Concert, group_id=group_id, deleted_at=None)
+                    for c in await self.store.get_many(Concert, visible)
                     if (c.date < today()) == past
                 ],
                 key=lambda c: (c.date, str(c.id)),
@@ -1555,16 +1604,27 @@ class Controller:
                     )
                     if sum(item.deleted_at is None for item in mine) > 1:
                         buttons.insert(0, (self.t("my_groups"), "groups"))
-            buttons.append((self.t("new_concert"), "concert"))
+            admin = bool(
+                await self.store.find(
+                    Membership,
+                    group_id=group_id,
+                    user_id=self.user.id,
+                    role="admin",
+                    status="active",
+                )
+            )
+            if not self.private or admin:
+                buttons.append((self.t("new_concert"), "concert"))
+            title = self.t("past_concerts") if past else self.t("concerts_heading", name=group.name)
             return Response(
-                self.t("past_concerts") if past else self.t("concerts_heading", name=group.name),
+                title if concerts else title + "\n\n" + self.t("no_visible_performances"),
                 buttons,
             )
         if command == "use_concert":
             await self.setlists.load(group_id, UUID(args))
             context.concert_id = UUID(args)
             context.observed_version = None
-            return await self._show(context)
+            return await self._show(context, prefer_approved=True)
         if command == "apply_submission":
             require(not self.private, "group_only")
             submitted = await self.store.get(Submission, UUID(args))
@@ -2053,7 +2113,13 @@ class Controller:
         return Response("\n\n".join(lines), input_rejected=True)
 
     def _concert_settings(self, concert: Concert, *, created: bool = False) -> Response:
-        text = concert_label(concert, self.language) + "\n\n" + self.t("concert_details_intro")
+        text = (
+            concert_label(concert, self.language)
+            + "\n\n"
+            + self.t("concert_settings")
+            + "\n"
+            + self.t("concert_details_intro")
+        )
         buttons = []
         for command, value, label in (
             ("concert_title", concert.title, "concert_title_label"),
@@ -2123,6 +2189,18 @@ class Controller:
                 concert = await self.store.get(Concert, context.concert_id)
                 prefix += concert_label(concert, self.language) + "\n"
                 context.observed_version = version
+                if (
+                    command == "pause"
+                    and self.private
+                    and await self.store.find(
+                        Membership,
+                        group_id=group.id,
+                        user_id=self.user.id,
+                        role="admin",
+                        status="active",
+                    )
+                ):
+                    detail += "\n" + self.t("pause_admin_scope")
             if command in ("edit", "copy", "alias") and context.selected_song_id is not None:
                 song = await self.catalog.song(context.group_id, context.selected_song_id)
                 detail = self.t(
@@ -2834,86 +2912,86 @@ class Controller:
     ) -> list[tuple[str, str]]:
         require(level in ("main", "options", "variants"), "input")
         key = card.id.hex
-        if level == "main":
-            proposal = (
-                f"copy_list {UUID(data['template_id']).hex}"
-                if data["template_id"]
-                else f"slact {key} reopen"
+        group_id, concert_id = UUID(data["group_id"]), UUID(data["concert_id"])
+        admin = bool(
+            await self.store.find(
+                Membership, group_id=group_id, user_id=self.user.id, role="admin", status="active"
             )
-            if data["template_id"] and self._direct_editor():
-                proposal = self._editor_link(UUID(data["template_id"]))
-            buttons = [
-                (self.t("copy_variant"), proposal),
-                (self.t("menu_options"), f"slmenu {key} options"),
-            ]
-            if not data["private_chat"] and (
-                data["approved"]
-                or any(
+        )
+        if level == "main":
+            buttons: list[tuple[str, str]] = []
+            if data["approved"]:
+                buttons.extend(
+                    (self.t("download_pdf"), callback)
+                    for _, callback in data["options"]
+                    if callback.startswith("export_menu ")
+                )
+            elif data["template_id"]:
+                template = UUID(data["template_id"])
+                editor = (
+                    self._editor_link(template)
+                    if self._direct_editor()
+                    else f"copy_list {template.hex}"
+                )
+                buttons.append((self.t("open_editor"), editor))
+
+            if data["personal"]:
+                shared_snapshot, _, _ = await self.setlists.read(group_id, concert_id)
+                if editable_content(data["snapshot"]) != editable_content(shared_snapshot):
+                    buttons.append((self.t("draft_publish"), f"sldraft {key} publish"))
+            else:
+                buttons.append((self.t("staff_lineup"), f"sf_lineup {concert_id.hex}"))
+                if data["approved"]:
+                    if admin or not self.private:
+                        buttons.append((self.t("menu_edit"), f"slact {key} reopen"))
+                elif any(
                     not is_pause(item)
                     for block in data["snapshot"]["blocks"]
                     for item in block["items"]
-                )
-            ):
-                buttons.append(
-                    (
-                        self.t("menu_edit" if data["approved"] else "menu_approve"),
-                        f"slact {key} {'reopen' if data['approved'] else 'approve'}",
+                ):
+                    buttons.append(
+                        (
+                            self.t(
+                                "request_approval_button"
+                                if self.private and not admin
+                                else "menu_approve"
+                            ),
+                            f"slact {key} approve",
+                        )
                     )
-                )
-            if data["approved"]:
-                exports = [
-                    (label, action)
-                    for label, action in data["options"]
-                    if action.startswith("export_menu ")
-                ]
-                buttons = exports + buttons[1:]
-            if data["personal"]:
-                shared_snapshot, _, _ = await self.setlists.read(
-                    UUID(data["group_id"]), UUID(data["concert_id"])
-                )
-                buttons = [(self.t("draft_edit"), proposal)]
-                if editable_content(data["snapshot"]) != editable_content(shared_snapshot):
-                    buttons.append((self.t("draft_publish"), f"sldraft {key} publish"))
-                buttons.append((self.t("menu_options"), f"slmenu {key} options"))
-            buttons.append((self.t("back_concerts"), f"slmenu {key} concerts"))
-            return buttons
-        variants = (
-            []
-            if data["personal"]
-            else [
-                r
-                for r in await self.setlists.history(
-                    UUID(data["group_id"]), UUID(data["concert_id"])
-                )
-                if r.suggestion_number is not None
-            ]
-        )
-        if level == "options":
-            buttons = [
-                (self.t("export_settings"), f"slformat {key} main"),
-                (self.t("setlist_settings"), f"slsettings {key} main"),
-            ]
-            member = (
-                await self.store.find(
-                    Membership,
-                    group_id=UUID(data["group_id"]),
-                    user_id=self.user.id,
-                    status="active",
-                )
-            )[0]
-            if member.role == "admin":
-                buttons.append(
-                    (self.t("concert_settings"), f"concert_settings {data['concert_id']}")
-                )
-            buttons.append((self.t("staff_lineup"), f"sf_lineup {UUID(data['concert_id']).hex}"))
-            if variants:
-                buttons.append((self.t("menu_variants"), f"slmenu {key} variants"))
-            if self.private or member.role == "admin":
-                buttons.append((self.t("cleanup_button"), "cleanup_chat"))
             buttons.extend(
-                [(self.t("support_button"), "support"), (self.t("menu_back"), f"slmenu {key} main")]
+                [
+                    (self.t("menu_options"), f"slmenu {key} options"),
+                    (self.t("back_concerts"), f"slmenu {key} concerts"),
+                ]
             )
             return buttons
+        variants = [
+            revision
+            for revision in await self.setlists.history(group_id, concert_id)
+            if revision.suggestion_number is not None
+        ]
+        if level == "options":
+            buttons = []
+            if admin:
+                buttons.append((self.t("concert_settings"), f"concert_settings {concert_id}"))
+            if variants:
+                buttons.append((self.t("menu_variants"), f"slmenu {key} variants"))
+            if data["personal"]:
+                buttons.append((self.t("staff_lineup"), f"sf_lineup {concert_id.hex}"))
+                buttons.append((self.t("shared_title"), f"slmenu {key} shared"))
+            buttons.extend(
+                [
+                    (self.t("export_settings"), f"slformat {key} main"),
+                    (self.t("setlist_settings"), f"slsettings {key} main"),
+                ]
+            )
+            if self.private or admin:
+                buttons.append((self.t("cleanup_button"), "cleanup_chat"))
+            return buttons + [
+                (self.t("support_button"), "support"),
+                (self.t("back_performance"), f"slmenu {key} main"),
+            ]
         require(page >= 0, "input")
         page = min(page, max(0, (len(variants) - 1) // 20))
         buttons = [
@@ -2987,6 +3065,24 @@ class Controller:
             response = Response(
                 self.t("request_accepted" if values[1] == "yes" else "request_rejected")
             )
+            if data["private_chat"]:
+                response.deliveries.append(
+                    (
+                        data["source_chat_id"],
+                        Response(
+                            self.t(
+                                "request_accepted" if values[1] == "yes" else "request_rejected"
+                            ),
+                            [
+                                (
+                                    self.t("back_performance"),
+                                    f"my_concert {UUID(data['concert_id']).hex}",
+                                )
+                            ],
+                        ),
+                    )
+                )
+                return response
             if values[1] == "yes":
                 source = Controller(
                     self.store,
@@ -3095,6 +3191,9 @@ class Controller:
             self.menus.write(row, {**data, "published": True})
             return response
         if command == "slmenu":
+            if values[1] == "shared":
+                context = await self._card_context(data)
+                return await self._show(context, shared=True)
             if values[1] == "concerts":
                 await self._card_context(data)
                 return await self.execute("concerts")
@@ -3130,7 +3229,7 @@ class Controller:
             command == "slact" and values[1] in ("approve", "reopen", "return", "cancel"), "input"
         )
         await self.menus.validate(data, fresh=True)
-        require(not data["private_chat"], "group_only")
+        require(not data["personal"], "group_only")
         if values[1] == "cancel":
             return Response(
                 "",
@@ -3183,22 +3282,23 @@ class Controller:
                         ],
                     )
                 )
-                self.store.add(
-                    Outbox(
-                        group_id=group.id,
-                        concert_id=concert.id,
-                        chat_id=self.chat_id,
-                        text=self.t(
-                            "request_group",
-                            name=name,
-                            concert=concert_label(concert, self.language),
-                            action=self.t(
-                                "request_approve" if operation == "approve" else "request_edit"
+                if not self.private:
+                    self.store.add(
+                        Outbox(
+                            group_id=group.id,
+                            concert_id=concert.id,
+                            chat_id=self.chat_id,
+                            text=self.t(
+                                "request_group",
+                                name=name,
+                                concert=concert_label(concert, self.language),
+                                action=self.t(
+                                    "request_approve" if operation == "approve" else "request_edit"
+                                ),
+                                version=data["version"],
                             ),
-                            version=data["version"],
-                        ),
+                        )
                     )
-                )
             return Response(
                 "", callback_notice=self.t("request_sent" if created else "request_duplicate")
             )
@@ -3231,8 +3331,12 @@ class Controller:
         await service(UUID(data["group_id"]), UUID(data["concert_id"]), data["version"])
         return await self._refresh_card(row, data)
 
-    async def _show(self, context: Context, *, shared: bool = False) -> Response:
+    async def _show(
+        self, context: Context, *, shared: bool = False, prefer_approved: bool = False
+    ) -> Response:
         assert context.group_id is not None and context.concert_id is not None
+        if prefer_approved and self.private and not shared:
+            shared = (await self.setlists.load(context.group_id, context.concert_id)).approved
         personal = self.private and not shared
         snapshot, version, approved = await self.setlists.read(
             context.group_id, context.concert_id, private=personal
@@ -3243,7 +3347,7 @@ class Controller:
         group = await self.store.get(Group, context.group_id)
         buttons = []
         template_id = None
-        if not approved or self.private:
+        if not approved:
             edit_version = version
             if shared and self.private:
                 _, edit_version, _ = await self.setlists.read(
@@ -3298,11 +3402,14 @@ class Controller:
                 export.payload = {
                     **export.payload,
                     "menu_card_id": str(card.id),
-                    "back": f"slmenu {card.id.hex} options",
+                    "back": f"slmenu {card.id.hex} main",
                 }
+        main_buttons = await self._menu_buttons(card, self.menus.data(card), "main")
+        if any(callback.startswith("sldraft ") for _, callback in main_buttons):
+            text += "\n\n" + self.t("draft_publish_hint")
         response = Response(
             text,
-            await self._menu_buttons(card, self.menus.data(card), "main"),
+            main_buttons,
             monospace=True,
             monospace_body=text,
             suggestion_template_id=template_id,
@@ -3323,6 +3430,7 @@ class Controller:
         private: bool = False,
         approved: bool = False,
         prefix: str = "",
+        proposal: bool = False,
     ) -> Response:
         group = await self.store.get(Group, concert.group_id)
         if group.setlist_style == "article":
@@ -3340,9 +3448,12 @@ class Controller:
                     version,
                     private=private,
                     approved=approved,
+                    proposal=proposal,
                     header_only=True,
                 )
             )
+            if private and response.text.endswith(self.t("draft_publish_hint")):
+                heading += "\n" + self.t("draft_publish_hint")
             response.article_source_text = response.text
             response.articles = setlist_articles(heading, snapshot, self.language)
             response.articles_keyboard = True

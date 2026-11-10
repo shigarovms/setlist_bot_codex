@@ -45,6 +45,7 @@ def payload(world, *, create=False):
     }
 
 
+@pytest.mark.usefixtures("invited_member")
 @pytest.mark.parametrize("member", [False, True])
 @pytest.mark.parametrize("create", [False, True])
 async def test_catalog_queue_reuses_catalog_proposals_and_retry_receipts(
@@ -111,6 +112,7 @@ async def test_catalog_queue_reuses_catalog_proposals_and_retry_receipts(
         assert sorted(a.title for a in aliases) == sorted(request["fields"]["aliases"])
 
 
+@pytest.mark.usefixtures("invited_member")
 @pytest.mark.parametrize("change", ["version", "membership", "archived"])
 async def test_worker_rechecks_catalog_version_access_and_archive(engine, world, change):
     identifier, _ = await session(engine, world, member=True)
@@ -274,3 +276,69 @@ async def test_catalog_edit_preserves_approved_history_and_trash_removes_receipt
     async with PostgresUnitOfWork(engine) as uow:
         await TrashCleanup(uow.store).run(at=now() + RETENTION + timedelta(seconds=1))
         assert not await uow.store.find(Confirmation, id=UUID(queued["request"]))
+
+
+@pytest.mark.usefixtures("invited_member")
+@pytest.mark.parametrize(("value", "seconds"), [("45", 2700), ("1:15", 4500), ("-", None)])
+async def test_planned_duration_uses_versioned_worker_and_keeps_draft(
+    engine, world, value, seconds
+):
+    from setlist_bot.domain.entities import Concert
+
+    identifier, initial = await session(engine, world)
+    member, _ = await session(engine, world, member=True)
+    request = {"request_id": str(uuid4()), "expected": initial["metadata_version"], "value": value}
+    async with PostgresUnitOfWork(engine) as uow:
+        catalog = MiniCatalog(MiniDrafts(uow.store, world.member))
+        with pytest.raises(AppError, match="admin_only"):
+            await catalog.queue(member, request, planned_duration=True)
+        catalog = MiniCatalog(MiniDrafts(uow.store, world.admin))
+        queued = await catalog.queue(identifier, request, planned_duration=True)
+        assert (await uow.store.get(Concert, world.concert.id)).metadata_version == initial[
+            "metadata_version"
+        ]
+    async with Bot("123456:TEST", session=FakeTelegram()) as bot:
+        assert await deliver_one_outbox(bot, engine)
+    async with PostgresUnitOfWork(engine) as uow:
+        service = MiniDrafts(uow.store, world.admin)
+        catalog = MiniCatalog(service)
+        receipt = await catalog.queue(identifier, request, planned_duration=True)
+        assert receipt["request"] == queued["request"]
+        assert receipt["status"] == "saved" and receipt["planned_seconds"] == seconds
+        updated = await service.state(identifier)
+        assert updated["version"] == initial["version"] and updated["entries"] == initial["entries"]
+        assert updated["metadata_version"] == initial["metadata_version"] + 1
+        with pytest.raises(AppError, match="conflict"):
+            await catalog.queue(
+                identifier, {**request, "request_id": str(uuid4())}, planned_duration=True
+            )
+
+
+@pytest.mark.usefixtures("invited_member")
+async def test_planned_duration_worker_rechecks_role_after_queue(engine, world):
+    identifier, initial = await session(engine, world)
+    # Grant an additional member admin rights only while queuing.
+    async with PostgresUnitOfWork(engine) as uow:
+        membership = (await uow.store.find(Membership, user_id=world.member.id))[0]
+        membership.role = "admin"
+    member, _ = await session(engine, world, member=True)
+    async with PostgresUnitOfWork(engine) as uow:
+        request = {
+            "request_id": str(uuid4()),
+            "expected": initial["metadata_version"],
+            "value": "45",
+        }
+        queued = await MiniCatalog(MiniDrafts(uow.store, world.member)).queue(
+            member, request, planned_duration=True
+        )
+        (await uow.store.find(Membership, user_id=world.member.id))[0].role = "member"
+    async with Bot("123456:TEST", session=FakeTelegram()) as bot:
+        assert not await deliver_one_outbox(bot, engine)
+    async with PostgresUnitOfWork(engine) as uow:
+        receipt = await MiniCatalog(MiniDrafts(uow.store, world.member)).status(
+            member, UUID(queued["request"])
+        )
+        assert receipt["status"] == "failed" and receipt["error"] == "admin_only"
+        assert (await MiniDrafts(uow.store, world.admin).state(identifier))[
+            "planned_seconds"
+        ] is None
