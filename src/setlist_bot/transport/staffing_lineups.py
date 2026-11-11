@@ -15,13 +15,14 @@ from setlist_bot.domain.entities import (
     Group,
     LineupTemplate,
     Membership,
-    StaffContact,
+    StaffReplacement,
     StaffRole,
     User,
 )
 from setlist_bot.domain.rules import normalize, require
 from setlist_bot.domain.staff_input import role_person
 from setlist_bot.transport.controller import Controller, Response
+from setlist_bot.transport.response_context import staffing_context
 from setlist_bot.transport.staffing import action, prompt
 
 
@@ -66,6 +67,11 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
                 invitation.id,
             )
         )
+    requests = await c.store.find(StaffReplacement, concert_id=event.id, status="pending")
+    from setlist_bot.domain.entities import now
+
+    sources = {r.source_id for r in requests if r.expires_at > now()}
+    pending_requests = {r.id for r in requests if r.expires_at > now()}
     lines = []
     for number, slot in enumerate(slots, 1):
         active = by_slot.get(slot.id, [])
@@ -75,7 +81,34 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
         if confirmed and person:
             line += " — " + names.get(person.id, person.display_name or str(person.telegram_id))
             line = "✅ " + line
+        if confirmed and active[0].id in sources:
+            line += " · " + c.t("staff_swap_pending")
         lines.append(line)
+        for candidate in active:
+            if candidate.replacement_id in pending_requests and candidate.status in OPEN:
+                candidate_person = people[candidate.user_id]
+                key = (
+                    "staff_swap_candidate"
+                    if candidate.status == "accepted"
+                    else "staff_swap_invited"
+                )
+                lines.append("  ↳ " + c.t(key, name=person_name(candidate_person)))
+                if (
+                    admin
+                    and candidate.status == "accepted"
+                    and page * 8 <= number - 1 < (page + 1) * 8
+                ):
+                    buttons.append(
+                        (
+                            c.t("staff_approve_swap") + " · " + person_name(candidate_person),
+                            action(
+                                c,
+                                "swap",
+                                invitation_id=str(candidate.id),
+                                version=candidate.version,
+                            ),
+                        )
+                    )
         if admin and page * 8 <= number - 1 < (page + 1) * 8:
             label = (
                 c.t("staff_change_person", name=person_name(person)[:48])
@@ -115,7 +148,11 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
             )
         )
     buttons.append((c.t("back_performance"), f"use_concert {event.id}"))
-    return Response("\n".join(lines) or c.t("staff_empty_lineup"), buttons)
+    from setlist_bot.transport.response_context import band
+
+    return await band(
+        c, Response("\n".join(lines) or c.t("staff_empty_lineup"), buttons), group.id, event.id
+    )
 
 
 async def template_view(
@@ -126,12 +163,7 @@ async def template_view(
     text = row.name
     require(page >= 0, "input")
     roles = {role.id: role for role in await c.store.find(StaffRole, group_id=row.group_id)}
-    defaults = Staffing.select_defaults(
-        roles,
-        await c.store.find(StaffContact, group_id=row.group_id),
-        [UUID(slot["role_id"]) for slot in row.slots],
-        await Staffing(c.store, c.user).vocabulary(),
-    )
+    defaults = await Staffing(c.store, c.user).template_people(row)
     people = {
         person.id: person
         for person in await c.store.get_many(User, {person for person in defaults if person})
@@ -297,6 +329,7 @@ async def lineup_input(c: Controller, data: dict[str, Any], value: str) -> Respo
     return await template_view(c, row)
 
 
+@staffing_context
 async def lineup_action(c: Controller, op: str, data: dict[str, Any]) -> Response | None:
     service = Staffing(c.store, c.user)
     if op == "onboard_later":

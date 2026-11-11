@@ -590,6 +590,17 @@ class Processor:
                         and command.partition(" ")[0] in ("show_song", "catalog_edit")
                         else None
                     )
+                    panels = await uow.store.find(Confirmation, user_id=user.id, chat_id=chat_id)
+                    for catalog_panel in panels:
+                        catalog_data = json.loads(catalog_panel.command)
+                        if (
+                            song_source_id is not None
+                            and catalog_data.get("kind") == "navigation_panel"
+                            and catalog_data.get("slot") == "catalog"
+                            and song_source_id in catalog_data.get("message_ids", [])
+                            and catalog_data.get("group_id") == str(response.context_group)
+                        ):
+                            response.catalog_source_id = song_source_id
                     for panel in await uow.store.find(
                         Confirmation, user_id=user.id, chat_id=chat_id
                     ):
@@ -604,6 +615,13 @@ class Processor:
                                 identifier >= song_source_id for identifier in identifiers
                             ):
                                 response.edit_message_ids = identifiers
+                                if (
+                                    song_source_id is None
+                                    and is_callback
+                                    and message_id in identifiers
+                                    and data.get("group_id") == str(response.context_group)
+                                ):
+                                    response.catalog_source_id = data.get("catalog_source_id")
                             break
             return response
 
@@ -675,6 +693,10 @@ class Processor:
                                 {
                                     "kind": "navigation_panel",
                                     "slot": response.navigation_slot,
+                                    "group_id": str(response.context_group)
+                                    if response.context_group
+                                    else None,
+                                    "catalog_source_id": response.catalog_source_id,
                                     "message_ids": [m.message_id for m in messages],
                                 }
                             ),
@@ -1043,6 +1065,26 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
                 ),
             )
         )
+    if (
+        response.navigation_slot == "song"
+        and response.catalog_source_id is not None
+        and len(messages) == 1
+        and messages[0].message_id == response.catalog_source_id + 1
+        and response.context_prefix
+        and response.text.startswith(response.context_prefix)
+    ):
+        compact = response.text.removeprefix(response.context_prefix)
+        try:
+            await bot.edit_message_text(
+                compact,
+                chat_id=chat_id,
+                message_id=messages[0].message_id,
+                parse_mode=None,
+                reply_markup=markup,
+            )
+        except TelegramBadRequest as exc:
+            if "message is not modified" not in exc.message.lower():
+                raise
     for identifier in response.edit_message_ids[len(pieces) :]:
         await delete_selection_message(bot, chat_id, identifier)
     for markup in markup_batches:

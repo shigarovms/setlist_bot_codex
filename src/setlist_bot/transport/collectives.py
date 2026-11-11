@@ -1,5 +1,6 @@
 """Telegram presentation for owner-controlled collective workflows."""
 
+import json
 from uuid import UUID
 
 from setlist_bot.application.collectives import Collectives
@@ -109,7 +110,12 @@ async def handle_collective(c: Controller, command: str, args: str) -> Response:
         )
     if command == "ct_code":
         row = await service.begin_transfer(UUID(args))
-        return Response(t("transfer_code", token=row.id.hex), workflow_id=row.id)
+        return Response(
+            (await c.store.get(Group, UUID(json.loads(row.command)["group_id"]))).name
+            + "\n\n"
+            + t("transfer_code", token=row.id.hex),
+            workflow_id=row.id,
+        )
     if command == "chat_transfer":
         row, group = await service.claim_transfer(UUID(args))
         return Response(
@@ -132,7 +138,11 @@ async def handle_collective(c: Controller, command: str, args: str) -> Response:
             "owner_only",
         )
         service.finish(row, data, "cancelled")
-        return Response(t("transfer_cancelled"))
+        return Response(
+            (await c.store.get(Group, UUID(data["group_id"]))).name
+            + "\n\n"
+            + t("transfer_cancelled")
+        )
     require(command == "ct_yes", "input")
     group = await service.finish_transfer(UUID(args), c.chat_owner_id)
     return Response(t("transfer_done", name=group.name))

@@ -87,7 +87,7 @@ def test_public_menu_registry_matches_real_commands_and_localization():
 
     from setlist_bot.transport.controller import Controller
 
-    source = inspect.getsource(Controller.execute)
+    source = inspect.getsource(Controller._execute)
     for name in DESCRIPTIONS:
         assert f'"{name}"' in source
         assert re.fullmatch(r"[a-z_]{1,32}", name)

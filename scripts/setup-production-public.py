@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 ROOT = Path("/opt/setlist_bot_codex")
 SANDBOX = Path("/opt/setlist_bot_sandbox")
 CONTAINER = "setlist_bot_codex-db-1"
-SCHEMA = "c91a72e6b304"
+SCHEMA = "e52b8f139a60"
 EDGE = "setlist-public-edge"
 
 

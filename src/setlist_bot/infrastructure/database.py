@@ -173,6 +173,7 @@ table(
 table(
     e.Membership,
     "memberships",
+    col("invitation", JSONB(none_as_null=True), nullable=True),
     col("requested_roles", JSONB(none_as_null=True), nullable=True),
     col("version", Integer, server_default="0"),
     tenant(),
@@ -182,7 +183,7 @@ table(
     col("status", String(10)),
     UniqueConstraint("group_id", "user_id"),
     CheckConstraint("role IN ('admin', 'member')", name="role"),
-    CheckConstraint("status IN ('pending', 'active')", name="status"),
+    CheckConstraint("status IN ('pending', 'active', 'invited', 'left')", name="status"),
 )
 table(
     e.ChatBinding,

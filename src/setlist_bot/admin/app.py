@@ -581,13 +581,24 @@ async def user_detail(request: web.Request) -> web.Response:
         + '</dd></dl><p class="hint">Личная переписка и содержимое черновиков недоступны в этом разделе.</p></section>'
     )
     content += v.table(
-        ["Коллектив", "Имя в коллективе", "Права", "Статус"],
+        ["Коллектив", "Имя в коллективе", "Роли", "Права", "Статус"],
         [
             [
                 v.link("/groups/" + str(row["group_id"]), row["name"]),
                 v.h(row["nickname"]),
+                v.h(row["team_roles"])
+                + (
+                    "<small>Приглашены роли: " + v.h(", ".join(row["invited_roles"])) + "</small>"
+                    if row["invited_roles"]
+                    else ""
+                )
+                + (
+                    "<small>Заявка на роли: " + v.h(", ".join(row["requested_roles"])) + "</small>"
+                    if row["requested_roles"]
+                    else ""
+                ),
                 v.h("владелец" if row["owner_id"] == identifier else row["role"]),
-                v.h(row["status"]),
+                v.h(tr("ru", row["status"])),
             ]
             for row in rows[:PAGE_SIZE]
         ],
@@ -649,7 +660,7 @@ async def group_detail(request: web.Request) -> web.Response:
     if not group["deleted_at"] and not request.app[STATE].settings.read_only:
         body += f'<section class="panel"><h2>Управление правами по @нику или Telegram ID</h2><form method="get" action="/groups/{identifier}/permissions"><label>Пользователь<input name="user" maxlength="64" placeholder="@shigarovms или Telegram ID" required></label><button type="submit">Найти и проверить</button></form><p class="hint">Назначение доступно подтверждённым участникам коллектива. Ник появится после следующего сообщения или нажатия кнопки в боте. Перед действием проверьте человека и его ID.</p></section>'
     body += v.table(
-        ["Участник", "Имя в коллективе", "Права", "Статус", "Управление"],
+        ["Участник", "Имя в коллективе", "Роли", "Права", "Статус", "Управление"],
         [
             [
                 v.person(row["telegram_id"], row["display_name"], row["username"])
@@ -657,8 +668,19 @@ async def group_detail(request: web.Request) -> web.Response:
                 + v.link("/users/" + str(row["user_id"]), "Данные пользователя")
                 + "</small>",
                 v.h(row["nickname"]),
+                v.h(row["team_roles"])
+                + (
+                    "<small>Приглашены роли: " + v.h(", ".join(row["invited_roles"])) + "</small>"
+                    if row["invited_roles"]
+                    else ""
+                )
+                + (
+                    "<small>Заявка на роли: " + v.h(", ".join(row["requested_roles"])) + "</small>"
+                    if row["requested_roles"]
+                    else ""
+                ),
                 v.h("владелец" if row["user_id"] == group["owner_id"] else row["role"]),
-                v.h(row["status"]),
+                v.h(tr("ru", row["status"])),
                 (
                     v.link(
                         f"/groups/{identifier}/permissions?user={row['telegram_id']}",
@@ -718,7 +740,7 @@ async def permission_form(request: web.Request) -> web.Response:
             + ". Ники могут меняться. Действие будет закреплено за указанным ID, а не ником.</p>"
         )
     if not members or members[0]["status"] != "active":
-        body += '<p class="notice">Этот пользователь ещё не подтверждённый участник коллектива. Сначала он должен подать /register в чате, а администратор — подтвердить заявку.</p>'
+        body += '<p class="notice">Этот пользователь ещё не подтверждённый участник коллектива. Он может принять приглашение в постоянную команду либо подать /register в чате и получить одобрение администратора.</p>'
     elif user.id == group["owner_id"]:
         body += "<p>Это текущий владелец. Для смены владельца выберите другого участника.</p>"
     else:

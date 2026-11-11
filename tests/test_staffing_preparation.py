@@ -72,7 +72,6 @@ async def test_team_menu_has_only_sections_and_back_to_selected_group(engine, wo
         "Постоянная команда",
         "Знакомые исполнители",
         "Составы",
-        "Участники и права",
         "◀️ Назад",
     ]
     back = await send(button(team, "Назад"), private=True, chat=1, callback=True)
@@ -107,7 +106,8 @@ async def test_new_saved_lineup_name_and_members_are_separate_force_replies(engi
 
 async def test_preview_back_discards_changes_and_keeps_real_roster_and_queue(engine, world):
     review = await prepared(engine, world)
-    assert review.text.startswith("Проверьте состав, затем нажмите «Проверить занятость».")
+    assert review.text.startswith(world.group.name + "\n\n")
+    assert "Проверьте состав, затем нажмите «Проверить занятость»." in review.text
     assert "Гитара — 2" in review.text and "Вокал — 3" in review.text
     original = await active_slots(engine, world)
     send = messenger(engine)

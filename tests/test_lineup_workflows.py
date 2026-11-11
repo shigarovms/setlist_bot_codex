@@ -170,8 +170,10 @@ async def test_creation_one_lineup_auto_applied_but_not_invited(engine, world):
     created = await send(
         next(a for _, a in preview.buttons if a.startswith("confirm ")), chat=-100, callback=True
     )
-    assert created.deliveries and created.deliveries[0][1].text.startswith(
-        "Проверьте состав, затем нажмите «Проверить занятость»."
+    assert (
+        created.deliveries
+        and "Проверьте состав, затем нажмите «Проверить занятость»."
+        in created.deliveries[0][1].text
     )
     async with PostgresUnitOfWork(engine) as uow:
         event = (await uow.store.find(Concert, title="Клуб Космос"))[0]
@@ -372,7 +374,7 @@ async def test_large_saved_lineups_and_creation_choices_are_paginated(engine, wo
     menu = await send(button(menu, "Составы"), private=True, chat=1)
     card = await send(button(menu, "Состав 00"), private=True, chat=1)
     assert len(card.text) < 4096
-    assert len(card.text.splitlines()) == 41 and card.text.splitlines()[-1].startswith("40.")
+    assert len(card.text.splitlines()) == 43 and card.text.splitlines()[-1].startswith("40.")
     assert sum(label[:1].isdigit() for label, _ in card.buttons) == 8
     current = card
     for page in range(1, 5):

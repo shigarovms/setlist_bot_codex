@@ -68,7 +68,7 @@ async def test_force_reply_template_contact_and_invitation_flow_without_group_me
             world.concert.id, template.id, template.version
         )
     lineup = await send("/lineup", private=True, chat=1)
-    assert lineup.text == "1. Вокал\n2. DJ"
+    assert lineup.text == world.group.name + "\n\n31.12 · Новый год\n\n1. Вокал\n2. DJ"
     role_card = await send(button(lineup, "1. Вокал"), private=True, chat=1)
     candidates = await send(button(role_card, "Выбрать исполнителя"), private=True, chat=1)
     await send(
@@ -86,7 +86,7 @@ async def test_force_reply_template_contact_and_invitation_flow_without_group_me
     assert "Приглашение на выступление" in session.sent[-1].text
     c = Processor(engine)
     view = await c.process(2001, 3, 3, f"sf_view {identifier.hex}", private=True)
-    accepted = await c.process(2002, 3, 3, button(view, "Подтверждаю"), private=True)
+    accepted = await c.process(2002, 3, 3, button(view, "Подтвердить участие"), private=True)
     assert "подтверждено" in accepted.text
     async with PostgresUnitOfWork(engine) as uow:
         assert (await uow.store.get(GigInvitation, identifier)).status == "confirmed"
@@ -197,7 +197,7 @@ async def test_large_lineup_and_invitation_lists_stay_within_telegram_limits(eng
                 )
     send = messenger(engine)
     first = await send(f"sf_lineup {world.concert.id.hex}", private=True, chat=1)
-    assert len(first.text.splitlines()) == 40 and len(first.buttons) < 100
+    assert len(first.text.splitlines()) == 44 and len(first.buttons) < 100
     assert first.text.splitlines()[-1].startswith("40.")
     card = await send(button(first, "1. ГГ"), private=True, chat=1)
     all_invites = await send(button(card, "Все приглашения"), private=True, chat=1)

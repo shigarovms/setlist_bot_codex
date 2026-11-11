@@ -9,11 +9,11 @@ from setlist_bot.domain.rules import AppError, require
 from setlist_bot.transport.controller import Controller, Response
 
 
-def link_response(
+async def link_response(
     c: Controller, identifier: UUID, token: str, *, instructions: bool = False
 ) -> Response:
     url = c.calendar_public_base_url + "/calendar/" + token + ".ics"
-    return Response(
+    result = Response(
         (c.t("calendar_help") + "\n\n" if instructions else "") + c.t("calendar_link", url=url),
         [
             (c.t("calendar_help_button"), f"cal_help {identifier.hex}"),
@@ -22,6 +22,9 @@ def link_response(
         monospace=True,
         monospace_body=url,
     )
+
+    row = await Calendars(c.store, c.user, c.calendar_link_key).owned(identifier)
+    return await scope_response(c, result, row)
 
 
 async def show_link(
@@ -35,7 +38,7 @@ async def show_link(
             raise
         token = None
     if token:
-        return link_response(c, row.id, token, instructions=instructions)
+        return await link_response(c, row.id, token, instructions=instructions)
     return Response(
         c.t("calendar_legacy"),
         [
@@ -66,20 +69,21 @@ async def restore_link_input(c: Controller, session: Confirmation, value: str) -
     except AppError as exc:
         if str(exc) != "calendar_wrong_link":
             raise
-        return Response(
+        response = Response(
             c.t("calendar_wrong_link") + "\n\n" + c.t("calendar_restore_prompt"),
             force_reply=True,
             workflow_id=session.id,
             input_rejected=True,
         )
-    result = link_response(c, UUID(data["subscription_id"]), match[1])
+        return await scope_response(c, response, await service.owned(UUID(data["subscription_id"])))
+    result = await link_response(c, UUID(data["subscription_id"]), match[1])
     result.delete_input = True
     result.delete_message_ids = data.get("message_ids", [])
     await c.store.delete(session)
     return result
 
 
-async def handle_calendar(c: Controller, command: str, args: str) -> Response:
+async def _handle_calendar(c: Controller, command: str, args: str) -> Response:
     if not c.private:
         return Response(
             c.t("calendar_private"),
@@ -169,7 +173,7 @@ async def handle_calendar(c: Controller, command: str, args: str) -> Response:
         if command == "cal_create":
             row, token = await service.create(group_id, scope)
             if token:
-                return link_response(c, row.id, token)
+                return await link_response(c, row.id, token)
             return await show_link(c, service, row.id)
         if row is not None and row.enabled:
             title = (
@@ -236,7 +240,7 @@ async def handle_calendar(c: Controller, command: str, args: str) -> Response:
                 UUID(data["subscription_id"]), data["version"], data["action"]
             )
             result = (
-                link_response(c, changed.id, token)
+                await link_response(c, changed.id, token)
                 if token
                 else Response(c.t("calendar_disabled"), [back])
             )
@@ -244,3 +248,48 @@ async def handle_calendar(c: Controller, command: str, args: str) -> Response:
         await c.store.delete(session)
         return result
     raise ValueError("Unknown calendar action")
+
+
+async def scope_response(c: Controller, response: Response, row: CalendarSubscription) -> Response:
+    from setlist_bot.domain.entities import Group
+    from setlist_bot.transport.response_context import prefix
+
+    title = (
+        ("Мои подтверждённые участия" if c.language == "ru" else "My confirmed assignments")
+        if row.scope == "personal"
+        else (
+            "Сводный календарь всех коллективов"
+            if c.language == "ru"
+            else "Combined calendar for all groups"
+        )
+        if row.group_id is None
+        else (await c.store.get(Group, row.group_id)).name
+    )
+    return prefix(response, title)
+
+
+async def handle_calendar(c: Controller, command: str, args: str) -> Response:
+    # Capture the owned subscription before confirmation consumes its session.
+    identifier = None
+    if c.private and c.calendar_public_base_url:
+        if command in ("cal_show", "cal_help", "cal_restore", "cal_change") and args:
+            identifier = UUID(args.split()[0])
+        elif command in ("cal_confirm", "cal_cancel"):
+            session = await c.store.get(Confirmation, UUID(args))
+            data = json.loads(session.command)
+            require(session.user_id == c.user.id and session.chat_id == c.chat_id, "forbidden")
+            identifier = UUID(data["subscription_id"])
+    response = await _handle_calendar(c, command, args)
+    if identifier:
+        row = await c.store.get(CalendarSubscription, identifier)
+        require(row.owner_id == c.user.id, "forbidden")
+        return await scope_response(c, response, row)
+    if c.private and c.calendar_public_base_url and command in ("cal_scope", "cal_create"):
+        row = CalendarSubscription(
+            owner_id=c.user.id,
+            group_id=None if args in ("all", "personal") else UUID(args),
+            token_hash="",
+            scope="personal" if args == "personal" else "groups",
+        )
+        return await scope_response(c, response, row)
+    return response

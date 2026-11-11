@@ -9,46 +9,14 @@ from setlist_bot.domain.entities import StaffContact, StaffRole, User
 from setlist_bot.domain.rules import require
 from setlist_bot.domain.staff_input import role_person
 from setlist_bot.transport.controller import Controller, Response
+from setlist_bot.transport.response_context import staffing_context
 from setlist_bot.transport.staffing import action
 
 
 async def view(c: Controller, group_id: UUID, page: int = 0) -> Response:
-    group = await c.groups.access(group_id, admin=True)
-    require(page >= 0, "input")
-    roles = {r.id: r for r in await c.store.find(StaffRole, group_id=group_id)}
-    rows = sorted(
-        (r for r in await c.store.find(StaffContact, group_id=group_id) if r.permanent),
-        key=lambda r: (roles[r.role_id].name_key, r.priority, r.id),
-    )
-    people = {u.id: u for u in await c.store.get_many(User, {r.user_id for r in rows})}
-    lines = [
-        f"{i}. {roles[r.role_id].name}: "
-        f"{people[r.user_id].display_name or people[r.user_id].telegram_id}"
-        for i, r in enumerate(rows, 1)
-    ]
-    buttons = [
-        (
-            lines[i],
-            action(
-                c, "permanent_card", group_id=str(group_id), contact_id=str(r.id), version=r.version
-            ),
-        )
-        for i, r in enumerate(rows)
-        if page * 15 <= i < (page + 1) * 15
-    ]
-    for delta, symbol in ((-1, "◀"), (1, "▶")):
-        if page + delta >= 0 and (delta < 0 or (page + 1) * 15 < len(rows)):
-            buttons.append(
-                (symbol, action(c, "permanent", group_id=str(group_id), page=page + delta))
-            )
-    buttons += [
-        (c.t("permanent_add"), action(c, "prompt", field="permanent", group_id=str(group_id))),
-        (c.t("menu_back"), action(c, "team", group_id=str(group_id))),
-    ]
-    return Response(
-        group.name + "\n\n" + c.t("permanent_title") + "\n\n" + ("\n".join(lines) or c.t("empty")),
-        buttons,
-    )
+    from setlist_bot.transport.team import members
+
+    return await members(c, group_id, page)
 
 
 async def input_value(c: Controller, data: dict[str, Any], value: str) -> Response | None:
@@ -73,14 +41,18 @@ async def input_value(c: Controller, data: dict[str, Any], value: str) -> Respon
         # RU/EN: Resolve every account first: unknown users must not leave partial assignments.
         values = [role_person(line, required=True) for line in lines]
         resolved = [(role, await known_user(c.store, ref)) for role, ref in values]
+        from setlist_bot.application.team import Team
+
+        grouped: dict[UUID, list[str]] = {}
         for name, person in resolved:
-            role = await service.role(group_id, name)
-            row = await service.set_permanent(group_id, role.id, person.id)
-            if old and old.id != row.id:
-                await service.change_contact(old.id, old.version, remove=True)
+            grouped.setdefault(person.id, []).append(name)
+        for person_id, names in grouped.items():
+            await Team(c.store, c.user).invite(group_id, person_id, names)
+        # Existing assignments remain until explicitly removed; editing proposes new roles.
     return await view(c, group_id)
 
 
+@staffing_context
 async def handle(c: Controller, operation: str, data: dict[str, Any]) -> Response | None:
     if operation == "permanent":
         return await view(c, UUID(data["group_id"]), data.get("page", 0))

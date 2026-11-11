@@ -6,6 +6,7 @@ from test_setlist_menus import sender
 
 from setlist_bot.application.profiles import Profiles
 from setlist_bot.application.staffing import Staffing
+from setlist_bot.application.team import Team
 from setlist_bot.domain.entities import (
     Confirmation,
     GigInvitation,
@@ -130,14 +131,17 @@ async def test_permanent_defaults_are_group_scoped_and_do_not_rewrite_existing_g
         first = await staff.set_permanent(world.group.id, role.id, world.member.id)
         slots = await staff.apply_template(world.concert.id, lineup.id, lineup.version)
         assert slots[0].preferred_user_id == world.member.id
-        await staff.set_permanent(world.group.id, role.id, world.stranger.id)
+        invitation = await Team(uow.store, world.admin).invite(
+            world.group.id, world.stranger.id, [role.name]
+        )
+        await Team(uow.store, world.stranger).respond(invitation.id, invitation.version, True)
         await staff.change_contact(first.id, first.version, remove=True)
         next_slots = await staff.apply_template(world.concert2.id, lineup.id, lineup.version)
         assert next_slots[0].preferred_user_id == world.stranger.id
         assert slots[0].preferred_user_id == world.member.id
         assert not await uow.store.find(GigInvitation)
-        assert not await uow.store.find(
-            Membership, group_id=world.group.id, user_id=world.stranger.id
+        assert await uow.store.find(
+            Membership, group_id=world.group.id, user_id=world.stranger.id, status="active"
         )
         with pytest.raises(AppError):
             await Staffing(uow.store, world.member).set_permanent(
@@ -174,14 +178,18 @@ async def test_new_team_menu_permanent_workflow_and_template_order(engine, world
         "Постоянная команда",
         "Знакомые исполнители",
         "Составы",
-        "Участники и права",
         "◀️ Назад",
     ]
     members = await send(team.buttons[0][1])
-    await send(members.buttons[0][1], remember=150)
+    await send(next(a for label, a in members.buttons if "Добавить" in label), remember=150)
     listed = await send("Басист 2", reply=150)
     assert "Басист" in listed.text
     async with PostgresUnitOfWork(engine) as uow:
+        member = (
+            await uow.store.find(Membership, group_id=world.group.id, user_id=world.member.id)
+        )[0]
+        assert member.invitation and member.status == "active"
+        await Team(uow.store, world.member).respond(member.id, member.version, True)
         contact = (await uow.store.find(StaffContact, group_id=world.group.id))[0]
         assert contact.permanent
         staff = Staffing(uow.store, world.admin)
@@ -328,7 +336,15 @@ async def test_permanent_order_changes_primary_and_rejects_a_stale_move(engine, 
         service = Staffing(uow.store, world.admin)
         role = await service.role(world.group.id, "Бас")
         first = await service.set_permanent(world.group.id, role.id, world.member.id)
-        second = await service.set_permanent(world.group.id, role.id, world.stranger.id)
+        invitation = await Team(uow.store, world.admin).invite(
+            world.group.id, world.stranger.id, [role.name]
+        )
+        await Team(uow.store, world.stranger).respond(invitation.id, invitation.version, True)
+        second = (
+            await uow.store.find(
+                StaffContact, group_id=world.group.id, user_id=world.stranger.id, role_id=role.id
+            )
+        )[0]
         before = second.version
         assert await service.lineup_people(world.group.id, [role.id]) == [world.member.id]
         await service.move_permanent(second.id, before, -1)

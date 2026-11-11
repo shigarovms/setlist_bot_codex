@@ -31,6 +31,7 @@ from setlist_bot.domain.rules import AppError, normalize, require
 from setlist_bot.domain.staff_input import role_person
 from setlist_bot.transport.controller import Controller, Response
 from setlist_bot.transport.render import render_setlist
+from setlist_bot.transport.response_context import staffing_context
 
 
 def action(c: Controller, operation: str, **data: Any) -> str:
@@ -57,6 +58,7 @@ async def context(c: Controller) -> Any:
     return result
 
 
+@staffing_context
 async def prompt(
     c: Controller,
     operation: str,
@@ -91,6 +93,7 @@ async def prompt(
     )
 
 
+@staffing_context
 async def input_reply(c: Controller, row: Confirmation, value: str) -> Response:
     try:
         return await _input_reply(c, row, value)
@@ -241,7 +244,6 @@ async def team_view(c: Controller, group_id: UUID) -> Response:
             (c.t("permanent_title"), action(c, "permanent", group_id=str(group_id))),
             (c.t("staff_contacts"), action(c, "contacts", group_id=str(group_id))),
             (c.t("staff_templates"), action(c, "templates", group_id=str(group_id))),
-            (c.t("membership_permissions"), action(c, "permissions", group_id=str(group_id))),
             (
                 c.t("menu_back"),
                 f"use_group {group_id}"
@@ -505,6 +507,7 @@ async def busy_view(c: Controller) -> Response:
     )
 
 
+@staffing_context
 async def handle(c: Controller, command: str, args: str) -> Response:
     row: Any
     rows: list[Any]

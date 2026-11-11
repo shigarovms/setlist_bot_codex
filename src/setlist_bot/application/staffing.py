@@ -114,6 +114,15 @@ class Staffing:
         role_id: UUID,
         user_id: UUID,
     ) -> StaffContact:
+        await self.groups.access(group_id, admin=True)
+        require(
+            bool(
+                await self.store.find(
+                    Membership, group_id=group_id, user_id=user_id, status="active"
+                )
+            ),
+            "forbidden",
+        )
         row = await self.contact(group_id, role_id, user_id)
         if not row.permanent:
             vocabulary = await self.vocabulary()
@@ -157,6 +166,12 @@ class Staffing:
 
         await self.store.flush()
         await queue_member_board(self.store, row.group_id)
+        if remove:
+            from setlist_bot.application.team import Team
+
+            members = await self.store.find(Membership, group_id=row.group_id, user_id=row.user_id)
+            if members:
+                await Team(self.store, self.user).notice(members[0], "team_role_removed")
         return row
 
     async def permanent_order(self, group_id: UUID, role_id: UUID) -> list[StaffContact]:
@@ -213,6 +228,31 @@ class Staffing:
             await self.vocabulary(),
         )
 
+    async def template_people(self, template: LineupTemplate) -> list[UUID | None]:
+        roles = {r.id: r for r in await self.store.find(StaffRole, group_id=template.group_id)}
+        contacts = await self.store.find(StaffContact, group_id=template.group_id)
+        vocabulary = await self.vocabulary()
+        defaults = self.select_defaults(
+            roles, contacts, [UUID(i["role_id"]) for i in template.slots], vocabulary
+        )
+        used: dict[str, set[UUID]] = {}
+        for index, item in enumerate(template.slots):
+            role_id = UUID(item["role_id"])
+            key = vocabulary.key(roles[role_id].name)
+            occupied = used.setdefault(key, set())
+            person = defaults[index]
+            if person is None and item.get("user_id"):
+                candidate = UUID(item["user_id"])
+                contact = next(
+                    (c for c in contacts if c.user_id == candidate and c.role_id == role_id), None
+                )
+                if candidate not in occupied and contact and contact.preference != "hidden":
+                    person = candidate
+            defaults[index] = person
+            if person:
+                occupied.add(person)
+        return defaults
+
     @staticmethod
     def select_defaults(
         roles: dict[UUID, StaffRole],
@@ -256,7 +296,7 @@ class Staffing:
             require(role.group_id == group_id, "forbidden")
             if item.get("user_id"):
                 person = await self.store.get(User, UUID(item["user_id"]))
-                await self.set_permanent(group_id, role.id, person.id)
+                await self.contact(group_id, role.id, person.id)
         matches = await self.store.find(LineupTemplate, group_id=group_id, name_key=normalize(name))
         row = (
             matches[0]
@@ -300,7 +340,7 @@ class Staffing:
                     role = await self.store.get(StaffRole, UUID(item["role_id"]))
                     require(role.group_id == row.group_id, "forbidden")
                     if item.get("user_id"):
-                        await self.set_permanent(row.group_id, role.id, UUID(item["user_id"]))
+                        await self.contact(row.group_id, role.id, UUID(item["user_id"]))
                 row.slots = [dict(item) for item in values]
             row.version += 1
         record_activity(self.store, self.user, "lineup_edited", row.id, deleted=delete)
@@ -432,9 +472,7 @@ class Staffing:
         event.lineup_name = template.name
         event.lineup_version += 1
         start = max((s.position for s in old), default=0)
-        defaults = await self.lineup_people(
-            event.group_id, [UUID(i["role_id"]) for i in template.slots]
-        )
+        defaults = await self.template_people(template)
         rows = []
         for position, item in enumerate(template.slots, 1):
             row = GigSlot(
@@ -509,7 +547,12 @@ class Staffing:
         force: bool = False,
         replacement_id: UUID | None = None,
     ) -> GigInvitation:
-        await self.store.lock_people({user_id})
+        people = {user_id}
+        if replacement_id:
+            pending = await self.store.get(StaffReplacement, replacement_id)
+            source = await self.store.get(GigInvitation, pending.source_id)
+            people.add(source.user_id)
+        await self.store.lock_people(people)
         slot = await self.store.get(GigSlot, slot_id)
         event = await self.event(slot.concert_id)
         slot = await self.store.get(GigSlot, slot_id, lock=True)
@@ -557,9 +600,11 @@ class Staffing:
                     "reconfirm",
                     "conditional",
                 ):
-                    return await self.respond(
+                    old = await self.respond(
                         old.id, old.version, "yes", force=force, notify_admins=False
                     )
+                if user_id == self.user.id and old.status == "accepted":
+                    return await self.approve_replacement(old.id, old.version, force=force)
                 return old
         busy, _ = await self.conflicts(user_id, event.date, exclude=event.id)
         require(force or not busy, "staff_busy")
@@ -585,7 +630,10 @@ class Staffing:
             # и процедура подмены остаются теми же, повторное личное приглашение не нужно.
             # EN: Self-assignment is consent; reuse transitions without another DM.
             await self.store.flush()
-            return await self.respond(row.id, row.version, "yes", force=force, notify_admins=False)
+            row = await self.respond(row.id, row.version, "yes", force=force, notify_admins=False)
+            if row.status == "accepted":
+                return await self.approve_replacement(row.id, row.version, force=force)
+            return row
         await self.notify(person.id, "invitation", row)
         return row
 
@@ -729,7 +777,9 @@ class Staffing:
         await self.admin_notice(source, "replacement", replacement=row)
         return row
 
-    async def approve_replacement(self, invitation_id: UUID, expected: int) -> GigInvitation:
+    async def approve_replacement(
+        self, invitation_id: UUID, expected: int, *, force: bool = False
+    ) -> GigInvitation:
         candidate = await self.store.get(GigInvitation, invitation_id)
         require(candidate.replacement_id is not None, "input")
         assert candidate.replacement_id is not None
@@ -752,7 +802,7 @@ class Staffing:
             "input_expired",
         )
         busy, _ = await self.conflicts(candidate.user_id, event.date, exclude=event.id)
-        require(not busy, "staff_busy")
+        require(force or not busy, "staff_busy")
         source.status, source.version = "replaced", source.version + 1
         await (
             self.store.flush()

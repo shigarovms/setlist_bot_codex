@@ -16,7 +16,7 @@ from urllib.request import urlopen
 
 ROOT = Path("/opt/setlist_bot_sandbox")
 ROLE = "setlist_calendar_reader"
-SCHEMA = "c91a72e6b304"
+SCHEMA = "e52b8f139a60"
 TABLES = (
     "concerts",
     "deployment_identity",
