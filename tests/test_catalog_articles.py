@@ -380,3 +380,45 @@ async def test_repertoire_menu_and_row_edit_are_bound_to_the_original_band(engin
     assert not denied.buttons
     denied = await send(edit_action, actor=3, private=True)
     assert not denied.buttons
+
+
+@pytest.mark.parametrize("gap", [0, 1])
+async def test_song_band_heading_is_omitted_only_when_actual_message_is_adjacent(
+    engine, world, gap
+):
+    processor = Processor(engine)
+    session = ArticleTelegram()
+    async with Bot("123456:TEST_ONLY_NOT_A_REAL_TELEGRAM_TOKEN", session=session) as bot:
+        catalog = await processor.process(990001, 1, -100, "/catalog", private=False)
+        pages = await send_response(bot, -100, catalog)
+        await processor.remember_response(-100, catalog, pages)
+        session.message_id += gap  # An intervening message the bot may not have observed.
+        card = await processor.process(
+            990002,
+            1,
+            -100,
+            f"show_song {world.song.id}",
+            private=False,
+            is_callback=True,
+            message_id=pages[-1].message_id,
+        )
+        assert card.context_group == world.group.id
+        assert card.catalog_source_id == pages[-1].message_id
+        messages = await send_response(bot, -100, card)
+        await processor.remember_response(-100, card, messages)
+        shown = session.edits[-1] if not gap else session.sent[-1]
+        assert (world.group.name in shown.text) == bool(gap)
+        assert shown.reply_markup is not None
+        assert "Комета" in shown.text
+        menu = next(action for _, action in card.buttons if action.startswith("song_edit_menu"))
+        editor = await processor.process(
+            990003,
+            1,
+            -100,
+            menu,
+            private=False,
+            is_callback=True,
+            message_id=messages[0].message_id,
+        )
+        await send_response(bot, -100, editor)
+        assert (world.group.name in session.edits[-1].text) == bool(gap)

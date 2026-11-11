@@ -24,6 +24,7 @@ async def test_selected_group_opens_its_performances_before_optional_transfer(en
     assert [label for label, _ in member.buttons] == [
         "Выступления Коллектив А",
         "Репертуар Коллектив А",
+        "Выйти из коллектива",
         "◀️ Все мои коллективы",
     ]
 

@@ -5,6 +5,7 @@ from setlist_bot.transport.help_texts import HELP_TEXTS
 from setlist_bot.transport.music_texts import TEXTS as MUSIC_TEXTS
 from setlist_bot.transport.profile_texts import TEXTS as PROFILE_TEXTS
 from setlist_bot.transport.staffing_texts import TEXTS as STAFFING_TEXTS
+from setlist_bot.transport.team_texts import TEXTS as TEAM_TEXTS
 from setlist_bot.transport.workflow_texts import TEXTS as WORKFLOW_TEXTS
 
 MESSAGES = {
@@ -829,6 +830,10 @@ MESSAGES["en"].update(
         "join_button": "Join {name}",
     }
 )
+
+
+for _language, _messages in TEAM_TEXTS.items():
+    MESSAGES[_language].update(_messages)
 
 
 def tr(language: str, key: str, **values: Any) -> str:

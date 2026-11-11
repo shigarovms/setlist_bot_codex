@@ -201,10 +201,10 @@ async def test_full_lineup_text_uses_group_names_and_buttons_alone_are_paginated
     await reply(engine, world.member, invitation_id)
     send = messenger(engine)
     first = await send(f"sf_lineup {world.concert.id.hex}", private=True, chat=1)
-    assert first.text.splitlines()[0] == "✅ 1. Роль 1 — Илья — наш басист"
+    assert first.text.splitlines()[4] == "✅ 1. Роль 1 — Илья — наш басист"
     assert first.text.splitlines()[-1] == "10. Роль 10"
     assert (
-        len(first.text.splitlines()) == 10
+        len(first.text.splitlines()) == 14
         and "Другое имя" not in first.text
         and "@" not in first.text
     )
@@ -234,7 +234,7 @@ async def test_role_spelling_is_kept_when_reusing_a_previously_lowercase_role(en
         await service.add_slot(world.concert.id, upper.id)
     send = messenger(engine)
     screen = await send(f"sf_lineup {world.concert.id.hex}", private=True, chat=1)
-    assert screen.text == "1. Звукорежиссер"
+    assert screen.text == world.group.name + "\n\n31.12 · Новый год\n\n1. Звукорежиссер"
     assert screen.buttons[0][0].startswith("1. Звукорежиссер:")
 
 

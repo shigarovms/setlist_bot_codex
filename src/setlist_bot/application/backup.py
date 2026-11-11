@@ -57,6 +57,8 @@ class Backup:
                     "role": member.role,
                     "musical_role": member.musical_role,
                     "status": member.status,
+                    "requested_roles": member.requested_roles,
+                    "invited_roles": member.invitation["roles"] if member.invitation else None,
                 }
             )
         data["members"] = members

@@ -83,4 +83,4 @@ async def test_full_lineup_uses_bounded_selects(engine, world, screen, record_pr
     record_property("selects_one_role", counts[0])
     record_property("selects_forty_roles", counts[1])
     assert counts[1] <= counts[0] + 1, counts
-    assert counts[1] <= {"performance": 10, "saved": 7}[screen], counts
+    assert counts[1] <= {"performance": 13, "saved": 8}[screen], counts

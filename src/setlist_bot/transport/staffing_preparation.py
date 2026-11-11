@@ -25,6 +25,7 @@ from setlist_bot.domain.entities import (
 from setlist_bot.domain.rules import require
 from setlist_bot.domain.staff_input import role_person
 from setlist_bot.transport.controller import Controller, Response
+from setlist_bot.transport.response_context import staffing_context
 from setlist_bot.transport.staffing import action, prompt
 
 
@@ -65,6 +66,7 @@ async def source(c: Controller, event: Concert) -> list[dict[str, Any]]:
     ]
 
 
+@staffing_context
 async def start_preparation(c: Controller, event_id: UUID) -> Response:
     event = await Staffing(c.store, c.user).event(event_id)
     data = {
@@ -235,6 +237,7 @@ async def preparation_input(c: Controller, args: dict[str, Any], value: str) -> 
     return await edit_view(c, row, data)
 
 
+@staffing_context
 async def preparation_action(c: Controller, op: str, args: dict[str, Any]) -> Response | None:
     if not op.startswith("prep_"):
         return None

@@ -91,6 +91,9 @@ def command_fields(value: str, *, maxsplit: int = 0) -> list[str]:
 @dataclass
 class Response:
     text: str
+    context_group: UUID | None = field(default=None, kw_only=True)
+    context_prefix: str = field(default="", kw_only=True)
+    catalog_source_id: int | None = field(default=None, kw_only=True)
     buttons: list[tuple[str, str]] = field(default_factory=list)
     files: list[tuple[str, bytes]] = field(default_factory=list)
     monospace: bool = False
@@ -234,6 +237,23 @@ class Controller:
     async def execute(
         self, text: str, *, confirmed: bool = False, reply_template_id: UUID | None = None
     ) -> Response:
+        previous = getattr(self, "_response_target", None)
+        self._response_target: tuple[UUID, UUID | None] | None = None
+        try:
+            response = await self._execute(
+                text, confirmed=confirmed, reply_template_id=reply_template_id
+            )
+            if self._response_target:
+                from setlist_bot.transport.response_context import band
+
+                response = await band(self, response, *self._response_target)
+            return response
+        finally:
+            self._response_target = previous
+
+    async def _execute(
+        self, text: str, *, confirmed: bool = False, reply_template_id: UUID | None = None
+    ) -> Response:
         message = text.lstrip()
         head = message.split(maxsplit=1)[0] if message else ""
         raw_args = message[len(head) :].lstrip(" \t\r")
@@ -257,6 +277,10 @@ class Controller:
                     [(self.t("profile_button"), f"https://t.me/{self.bot_username}?start=profile")],
                 )
             return await profile_handle(self, args) if command == "pf_go" else await begin(self)
+        if command.startswith("tm_"):
+            from setlist_bot.transport.team import handle as team_handle
+
+            return await team_handle(self, command, args)
         if command == "start" and args == "calendar":
             return await self.execute("calendar")
         if command == "start" and args == "my_gigs":
@@ -335,6 +359,7 @@ class Controller:
             values = args.split()
             metadata_concert = await self.store.get(Concert, UUID(values[0]))
             await self.groups.access(metadata_concert.group_id, admin=True)
+            self._response_target = (metadata_concert.group_id, None)
             require(metadata_concert.deleted_at is None, "in_trash")
             if not self.private:
                 require(
@@ -774,10 +799,26 @@ class Controller:
             memberships = await self.store.find(Membership, user_id=self.user.id, status="active")
             groups = [await self.store.get(Group, m.group_id) for m in memberships]
             groups = [g for g in groups if g.deleted_at is None]
+            from setlist_bot.application.team import Team
+
+            team_invitations = []
+            for member in await self.store.find(Membership, user_id=self.user.id):
+                if member.invitation:
+                    try:
+                        invited_group = await Team(self.store, self.user).validate(member)
+                    except AppError:
+                        continue
+                    team_invitations.append(
+                        (
+                            self.t("team_pending") + " · " + invited_group.name,
+                            f"tm_view {member.id.hex}",
+                        )
+                    )
             return Response(
                 self.t("choose_group") if groups else self.t("no_bands"),
                 [(self.t("profile_button"), "profile")]
-                + [(g.name, f"use_group {g.id}") for g in groups],
+                + [(g.name, f"use_group {g.id}") for g in groups]
+                + team_invitations,
             )
         if command == "all_my_concerts":
             if not self.private:
@@ -862,6 +903,9 @@ class Controller:
             group = await self.groups.access(UUID(args))
             context.group_id, context.concert_id, context.observed_version = group.id, None, None
             context.selected_song_id = None
+            own_member = (
+                await self.store.find(Membership, group_id=group.id, user_id=self.user.id)
+            )[0]
             return Response(
                 self.t("selected", name=group.name),
                 [
@@ -884,15 +928,30 @@ class Controller:
                     if group.owner_id == self.user.id
                     else []
                 )
+                + (
+                    [(self.t("team_leave"), f"tm_remove {own_member.id.hex} {own_member.version}")]
+                    if group.owner_id != self.user.id
+                    else []
+                )
                 + [(self.t("all_groups_back"), "groups")],
             )
-        if command in ("group_catalog", "catalog_edit", "show_song"):
+        if command in (
+            "group_catalog",
+            "catalog_edit",
+            "show_song",
+            "song_edit_menu",
+            "song_field",
+            "edit_hint",
+            "edit_full_hint",
+            "copy_hint",
+            "alias_hint",
+        ):
             # RU: Старая кнопка каталога относится к исходному коллективу, не к /groups.
             # EN: Resolve the explicit target and recheck access before changing context.
             target_group = (
                 UUID(args)
                 if command == "group_catalog"
-                else (await self.store.get(Song, UUID(args))).group_id
+                else (await self.store.get(Song, UUID(args.split()[0]))).group_id
             )
             await self.groups.access(target_group)
             if not self.private:
@@ -941,6 +1000,12 @@ class Controller:
 
             member = await self.groups.request_roles(group_id, [args])
             await queue_member_board(self.store, group_id, ensure=True)
+            if member.status == "active" and member.requested_roles is None:
+                return Response(
+                    (await self.store.get(Group, group_id)).name
+                    + "\n\n"
+                    + self.t("team_joined", name=await self.groups.name(group_id))
+                )
             roles = member.requested_roles or []
             label = await self.groups.name(group_id)
             return Response(
@@ -959,6 +1024,55 @@ class Controller:
                 self.t("nickname_saved" if membership.status == "active" else "registered")
             )
         group = await self.groups.access(group_id)
+        if (
+            command
+            in {
+                "members",
+                "member",
+                "proposals",
+                "decide",
+                "reminders",
+                "backup",
+                "backup_group",
+                "administrator",
+                "group_language",
+                "show_song",
+                "catalog_edit",
+                "song_edit_menu",
+                "edit_hint",
+                "edit_full_hint",
+                "song_field",
+                "song_options",
+                "song",
+                "edit",
+                "copy",
+                "save_song",
+                "alias",
+                "archive",
+                "unarchive",
+                "set_archive",
+                "edit_bpm",
+                "edit_lights",
+                "edit_comment",
+                "add_new_songs",
+                "import",
+                "commit_import",
+                "map_start",
+                "map_header",
+                "map_col",
+                "concert",
+                "concert_correct",
+                "create_performance",
+                "create_concert",
+                "past_concerts",
+                "history",
+                "versions",
+                "revision",
+                "confirm",
+            }
+            or command in CONCERT_INPUTS
+        ):
+            self._response_target = (group_id, None)
         if command in (
             "suggestion",
             "add",
@@ -1179,42 +1293,9 @@ class Controller:
                 self.language = args
             return Response(self.t("ok"))
         if command == "members":
-            await self.groups.access(group_id, admin=True)
-            lines = [self.t("members")]
-            buttons = []
-            for member in await self.store.find(Membership, group_id=group_id):
-                user = await self.store.get(User, member.user_id)
-                label = await self.groups.name(group_id, user.id)
-                role = "owner" if group.owner_id == user.id else member.role
-                lines.append(f"{label} · {self.t(role)} · {self.t(member.status)}")
-                if (
-                    group.owner_id == self.user.id
-                    and user.id != group.owner_id
-                    and member.status == "active"
-                ):
-                    operation = "revoke" if member.role == "admin" else "grant"
-                    buttons.append(
-                        (
-                            self.t(operation) + " · " + label,
-                            f"administrator {operation} {member.id}",
-                        )
-                    )
-                if member.requested_roles:
-                    lines.append(" · " + ", ".join(member.requested_roles))
-                if member.status == "pending" or member.requested_roles is not None:
-                    for action, key in (("yes", "approve_button"), ("no", "reject_button")):
-                        buttons.append(
-                            (
-                                f"{self.t(key)} {label}",
-                                f"member {action} {member.id}"
-                                + (
-                                    f" {member.version}"
-                                    if member.requested_roles is not None
-                                    else ""
-                                ),
-                            )
-                        )
-            return Response("\n".join(lines), buttons)
+            from setlist_bot.transport.team import members
+
+            return await members(self, group_id)
         if command == "member":
             fields = args.split()
             require(len(fields) in (2, 3), "input")
@@ -1264,6 +1345,7 @@ class Controller:
                         },
                     ]
                     first.buttons.append((label, action))
+            response.context_group = group_id
             response.navigation_slot = "catalog"
             return response
         if command in (
@@ -1451,7 +1533,11 @@ class Controller:
             )
             await self.groups.access(group_id, admin=True)
             return await self.confirm(
-                context, f"set_archive {song.id} {song.version} {command}", self._song_card(song)
+                context,
+                f"set_archive {song.id} {song.version} {command}",
+                self.t("song_archive_question" if command == "archive" else "song_restore_question")
+                + "\n\n"
+                + self._song_card(song),
             )
         if command == "set_archive":
             require(confirmed, "confirmation")
@@ -1480,7 +1566,10 @@ class Controller:
                             f"decide {action} {proposal.id}",
                         )
                     )
-            return Response("\n\n".join(lines) or self.t("empty"), buttons)
+            return Response(
+                self.t("context_proposals") + "\n\n" + ("\n\n".join(lines) or self.t("empty")),
+                buttons,
+            )
         if command == "decide":
             action, identifier = args.split()
             require(action in ("yes", "no"), "input")
@@ -1687,6 +1776,7 @@ class Controller:
         concert_id = context.concert_id
         assert concert_id is not None
         if command in ("move", "remove") and not args:
+            self._response_target = (group_id, context.concert_id)
             snapshot, version, approved = await self.setlists.read(
                 group_id, concert_id, private=self.private
             )
@@ -1719,6 +1809,7 @@ class Controller:
         if command in SETLIST_INPUTS and not args:
             return await self._request_input(command, context)
         if command in ("delete_concert", "delete_concert_final"):
+            self._response_target = (group_id, context.concert_id)
             await self.groups.access(group_id, admin=True)
             require(
                 not args or command == "delete_concert_final" or UUID(args) == concert_id,
@@ -1959,6 +2050,7 @@ class Controller:
                 require(False, "input")
             return await self._show(context)
         if command in ("history", "versions"):
+            self._response_target = (group_id, context.concert_id)
             history = await self.setlists.history(group_id, concert_id)
             lines = [concert_label(await self.store.get(Concert, concert_id), self.language)]
             for revision in history:
@@ -1979,6 +2071,7 @@ class Controller:
                 [(await self._revision_label(r), f"revision {r.id}") for r in history],
             )
         if command == "revision":
+            self._response_target = (group_id, context.concert_id)
             revision = await self.store.get(Revision, UUID(args))
             setlist = await self.setlists.load(group_id, concert_id)
             require(

@@ -42,6 +42,7 @@ class Group(Entity):
 
 @dataclass(kw_only=True)
 class Membership(Entity):
+    invitation: dict[str, Any] | None = None
     requested_roles: list[str] | None = None
     version: int = 0
     group_id: UUID

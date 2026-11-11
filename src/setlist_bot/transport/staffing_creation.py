@@ -16,6 +16,7 @@ from setlist_bot.domain.performance_input import (
 )
 from setlist_bot.domain.rules import normalize, require
 from setlist_bot.transport.controller import Controller, Response
+from setlist_bot.transport.response_context import staffing_context
 from setlist_bot.transport.staffing import action
 
 
@@ -119,6 +120,7 @@ async def prepare(c: Controller, group_id: UUID, value: str) -> Response:
     return await choices(c, group_id, payload)
 
 
+@staffing_context
 async def choices(
     c: Controller, group_id: UUID, payload: dict[str, Any], page: int = 0
 ) -> Response:
@@ -170,6 +172,7 @@ async def choices(
     return Response(c.t("staff_creation_choose"), buttons)
 
 
+@staffing_context
 async def choose(c: Controller, data: dict[str, Any]) -> Response:
     group_id = UUID(data["group_id"])
     await c.groups.access(group_id, admin=True)

@@ -148,6 +148,10 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
             event = await uow.store.get(Outbox, pending.id, lock=True)
             if event.sent:
                 return False
+            if event.support_kind in ("team", "team_note"):
+                from setlist_bot.infrastructure.team_delivery import deliver_team
+
+                return await deliver_team(bot, uow, event)
             if event.support_kind == "members":
                 from setlist_bot.infrastructure.member_board_delivery import deliver_members
 

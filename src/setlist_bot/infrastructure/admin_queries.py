@@ -220,6 +220,11 @@ class AdminQueries:
     ) -> list[dict[str, Any]]:
         return await self.rows(
             """SELECT m.id,m.role,m.status,m.musical_role AS nickname,
+            COALESCE((SELECT string_agg(r.name, ', ' ORDER BY c.priority,r.name)
+              FROM staff_contacts c JOIN staff_roles r ON r.id=c.role_id
+              WHERE c.group_id=m.group_id AND c.user_id=m.user_id
+                AND c.permanent),'') AS team_roles,
+            m.requested_roles,m.invitation->'roles' AS invited_roles,
             u.display_name,u.telegram_id,u.username,u.id AS user_id,
             g.name,g.id AS group_id,g.owner_id
             FROM memberships m JOIN users u ON u.id=m.user_id JOIN groups g ON g.id=m.group_id

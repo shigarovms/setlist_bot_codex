@@ -141,6 +141,9 @@ class Groups:
         require(group.deleted_at is None, "in_trash")
         existing = await self.store.find(Membership, group_id=group_id, user_id=self.user.id)
         if existing:
+            if existing[0].status == "left":
+                existing[0].status = "pending"
+                existing[0].version += 1
             existing[0].musical_role = musical_role.strip()
             await queue_member_board(self.store, group_id)
             return existing[0]
@@ -168,7 +171,20 @@ class Groups:
                 or str(self.user.telegram_id),
             )
         )
+        if member.invitation and set(member.invitation["roles"]) == set(roles):
+            from setlist_bot.application.team import Team
+            from setlist_bot.domain.rules import AppError
+
+            try:
+                await Team(self.store, self.user).validate(member)
+            except AppError:
+                pass
+            else:
+                return await Team(self.store, self.user).respond(member.id, member.version, True)
         if member.requested_roles != roles:
+            member.invitation = None
+            if member.status in ("left", "invited"):
+                member.status = "pending"
             member.requested_roles = list(roles)
             member.version += 1
         return member
@@ -186,6 +202,7 @@ class Groups:
             require(expected == membership.version, "input_expired")
         if approve:
             membership.status = "active"
+            membership.invitation = None
             if membership.requested_roles:
                 from setlist_bot.application.staffing import Staffing
 
@@ -199,7 +216,9 @@ class Groups:
             membership.requested_roles = None
             membership.version += 1
         else:
-            await self.store.delete(membership)
+            membership.requested_roles = None
+            membership.status = "invited" if membership.invitation else "left"
+            membership.version += 1
         await self.store.flush()
         await queue_member_board(self.store, group_id)
 
