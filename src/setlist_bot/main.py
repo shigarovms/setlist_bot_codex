@@ -212,6 +212,9 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
                     return False
             request = None
             request_data = None
+            if event.support_kind == "sl_result" and (group is None or event.concert_id is None):
+                event.sent, event.discarded_at = True, now()
+                return False
             if group is not None:
                 bindings = await uow.store.find(
                     ChatBinding, group_id=group.id, chat_id=event.chat_id
@@ -219,6 +222,15 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
                 concert = (
                     await uow.store.get(Concert, event.concert_id) if event.concert_id else None
                 )
+                private_decision = event.support_kind == "sl_result"
+                if private_decision:
+                    from setlist_bot.transport.shared_requests import can_deliver_private_decision
+
+                    if concert is None or not await can_deliver_private_decision(
+                        uow.store, event, group, concert
+                    ):
+                        event.sent, event.discarded_at = True, now()
+                        return False
                 if event.chat_id > 0 and event.buttons and event.buttons[0][1].startswith("slreq "):
                     requests = await uow.store.find(
                         Confirmation, id=UUID(event.buttons[0][1].split()[1])
@@ -269,7 +281,7 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
                             return False
                 if (
                     group.deleted_at is not None
-                    or (not bindings and request is None)
+                    or (not bindings and request is None and not private_decision)
                     or (concert and concert.deleted_at is not None)
                 ):
                     event.sent = True

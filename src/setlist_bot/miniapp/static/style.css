@@ -118,6 +118,11 @@ main {
 }
 .shared-setlist small { display: block; color: var(--hint); white-space: pre-wrap; }
 .shared-setlist .shared-pause { background: transparent; border-style: dashed; }
+.shared-tools { width: min(720px, calc(100% - 24px)); }
+.shared-tools label { display: block; margin-top: 8px; }
+.shared-tools button { margin: 2px; }
+.shared-edit-row input { max-width: 100%; }
+.shared-edit-row .toolbar { margin-top: 6px; }
 header h1 {
   font-size: 23px;
   line-height: 1.2;

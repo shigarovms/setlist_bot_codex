@@ -3159,6 +3159,12 @@ class Controller:
                 self.t("request_accepted" if values[1] == "yes" else "request_rejected")
             )
             if data["private_chat"]:
+                if values[1] == "yes" and data.get("card_id") is None:
+                    from setlist_bot.application.message_refresh import queue_card_refreshes
+
+                    await queue_card_refreshes(
+                        self.store, UUID(data["group_id"]), UUID(data["concert_id"])
+                    )
                 response.deliveries.append(
                     (
                         data["source_chat_id"],
@@ -3340,41 +3346,14 @@ class Controller:
         )[0]
         if membership.role != "admin":
             require(values[1] != "return", "admin_only")
-            request, admin, created = await self.menus.request(row, data, operation)
+            from setlist_bot.transport.shared_requests import queue_admin_request
+
+            request, _, created = await self.menus.request(row, data, operation)
             if created:
+                await queue_admin_request(self.store, self.user, request)
                 group = await self.store.get(Group, UUID(data["group_id"]))
                 concert = await self.store.get(Concert, UUID(data["concert_id"]))
-                name = await self.groups.name(UUID(data["group_id"]))
-                header = tr(
-                    admin.language,
-                    "request_admin",
-                    name=name,
-                    group=group.name,
-                    action=tr(
-                        admin.language,
-                        "request_approve" if operation == "approve" else "request_edit",
-                    ),
-                )
-                self.store.add(
-                    Outbox(
-                        group_id=group.id,
-                        concert_id=concert.id,
-                        chat_id=admin.telegram_id,
-                        text=header
-                        + "\n\n"
-                        + render_setlist(
-                            data["snapshot"],
-                            concert,
-                            admin.language,
-                            data["version"],
-                            approved=data["approved"],
-                        ),
-                        buttons=[
-                            [tr(admin.language, "request_yes"), f"slreq {request.id.hex} yes"],
-                            [tr(admin.language, "request_no"), f"slreq {request.id.hex} no"],
-                        ],
-                    )
-                )
+                name = await self.groups.name(group.id)
                 if not self.private:
                     self.store.add(
                         Outbox(

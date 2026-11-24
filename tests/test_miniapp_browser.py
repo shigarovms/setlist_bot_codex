@@ -294,6 +294,37 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.wait(
                     "document.querySelector('.shared-setlist')?.innerText.includes('Комета')"
                 )
+                await browser.click_named(
+                    "#workspace-content button", "Редактировать общий сет-лист"
+                )
+                await browser.click_named(".shared-tools button", "Добавить паузу")
+                await browser.js("""
+                    const caption = document.querySelector('.shared-edit-row input[maxlength]');
+                    caption.value = 'Пауза для настройки';
+                    caption.dispatchEvent(new Event('input', {bubbles: true}));
+                """)
+                await browser.click_named(".shared-tools button", "Сохранить общий список")
+                await process_catalog_request(engine)
+                await browser.wait(
+                    "document.querySelector('.shared-setlist')?.innerText"
+                    ".includes('Пауза для настройки')"
+                )
+                await browser.click_named("#workspace-content button", "Утвердить")
+                await process_catalog_request(engine)
+                await browser.wait(
+                    "document.querySelector('#workspace-content').innerText.includes('Утверждён')"
+                )
+                await browser.click_named("#workspace-content button", "Вернуть в работу")
+                await process_catalog_request(engine)
+                await browser.wait(
+                    "document.querySelector('#workspace-content').innerText.includes('В работе')"
+                )
+                await browser.click_named("#workspace-content button", "История")
+                await browser.wait(
+                    "document.querySelector('.shared-tools').innerText"
+                    ".includes('Возвращён в работу')"
+                )
+                await browser.click_named(".shared-tools button", "Закрыть")
                 await browser.click_named("#workspace-content button", "Открыть личный черновик")
                 await browser.wait("document.querySelectorAll('.catalog-entry').length === 2")
                 assert "Новый год" in await browser.js(

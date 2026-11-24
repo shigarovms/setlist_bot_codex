@@ -17,6 +17,7 @@ from setlist_bot.application.importing import Importer
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.repertoire_import import RepertoireImport
 from setlist_bot.application.workspace_music import WorkspaceMusic
+from setlist_bot.application.workspace_setlists import SETLIST_SESSION, WorkspaceSetlists
 from setlist_bot.domain.entities import (
     CatalogProposal,
     Concert,
@@ -36,6 +37,7 @@ CATALOG_OPERATIONS = {
     "catalog_decide": "miniapp_catalog_decide",
     "catalog_import": "miniapp_catalog_import",
     "music_action": "miniapp_music",
+    "shared_action": "miniapp_shared",
     "duration_save": "miniapp_duration",
 }
 
@@ -45,6 +47,7 @@ class CatalogTarget:
     parent: Confirmation
     group_id: UUID
     concert: Concert | None = None
+    shared: bool = False
 
 
 class MiniCatalog:
@@ -73,7 +76,8 @@ class MiniCatalog:
     async def target(self, session: UUID) -> CatalogTarget:
         parent = await self.store.get(Confirmation, session)
         data = json.loads(parent.command)
-        if data.get("kind") != "miniapp_repertoire":
+        kind = data.get("kind")
+        if kind not in ("miniapp_repertoire", SETLIST_SESSION):
             parent, _, concert = await self.drafts.load(session)
             return CatalogTarget(parent, concert.group_id, concert)
         require(
@@ -84,6 +88,16 @@ class MiniCatalog:
         )
         group = await self.drafts.groups.access(UUID(data["group_id"]))
         require(group.lifecycle_version == data["group_epoch"], "miniapp_expired")
+        if kind == SETLIST_SESSION:
+            concert = await self.store.get(Concert, UUID(data["concert_id"]))
+            require(
+                concert.group_id == group.id
+                and concert.deleted_at is None
+                and concert.lifecycle_version == data["concert_epoch"],
+                "miniapp_expired",
+            )
+            await self.drafts.groups.check_performance_visibility(group.id, concert.id)
+            return CatalogTarget(parent, group.id, concert, shared=True)
         return CatalogTarget(parent, group.id)
 
     async def read(self, session: UUID, song_id: UUID) -> dict[str, Any]:
@@ -103,7 +117,8 @@ class MiniCatalog:
         target = await self.target(session)
         group_id, concert = target.group_id, target.concert
         kind = CATALOG_OPERATIONS[operation]
-        if operation != "catalog_save":
+        require(target.shared == (operation == "shared_action"), "input")
+        if operation not in ("catalog_save", "shared_action"):
             await self.drafts.groups.access(group_id, admin=True)
         request = payload.get("request_id")
         require(isinstance(request, str) and str(UUID(request)) == request, "input")
@@ -152,6 +167,8 @@ class MiniCatalog:
         elif operation == "music_action":
             require(concert is None, "input")
             details = {"music": WorkspaceMusic.command(payload)}
+        elif operation == "shared_action":
+            details = {"shared": WorkspaceSetlists.command(payload)}
         else:
             details = await self._catalog_details(group_id, payload)
         self.store.add(
@@ -293,6 +310,19 @@ class MiniCatalog:
             )
             row.command = json.dumps({**data, "status": "saved", "result": music_result})
             return music_result
+        if data["kind"] == "miniapp_shared":
+            require(target.shared and concert is not None, "miniapp_expired")
+            assert concert is not None
+            shared_result = await WorkspaceSetlists(self.store, self.user).apply(
+                group_id, concert.id, data["shared"]
+            )
+            public = {
+                key: value
+                for key, value in shared_result.items()
+                if key not in ("notify", "resolved")
+            }
+            row.command = json.dumps({**data, "status": "saved", "result": public})
+            return shared_result
         song_id = UUID(data["song_id"]) if data["song_id"] else None
         if song_id:
             require(not (await self.catalog.song(group_id, song_id)).archived, "not_found")

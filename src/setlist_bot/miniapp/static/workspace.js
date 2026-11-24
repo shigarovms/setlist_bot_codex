@@ -1,6 +1,7 @@
 import { clock, numbered } from "./model.js";
 import { repertoireImport } from "./repertoire-import.js";
 import { repertoireMusic } from "./repertoire-music.js";
+import { mountSharedSetlist } from "./shared-setlist.js";
 
 const copy = {
   ru: {
@@ -112,6 +113,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   let language = navigator.language.startsWith("ru") ? "ru" : "en";
   let login;
   let catalogSession;
+  let sharedSession;
   const t = (key) => workspaceText(language, key);
   main.hidden = false;
   title.textContent = t("bands");
@@ -225,6 +227,18 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       throw error;
     }
   }
+  async function sharedApi(operation, payload, method) {
+    sharedSession ??= api("open_shared", { band, performance }, "POST");
+    const opening = sharedSession;
+    let session;
+    try {
+      ({ session } = await opening);
+      return await api(operation, { ...payload, session }, method);
+    } catch (error) {
+      if (sharedSession === opening && (!session || error.data?.error === "miniapp_expired")) sharedSession = null;
+      throw error;
+    }
+  }
   function songButton(label, admin, id = null, mode = "edit") {
     const button = element("button", t(label), { type: "button" });
     button.addEventListener("click", () => openSong(id, {
@@ -298,6 +312,11 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       }
       content.append(rows);
     } else content.append(element("p", t("noEntries")));
+    mountSharedSetlist({
+      root: content, data, language,
+      read: (operation, params = {}) => api(operation, { band, performance, ...params }),
+      request: sharedApi, refresh: load, status: message => { status.textContent = message; },
+    });
     if (data.can_edit_draft) {
       const action = element("button", t("draft"), { type: "button", class: "primary" });
       action.addEventListener("click", () => openDraft(info.id, action));

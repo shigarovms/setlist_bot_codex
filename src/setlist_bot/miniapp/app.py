@@ -16,6 +16,7 @@ from setlist_bot.application.miniapp_catalog import CATALOG_OPERATIONS, MiniCata
 from setlist_bot.application.repertoire_import import RepertoireImport
 from setlist_bot.application.workspace import Workspace
 from setlist_bot.application.workspace_music import WorkspaceMusic
+from setlist_bot.application.workspace_setlists import WorkspaceSetlists
 from setlist_bot.domain.entities import Confirmation, User, now
 from setlist_bot.domain.miniapp_auth import verify_init_data
 from setlist_bot.domain.rules import AppError
@@ -101,6 +102,7 @@ async def asset(request: web.Request) -> web.Response:
         "workspace.js": "text/javascript",
         "repertoire-import.js": "text/javascript",
         "repertoire-music.js": "text/javascript",
+        "shared-setlist.js": "text/javascript",
         "model.js": "text/javascript",
         "persistence.js": "text/javascript",
         "style.css": "text/css",
@@ -203,6 +205,42 @@ async def api(request: web.Request) -> web.Response:
                 user = users[0]
             request[LANGUAGE] = user.language
             service = MiniDrafts(uow.store, user)
+            if operation == "open_shared" and request.method == "POST":
+                shared = await WorkspaceSetlists(uow.store, user).open(
+                    UUID(payload["band"]), UUID(payload["performance"])
+                )
+                return web.json_response({"session": str(shared.id)})
+            if (
+                operation
+                in (
+                    "shared_editor",
+                    "shared_variants",
+                    "shared_variant",
+                    "shared_requests",
+                    "shared_history",
+                )
+                and request.method == "GET"
+            ):
+                shared_lists = WorkspaceSetlists(uow.store, user)
+                group_id, concert_id = UUID(payload["band"]), UUID(payload["performance"])
+                if operation == "shared_editor":
+                    return web.json_response(await shared_lists.editor(group_id, concert_id))
+                if operation == "shared_requests":
+                    return web.json_response(await shared_lists.requests(group_id, concert_id))
+                if operation == "shared_variant":
+                    return web.json_response(
+                        await shared_lists.variant(
+                            group_id, concert_id, payload["kind"], UUID(payload["variant"])
+                        )
+                    )
+                page = int(payload.get("page", "0"))
+                if not 0 <= page <= 10000:
+                    raise ValueError("Invalid page")
+                return web.json_response(
+                    await shared_lists.variants(
+                        group_id, concert_id, page, history=operation == "shared_history"
+                    )
+                )
             if operation == "music_search" and request.method == "GET":
                 result = await WorkspaceMusic(uow.store, user).view(UUID(payload["band"]))
                 return web.json_response(result)
@@ -315,8 +353,6 @@ async def api(request: web.Request) -> web.Response:
                 result = await MiniCatalog(service).queue(identifier, payload, operation=operation)
             elif request.method == "GET" and operation == "catalog_status":
                 result = await MiniCatalog(service).status(identifier, UUID(payload["request"]))
-                if result.get("error"):
-                    result["message"] = tr(user.language, result["error"])
             elif request.method == "GET" and operation == "history_menu":
                 result = {"sources": await service.history_menu(identifier)}
             elif request.method == "GET" and operation == "history":
@@ -370,6 +406,8 @@ async def api(request: web.Request) -> web.Response:
                 result = await service.publication_status(identifier)
             else:
                 raise web.HTTPMethodNotAllowed(request.method, ["GET", "POST"])
+        if result.get("error") and "message" not in result:
+            result["message"] = tr(user.language, result["error"])
         return web.json_response(result)
 
 

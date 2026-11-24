@@ -7,6 +7,7 @@ from setlist_bot.application.catalog import SONG_FIELDS, Catalog, song_data
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
+from setlist_bot.application.workspace_setlists import revision_token
 from setlist_bot.domain.concerts import today
 from setlist_bot.domain.entities import (
     CatalogProposal,
@@ -83,6 +84,11 @@ class Workspace:
             group_id, performance_id
         )
         concert = await self.store.get(Concert, performance_id)
+        member = (
+            await self.store.find(
+                Membership, group_id=group_id, user_id=self.user.id, status="active"
+            )
+        )[0]
         items = flat_content(snapshot)["blocks"][0]["items"]
         return {
             "language": self.user.language,
@@ -97,9 +103,11 @@ class Workspace:
                 "planned_seconds": concert.performance_duration_seconds,
             },
             "can_edit_draft": await can_open_draft(groups, group_id),
+            "admin": member.role == "admin",
             "setlist": {
                 "approved": approved,
                 "version": version,
+                "token": revision_token(group, concert, snapshot),
                 "seconds": totals(snapshot)[2],
                 "entries": [
                     {

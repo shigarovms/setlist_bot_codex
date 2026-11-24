@@ -94,7 +94,7 @@ class SetlistMenus:
         return row, data
 
     async def request(
-        self, card: Confirmation, data: dict[str, Any], operation: str
+        self, card: Confirmation | None, data: dict[str, Any], operation: str
     ) -> tuple[Confirmation, User, bool]:
         require(not data["personal"], "group_only")
         await self.validate(data, fresh=True)
@@ -122,6 +122,7 @@ class SetlistMenus:
                 and pending["operation"] == operation
                 and pending["group_epoch"] == data["group_epoch"]
                 and pending["concert_epoch"] == data["concert_epoch"]
+                and pending["snapshot"] == data["snapshot"]
             ):
                 return row, admin, False
         row = Confirmation(
@@ -139,7 +140,7 @@ class SetlistMenus:
                 "status": "pending",
                 "operation": operation,
                 "source_chat_id": self.chat_id,
-                "card_id": str(card.id),
+                "card_id": str(card.id) if card else None,
                 "requester_id": str(self.user.id),
             },
         )
@@ -161,6 +162,9 @@ class SetlistMenus:
             "menu_expired",
         )
         await Groups(self.store, self.user).access(UUID(data["group_id"]), admin=True)
+        row = await self.store.get(Confirmation, row.id, lock=True)
+        data = self.data(row)
+        require(data["status"] == "pending" and row.expires_at > now(), "menu_expired")
         await self.validate(data, fresh=True)
         group_id = UUID(data["group_id"])
         requester = await self.store.get(User, UUID(data["requester_id"]))

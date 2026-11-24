@@ -341,9 +341,7 @@ class Setlists:
             # RU: Порядок песен и средняя сохраняются одной версией личного черновика.
             # EN: A single atomic draft write prevents a gap edit from racing the song list.
             require(
-                private
-                and type(default_pause_seconds) is int
-                and 0 <= default_pause_seconds <= 86400,
+                type(default_pause_seconds) is int and 0 <= default_pause_seconds <= 86400,
                 "pause_duration",
             )
             content["default_pause_seconds"] = default_pause_seconds
@@ -375,7 +373,7 @@ class Setlists:
             ]
         else:
             entries = ordered if ordered is not None else list(song_ids or [])
-            require((0 if private and replace else 1) <= len(entries) <= 200, "song_list_input")
+            require((0 if replace else 1) <= len(entries) <= 200, "song_list_input")
             items = []
             for entry in entries:
                 if isinstance(entry, int):
@@ -385,13 +383,13 @@ class Setlists:
                     require(not song.archived, "selection_catalog_changed")
                     items.append({"song_id": str(song.id), "pause_before": None})
         if pause_labels is not None:
-            require(private and len(pause_labels) == len(items), "input")
+            require(len(pause_labels) == len(items), "input")
             for index, (item, label) in enumerate(zip(items, pause_labels, strict=True)):
                 require(is_pause(item) or label is None, "input")
                 if is_pause(item):
                     items[index] = pause_item(item["duration_seconds"], label)
         if pauses_before is not None:
-            require(private and len(pauses_before) == len(items), "input")
+            require(len(pauses_before) == len(items), "input")
             for item, lead in zip(items, pauses_before, strict=True):
                 require(lead is None or type(lead) is int and 0 <= lead <= 86400, "pause_duration")
                 if not is_pause(item):

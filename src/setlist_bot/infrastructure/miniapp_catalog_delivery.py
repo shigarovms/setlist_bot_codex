@@ -32,7 +32,20 @@ async def deliver_catalog(uow: PostgresUnitOfWork, event: Outbox) -> bool:
                 and user.telegram_id == event.chat_id,
                 "miniapp_expired",
             )
-            await service.execute(target, identifier)
+            result = await service.execute(target, identifier)
+            if notice := result.get("notify"):
+                from setlist_bot.transport.shared_requests import queue_admin_request
+
+                await uow.store.flush()
+                await queue_admin_request(
+                    uow.store, user, await uow.store.get(Confirmation, UUID(notice))
+                )
+            if resolved := result.get("resolved"):
+                from setlist_bot.transport.shared_requests import queue_decision_result
+
+                await queue_decision_result(
+                    uow.store, await uow.store.get(Confirmation, UUID(resolved))
+                )
     except AppError as exc:
         row = await uow.store.get(Confirmation, identifier, lock=True)
         if data.get("kind") == "miniapp_catalog_import":
