@@ -146,7 +146,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   let login;
   let catalogSession;
   let sharedSession;
-  let gigSession;
+  const gigSessions = new Map();
   const t = (key) => workspaceText(language, key);
   main.hidden = false;
   title.textContent = t("bands");
@@ -299,16 +299,17 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       throw error;
     }
   }
-  async function gigApi(operation, payload, method) {
-    gigSession ??= api("open_gig", { invitation: gigInvitation }, "POST");
-    const opening = gigSession;
+  async function gigApi(operation, payload, method, invitation = gigInvitation) {
+    if (!gigSessions.has(invitation))
+      gigSessions.set(invitation, api("open_gig", { invitation }, "POST"));
+    const opening = gigSessions.get(invitation);
     let session;
     try {
       ({ session } = await opening);
       return await api(operation, { ...payload, session }, method);
     } catch (error) {
-      if (gigSession === opening && (!session || error.data?.error === "miniapp_expired"))
-        gigSession = null;
+      if (gigSessions.get(invitation) === opening && (!session || error.data?.error === "miniapp_expired"))
+        gigSessions.delete(invitation);
       throw error;
     }
   }
@@ -331,6 +332,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       invitationUrl: gigSection === "history" ? null : id => gigsUrl(gigSection, page, id),
       setlistUrl: gigsUrl(gigSection, page, gigInvitation, true), historyUrl: gigsUrl("history"),
       request: gigApi, options: () => api("export_options", { invitation: gigInvitation }),
+      requestFor: invitation => (operation, payload, method) => gigApi(operation, payload, method, invitation),
       status: message => { status.textContent = message; },
     });
     if (!gigInvitation) showPages(data.has_next, index => gigsUrl(gigSection, index));

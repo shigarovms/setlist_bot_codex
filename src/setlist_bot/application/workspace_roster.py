@@ -8,6 +8,11 @@ from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.staffing import OPEN, Staffing
 from setlist_bot.application.user_lookup import checked_target
+from setlist_bot.application.workspace_replacements import (
+    active_replacements,
+    replacement_data,
+    replacement_source,
+)
 from setlist_bot.application.workspace_staffing import WorkspaceStaffing, lineup_input
 from setlist_bot.application.workspace_team import person_name, text_field
 from setlist_bot.domain.concerts import today
@@ -20,6 +25,7 @@ from setlist_bot.domain.entities import (
     LineupTemplate,
     Membership,
     StaffContact,
+    StaffReplacement,
     StaffRole,
     User,
     now,
@@ -29,6 +35,7 @@ from setlist_bot.domain.rules import require
 ROSTER_KIND = "miniapp_roster"
 SLOT_ACTIONS = {"candidates", "remove", "needed"}
 INVITE_ACTIONS = {"remind", "cancel"}
+REPLACEMENT_ACTIONS = {"request_replacement", "cancel_replacement", "approve_replacement"}
 
 
 def status(busy: int, tentative: int) -> str:
@@ -75,7 +82,15 @@ class WorkspaceRoster:
             for row in invitations
             if row.status in OPEN | {"confirmed"} and self.staffing.valid(row, event, group)
         ]
-        shown = active if admin else [row for row in active if row.status == "confirmed"]
+        pending = {row.source_id: row for row in await active_replacements(self.store, event)}
+        replacement_ids = {row.id for row in pending.values()}
+        shown = [
+            row
+            for row in active
+            if row.status == "confirmed"
+            or admin
+            and (row.replacement_id is None or row.replacement_id in replacement_ids)
+        ]
         ids = {row.user_id for row in shown}
         if admin:
             ids.update(slot.preferred_user_id for slot in rows if slot.preferred_user_id)
@@ -129,7 +144,13 @@ class WorkspaceRoster:
                             "name": person_name(people[row.user_id]),
                             "status": row.status,
                             "version": row.version,
-                            "replacement": row.replacement_id is not None,
+                            "replacement": row.replacement_id in replacement_ids,
+                            "substituted": row.status == "confirmed"
+                            and row.replacement_id is not None,
+                            "needs_replacement": row.id in pending,
+                            "request": replacement_data(pending[row.id])
+                            if admin and row.id in pending
+                            else None,
                         }
                         for row in by_slot.get(slot.id, [])
                     ],
@@ -151,6 +172,7 @@ class WorkspaceRoster:
                 "send",
                 *SLOT_ACTIONS,
                 *INVITE_ACTIONS,
+                *REPLACEMENT_ACTIONS,
             },
             "input",
         )
@@ -165,7 +187,7 @@ class WorkspaceRoster:
         version = body.get("version")
         require(type(version) is int, "input")
         command: dict[str, Any] = {"action": action, "version": version}
-        if action in SLOT_ACTIONS | INVITE_ACTIONS | {"apply_template"} or (
+        if action in SLOT_ACTIONS | INVITE_ACTIONS | REPLACEMENT_ACTIONS | {"apply_template"} or (
             action == "review" and body.get("target")
         ):
             command["target"] = str(UUID(text_field(body, "target", 36)))
@@ -181,7 +203,24 @@ class WorkspaceRoster:
             command["person"] = str(UUID(text_field(body, "person", 36)))
             if body.get("reference"):
                 command["reference"] = text_field(body, "reference", 64)
+        if action in ("review", "candidates") and body.get("replacement"):
+            require("target" in command, "input")
+            command["replacement"] = str(UUID(text_field(body, "replacement", 36)))
         return command
+
+    async def open_replacement(
+        self, event: Concert, group: Group, identifier: UUID
+    ) -> tuple[StaffReplacement, GigInvitation]:
+        pending, source = await replacement_source(self.store, identifier, group.id, event.id)
+        require(
+            pending.status == "pending"
+            and pending.expires_at > now()
+            and source.status == "confirmed"
+            and self.staffing.valid(source, event, group)
+            and event.date >= today(),
+            "input_expired",
+        )
+        return pending, source
 
     async def slot(self, event: Concert, command: dict[str, Any]) -> GigSlot:
         slot = await self.store.get(GigSlot, UUID(command["target"]))
@@ -212,6 +251,7 @@ class WorkspaceRoster:
     async def review(self, event: Concert, group: Group, command: dict[str, Any]) -> dict[str, Any]:
         require(event.date >= today(), "input_expired")
         active = await self.active(event, group)
+        replacement = source = None
         if "target" in command:
             slot = await self.slot(event, command)
             person = UUID(command["person"])
@@ -223,14 +263,28 @@ class WorkspaceRoster:
                     person == self.user.id or any(u.id == person for _, u, *_ in candidates),
                     "input_expired",
                 )
-            require(
-                slot.required
-                and not any(
-                    inv.slot_id == slot.id and (inv.status == "confirmed" or inv.user_id == person)
-                    for inv in active
-                ),
-                "staff_filled",
-            )
+            require(slot.required, "input_expired")
+            if "replacement" in command:
+                replacement, source = await self.open_replacement(
+                    event, group, UUID(command["replacement"])
+                )
+                require(source.slot_id == slot.id and source.user_id != person, "input_expired")
+                require(
+                    not any(
+                        row.replacement_id == replacement.id and row.user_id == person
+                        for row in active
+                    ),
+                    "staff_filled",
+                )
+            else:
+                require(
+                    not any(
+                        inv.slot_id == slot.id
+                        and (inv.status == "confirmed" or inv.user_id == person)
+                        for inv in active
+                    ),
+                    "staff_filled",
+                )
             targets = [(slot, person)]
         else:
             targets = self.default_targets(await self.slots(event), active)
@@ -268,7 +322,13 @@ class WorkspaceRoster:
                     for slot, person in targets
                 ],
                 "availability": {str(person): status(*conflicts[person]) for person in people},
+                **(
+                    {"replacement": str(replacement.id), "source": str(source.user_id)}
+                    if replacement is not None and source is not None
+                    else {}
+                ),
             },
+            "replacement": replacement is not None,
         }
 
     async def send_plan(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -298,11 +358,66 @@ class WorkspaceRoster:
         availability = {str(person): status(*conflicts[person]) for person in people}
         require(availability == plan["availability"], "conflict")
         require("busy" not in availability.values() or command["force"], "staff_busy")
-        for row in plan["targets"]:
-            await self.staffing.invite(
-                UUID(row["slot"]), UUID(row["person"]), row["version"], force=command["force"]
+        replacement = UUID(plan["replacement"]) if plan.get("replacement") else None
+        for target in plan["targets"]:
+            invite = await self.staffing.invite(
+                UUID(target["slot"]),
+                UUID(target["person"]),
+                target["version"],
+                force=command["force"],
+                replacement_id=replacement,
             )
-        return {"recipients": len(people - {self.user.id}), "assigned_self": self.user.id in people}
+            if replacement is not None and invite.status == "confirmed":
+                return {"replacement_confirmed": True}
+        return {
+            "recipients": len(people - {self.user.id}),
+            "assigned_self": self.user.id in people,
+        }
+
+    async def delivery_people(self, request: dict[str, Any]) -> set[UUID]:
+        command = request["roster"]
+        action = command["action"]
+        if action == "send":
+            plan = await self.send_plan(request)
+            people = {UUID(row["person"]) for row in plan["targets"]}
+            if source := plan.get("source"):
+                people.add(UUID(source))
+            return people
+        if action not in REPLACEMENT_ACTIONS:
+            return set()
+        group_id, event_id = UUID(request["group_id"]), UUID(request["concert_id"])
+        identifier = UUID(command["target"])
+        if action == "cancel_replacement":
+            _, source_row = await replacement_source(self.store, identifier, group_id, event_id)
+            return {source_row.user_id}
+        invite = await self.store.get(GigInvitation, identifier)
+        require(invite.group_id == group_id and invite.concert_id == event_id, "not_found")
+        if action == "request_replacement":
+            return {invite.user_id}
+        require(invite.replacement_id is not None, "input_expired")
+        assert invite.replacement_id is not None
+        _, source_row = await replacement_source(
+            self.store, invite.replacement_id, group_id, event_id
+        )
+        return {invite.user_id, source_row.user_id}
+
+    async def apply_replacement(
+        self, event: Concert, group: Group, command: dict[str, Any]
+    ) -> dict[str, Any]:
+        action, identifier = command["action"], UUID(command["target"])
+        if action == "cancel_replacement":
+            pending, _ = await self.open_replacement(event, group, identifier)
+            await self.staffing.cancel_request(pending.id, command["expected"])
+            return {}
+        rows = await self.store.roster_invitations(group.id, event.id)
+        invite = next((row for row in rows if row.id == identifier), None)
+        require(invite is not None and invite.version == command["expected"], "input_expired")
+        assert invite is not None
+        if action == "request_replacement":
+            await self.staffing.request_replacement(invite.id, by_admin=True)
+            return {}
+        await self.staffing.approve_replacement(invite.id, invite.version)
+        return {"replacement_confirmed": True}
 
     async def apply(
         self, group_id: UUID, event_id: UUID, request: dict[str, Any]
@@ -318,6 +433,20 @@ class WorkspaceRoster:
         if action == "candidates":
             slot = await self.slot(event, command)
             people = await self.staffing.candidates(slot.id)
+            excluded: set[UUID] = set()
+            if "replacement" in command:
+                pending, source = await self.open_replacement(
+                    event, group, UUID(command["replacement"])
+                )
+                require(source.slot_id == slot.id, "input_expired")
+                excluded = {
+                    source.user_id,
+                    *(
+                        row.user_id
+                        for row in await self.active(event, group)
+                        if row.replacement_id == pending.id
+                    ),
+                }
             return {
                 "candidates": [
                     {
@@ -326,9 +455,14 @@ class WorkspaceRoster:
                         "status": status(busy, tentative),
                     }
                     for _, person, busy, tentative in people
+                    if person.id not in excluded
                 ],
-                "self": {"id": str(self.user.id), "name": person_name(self.user)},
+                "self": {"id": str(self.user.id), "name": person_name(self.user)}
+                if self.user.id not in excluded
+                else None,
             }
+        if action in REPLACEMENT_ACTIONS:
+            return await self.apply_replacement(event, group, command)
         if action in ("prepare", "add"):
             if action == "prepare":
                 require(all(slot.required for slot in await self.slots(event)), "input_expired")
@@ -358,7 +492,6 @@ class WorkspaceRoster:
             require(
                 invitation.group_id == group_id
                 and invitation.concert_id == event.id
-                and invitation.replacement_id is None
                 and self.staffing.valid(invitation, event, group),
                 "input_expired",
             )

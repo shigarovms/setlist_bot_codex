@@ -24,6 +24,7 @@ from setlist_bot.domain.entities import (
     Concert,
     Confirmation,
     DeploymentIdentity,
+    GigInvitation,
     Group,
     Membership,
     PersonalDraft,
@@ -252,6 +253,15 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
         lineup = await staffing.template(
             world.group.id, "Дуэт", [{"role_id": str(guitar.id), "user_id": str(world.stranger.id)}]
         )
+        booking = (
+            await uow.store.find(
+                GigInvitation,
+                concert_id=world.concert.id,
+                user_id=world.member.id,
+                status="confirmed",
+            )
+        )[0]
+        replacement = await Staffing(uow.store, world.member).request_replacement(booking.id)
     spec = importlib.util.spec_from_file_location(
         "miniapp_setup", Path(__file__).parents[1] / "scripts/setup-sandbox-miniapp.py"
     )
@@ -383,6 +393,7 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
             assert roster.status == 200, await roster.text()
             slots = (await roster.json())["slots"]
             assert slots[0]["invitations"][0]["status"] == "confirmed"
+            assert slots[0]["invitations"][0]["request"]["id"] == str(replacement.id)
             invite_id = slots[0]["invitations"][0]["id"]
             performer = {**headers, "Authorization": "tma " + signed(actor=2)}
             personal_card = await client.get(
@@ -454,6 +465,7 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 "UPDATE concerts SET deleted_at=now()",
                 "UPDATE lineup_templates SET slots='[]'",
                 "UPDATE gig_slots SET required=false",
+                "UPDATE staff_replacements SET status='approved'",
                 "SELECT last_reminded_at FROM gig_invitations",
                 "UPDATE songs SET title='bad'",
                 "INSERT INTO song_aliases(id,group_id,song_id,title) "

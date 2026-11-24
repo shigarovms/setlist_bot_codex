@@ -30,6 +30,7 @@ READ_TABLES = (
     "staff_contacts",
     "lineup_templates",
     "gig_slots",
+    "staff_replacements",
     "concerts",
     "setlists",
     "blocks",

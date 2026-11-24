@@ -18,7 +18,12 @@ from setlist_bot.application.importing import Importer
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.repertoire_import import RepertoireImport
 from setlist_bot.application.workspace_exports import WorkspaceExports
-from setlist_bot.application.workspace_gigs import GIG_REPLY, GIG_SESSION, WorkspaceGigs
+from setlist_bot.application.workspace_gigs import (
+    GIG_REPLACEMENT,
+    GIG_REPLY,
+    GIG_SESSION,
+    WorkspaceGigs,
+)
 from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.application.workspace_performances import WorkspacePerformances
 from setlist_bot.application.workspace_roster import ROSTER_KIND, WorkspaceRoster
@@ -51,6 +56,7 @@ CATALOG_OPERATIONS = {
     "staff_action": "miniapp_staff",
     "roster_action": ROSTER_KIND,
     "gig_reply": GIG_REPLY,
+    "gig_replacement": GIG_REPLACEMENT,
     "duration_save": "miniapp_duration",
 }
 
@@ -201,11 +207,13 @@ class MiniCatalog:
         group_id, concert = target.group_id, target.concert
         kind = CATALOG_OPERATIONS[operation]
         workspace_operations = ("shared_action", "export_action", "roster_action")
+        gig_operations = ("gig_reply", "gig_replacement")
         if target.invitation_id is not None:
-            require(operation in ("gig_reply", "export_action"), "forbidden")
+            require(operation in (*gig_operations, "export_action"), "forbidden")
         else:
             require(
-                operation != "gig_reply" and target.shared == (operation in workspace_operations),
+                operation not in gig_operations
+                and target.shared == (operation in workspace_operations),
                 "input",
             )
         personal = target.membership_id is not None
@@ -216,7 +224,7 @@ class MiniCatalog:
             team_command = WorkspaceTeam.command(payload, personal=personal)
             if not personal and team_command["action"] != "request_roles":
                 await self.drafts.groups.access(group_id, admin=True)
-        elif operation not in ("catalog_save", "shared_action", "export_action", "gig_reply"):
+        elif operation not in ("catalog_save", "shared_action", "export_action", *gig_operations):
             await self.drafts.groups.access(group_id, admin=True)
         request = payload.get("request_id")
         require(isinstance(request, str) and str(UUID(request)) == request, "input")
@@ -283,6 +291,9 @@ class MiniCatalog:
             expires = min(expires, now() + timedelta(minutes=15))
         elif operation == "gig_reply":
             details = {"gig_reply": WorkspaceGigs.command(payload)}
+            expires = min(expires, now() + timedelta(minutes=15))
+        elif operation == "gig_replacement":
+            details = {"gig_replacement": WorkspaceGigs.replacement_command(payload)}
             expires = min(expires, now() + timedelta(minutes=15))
         else:
             details = await self._catalog_details(group_id, payload)
@@ -380,7 +391,8 @@ class MiniCatalog:
         )
         require(target.membership_id is None or data["kind"] == "miniapp_team", "forbidden")
         require(
-            target.invitation_id is None or data["kind"] in (GIG_REPLY, "miniapp_export"),
+            target.invitation_id is None
+            or data["kind"] in (GIG_REPLY, GIG_REPLACEMENT, "miniapp_export"),
             "forbidden",
         )
         if data["status"] != "pending":
@@ -493,11 +505,14 @@ class MiniCatalog:
                 data["delivery"] = delivery
             row.command = json.dumps({**data, "status": "saved", "result": result_roster})
             return result_roster
-        if data["kind"] == GIG_REPLY:
+        if data["kind"] in (GIG_REPLY, GIG_REPLACEMENT):
             require(target.invitation_id is not None, "miniapp_expired")
             assert target.invitation_id is not None
-            result_reply = await WorkspaceGigs(self.store, self.user).reply(
-                target.invitation_id, data
+            gigs = WorkspaceGigs(self.store, self.user)
+            result_reply = (
+                await gigs.reply(target.invitation_id, data)
+                if data["kind"] == GIG_REPLY
+                else await gigs.replace(target.invitation_id, data["gig_replacement"])
             )
             row.command = json.dumps({**data, "status": "saved", "result": result_reply})
             return result_reply

@@ -8,6 +8,11 @@ from uuid import UUID
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Document, Setlists
 from setlist_bot.application.staffing import OPEN, Staffing
+from setlist_bot.application.workspace_replacements import (
+    active_replacements,
+    replacement_data,
+    replacement_source,
+)
 from setlist_bot.domain.concerts import today
 from setlist_bot.domain.entities import (
     Concert,
@@ -24,6 +29,7 @@ from setlist_bot.domain.rules import flat_content, is_pause, require, totals
 
 GIG_SESSION = "miniapp_gig"
 GIG_REPLY = "miniapp_gig_reply"
+GIG_REPLACEMENT = "miniapp_gig_replacement"
 REPLYABLE = {"pending", "conditional", "reconfirm"}
 
 
@@ -69,7 +75,7 @@ class WorkspaceGigs:
         require(bool(rows), "not_found")
         return await Setlists(self.store, self.user)._read_shared(rows[0])
 
-    async def list(self, section: str, page: int, size: int) -> dict[str, Any]:
+    async def listing(self, section: str, page: int, size: int) -> dict[str, Any]:
         invitations = await self.store.personal_invitations(self.user.id)
         events = {
             row.id: row
@@ -141,6 +147,12 @@ class WorkspaceGigs:
             answers = ["yes", "no"] if row.replacement_id else ["yes", "no", "conditional"]
         elif upcoming and row.status == "accepted":
             answers = ["no"]
+        replacements = []
+        sources: list[dict[str, Any]] = []
+        if upcoming and row.status == "confirmed":
+            replacements = await active_replacements(self.store, event, source_id=row.id)
+        elif upcoming and row.status == "conditional":
+            sources = await self.replacement_sources(row)
         return {
             "language": self.user.language,
             "band": group.name,
@@ -156,8 +168,47 @@ class WorkspaceGigs:
                 "status": row.status,
                 "answers": answers,
                 "setlist": row.status == "confirmed",
+                "can_request_replacement": upcoming
+                and row.status == "confirmed"
+                and not replacements,
+                "replacement": replacement_data(replacements[0]) if replacements else None,
+                "replacement_sources": sources,
             },
         }
+
+    async def replacement_sources(self, target: GigInvitation) -> list[dict[str, Any]]:
+        invites = [
+            row
+            for row in await self.store.personal_invitations(self.user.id)
+            if row.status == "confirmed"
+            and row.date == target.date
+            and row.concert_id != target.concert_id
+        ]
+        events = {
+            row.id: row
+            for row in await self.store.get_many(Concert, {r.concert_id for r in invites})
+        }
+        groups = {
+            row.id: row for row in await self.store.get_many(Group, {r.group_id for r in invites})
+        }
+        options = []
+        for row in sorted(invites, key=lambda item: item.id):
+            event, group = events.get(row.concert_id), groups.get(row.group_id)
+            if not event or not group or not self.staffing.valid(row, event, group):
+                continue
+            pending = await active_replacements(self.store, event, source_id=row.id)
+            request = next((item for item in pending if item.target_id == target.id), None)
+            options.append(
+                {
+                    "id": str(row.id),
+                    "version": row.version,
+                    "band": group.name,
+                    "title": event.title,
+                    "can_request": not pending,
+                    "replacement": replacement_data(request) if request else None,
+                }
+            )
+        return options
 
     async def setlist(self, identifier: UUID) -> dict[str, Any]:
         scope = await self.confirmed(identifier)
@@ -219,3 +270,42 @@ class WorkspaceGigs:
             invitation_id, version, answer, force=bool(previous)
         )
         return {"invitation_status": invitation.status}
+
+    @staticmethod
+    def replacement_command(body: dict[str, Any]) -> dict[str, Any]:
+        action, version = body.get("action"), body.get("version")
+        require(action in ("request", "cancel") and type(version) is int, "input")
+        result = {"action": action, "version": version}
+        if action == "request":
+            target = body.get("target")
+            require(target is None or isinstance(target, str), "input")
+            if target is not None:
+                result["target"] = str(UUID(target))
+        else:
+            replacement, expected = body.get("replacement"), body.get("expected")
+            require(isinstance(replacement, str) and type(expected) is int, "input")
+            result.update(replacement=str(UUID(replacement)), expected=expected)
+        return result
+
+    async def replace(self, invitation_id: UUID, command: dict[str, Any]) -> dict[str, Any]:
+        scope = await self.confirmed(invitation_id)
+        source = scope.invitation
+        require(
+            source.version == command["version"] and scope.event.date >= today(), "input_expired"
+        )
+        if command["action"] == "cancel":
+            pending, _ = await replacement_source(
+                self.store, UUID(command["replacement"]), scope.group.id, scope.event.id
+            )
+            require(pending.source_id == source.id and pending.expires_at > now(), "input_expired")
+            await self.staffing.cancel_request(pending.id, command["expected"])
+            return {"replacement_status": "cancelled"}
+        target_id = None
+        if "target" in command:
+            target = await self.own(UUID(command["target"]))
+            # Keep the conditional booking read-only here, including across bands.
+            require(target.date == source.date, "input_expired")
+            target_id = target.id
+        pending = await self.staffing.request_replacement(source.id, target_id)
+        require(pending.target_id == target_id, "input_expired")
+        return {"replacement_status": "pending", "replacement": replacement_data(pending)}

@@ -16,6 +16,9 @@ const words = {
     version: "Версия", noSongs: "Сет-лист пока пуст.", pause: "Пауза",
     close: "Закрыть", check: "Проверить результат", confirm: "Подтвердить",
     busy: "Запрос обрабатывается…", done: "Ответ сохранён.",
+    requestReplacement: "Запросить подмену", cancelReplacement: "Отменить запрос на подмену",
+    awaitingReplacement: "Запрос на подмену отправлен.", replacementSources: "Где нужна подмена",
+    requested: "Запрос сохранён.", withdrawn: "Запрос на подмену отменён.",
   },
   en: {
     title: "My performances", invitations: "Performance invitations", confirmed: "Confirmed",
@@ -30,6 +33,9 @@ const words = {
     version: "Version", noSongs: "The setlist is empty.", pause: "Pause",
     close: "Close", check: "Check result", confirm: "Confirm",
     busy: "Processing your request…", done: "Response saved.",
+    requestReplacement: "Request a substitute", cancelReplacement: "Cancel substitution request",
+    awaitingReplacement: "Substitution requested.", replacementSources: "Bookings that may need a substitute",
+    requested: "Request saved.", withdrawn: "Substitution request cancelled.",
   },
 };
 
@@ -48,7 +54,7 @@ function button(label, click, primary = false) {
   return node;
 }
 
-export function showGigs({ root, data, language, dateText, invitationUrl, setlistUrl, historyUrl, request, options, refresh, status }) {
+export function showGigs({ root, data, language, dateText, invitationUrl, setlistUrl, historyUrl, request, requestFor, options, refresh, status }) {
   const t = words[language];
   const statusLabel = value => t[value === "confirmed" ? "confirmedStatus" : value] || t.inactive;
 
@@ -70,6 +76,25 @@ export function showGigs({ root, data, language, dateText, invitationUrl, setlis
       ), true));
     }
     panel.body.append(button(t.confirm, event => panel.send(event.currentTarget, payload, request, complete, failed), true));
+  }
+
+  function replacement(source, target = null) {
+    const existing = source.replacement;
+    const label = t[existing ? "cancelReplacement" : "requestReplacement"];
+    const scopedRequest = requestFor(source.id);
+    const panel = requestDialog({
+      title: label, labels: t, operation: "gig_replacement", request: scopedRequest, refresh, status,
+    });
+    const command = { action: existing ? "cancel" : "request", version: source.version };
+    if (existing) Object.assign(command, { replacement: existing.id, expected: existing.version });
+    else if (target) command.target = target;
+    panel.body.append(el("p", [source.band || data.band, source.title].filter(Boolean).join(" · ")));
+    panel.body.append(button(t.confirm, event => panel.send(event.currentTarget, command, scopedRequest,
+      async result => {
+        panel.dialog.close();
+        await refresh();
+        status(t[result.replacement_status === "cancelled" ? "withdrawn" : "requested"]);
+      }), true));
   }
 
   async function pdf() {
@@ -103,7 +128,26 @@ export function showGigs({ root, data, language, dateText, invitationUrl, setlis
     const actions = el("div", "", { class: "toolbar" });
     for (const answer of row.answers)
       actions.append(button(t[answer === "conditional" ? "tentative" : answer], () => reply(row, answer), answer === "yes"));
+    if (row.can_request_replacement)
+      actions.append(button(t.requestReplacement, () => replacement(row)));
+    if (row.replacement)
+      actions.append(button(t.cancelReplacement, () => replacement(row)));
     root.append(actions);
+    if (row.replacement) root.append(el("p", t.awaitingReplacement));
+    if (row.replacement_sources.length) {
+      root.append(el("h3", t.replacementSources));
+      const choices = el("ul", "", { class: "workspace-list" });
+      for (const source of row.replacement_sources) {
+        const choice = el("li");
+        choice.append(el("p", [source.band, source.title].filter(Boolean).join(" · ")));
+        if (source.can_request || source.replacement) {
+          const label = t[source.replacement ? "cancelReplacement" : "requestReplacement"];
+          choice.append(button(label, () => replacement(source, row.id)));
+        } else choice.append(el("p", t.awaitingReplacement));
+        choices.append(choice);
+      }
+      root.append(choices);
+    }
     return;
   }
 

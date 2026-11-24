@@ -17,6 +17,11 @@ const words = {
     assign: "Подтвердить своё участие", pick: "Проверить", myself: "Назначить себя",
     outside: "Найти по Telegram ID или @username", none: "Подходящих знакомых исполнителей пока нет.",
     remind: "Напомнить", cancel: "Отменить приглашение", cancelBooking: "Отменить участие",
+    requestReplacement: "Запросить подмену", findReplacement: "Подобрать замену",
+    cancelReplacement: "Отменить запрос на подмену", approveReplacement: "Утвердить подмену",
+    waitingReplacement: "Ищем подмену", substituted: "Подмена утверждена",
+    candidateInvited: "Кандидат на подмену", sendReplacement: "Пригласить на подмену",
+    assignReplacement: "Встать на подмену", cancelReplacementHint: "Приглашения кандидатам будут отозваны.",
     confirm: "Подтвердить", close: "Закрыть", check: "Проверить результат",
     busy: "Запрос обрабатывается…", done: "Изменения сохранены.",
     sent: "Приглашения поставлены в очередь.", assigned: "Ваше участие подтверждено.",
@@ -36,6 +41,11 @@ const words = {
     assign: "Confirm my booking", pick: "Check", myself: "Assign myself",
     outside: "Find by Telegram ID or @username", none: "No matching performers in your directory yet.",
     remind: "Remind", cancel: "Withdraw invitation", cancelBooking: "Cancel booking",
+    requestReplacement: "Request a substitute", findReplacement: "Find a substitute",
+    cancelReplacement: "Cancel substitution request", approveReplacement: "Approve substitute",
+    waitingReplacement: "Looking for a substitute", substituted: "Substitution approved",
+    candidateInvited: "Substitute candidate", sendReplacement: "Invite substitute",
+    assignReplacement: "Take over the role", cancelReplacementHint: "Invitations to candidates will be withdrawn.",
     confirm: "Confirm", close: "Close", check: "Check result",
     busy: "Processing your request…", done: "Changes saved.",
     sent: "Invitations queued.", assigned: "Your booking is confirmed.",
@@ -107,12 +117,14 @@ export function showRoster({ root, data, language, dateText, request, preview, r
     for (const row of record.review)
       list.append(el("li", `${row.role} · ${row.person} · ${availability(row.status)}`));
     const allSelf = record.review.every(row => row.self);
-    const send = button(t[allSelf ? "assign" : "send"], event => panel.send(event.currentTarget, {
+    const key = record.replacement ? (allSelf ? "assignReplacement" : "sendReplacement")
+      : (allSelf ? "assign" : "send");
+    const send = button(t[key], event => panel.send(event.currentTarget, {
       action: "send", preview: record.request, force: !!force?.checked,
     }, request, async result => {
       panel.dialog.close();
       await refresh();
-      status(t[result.recipients ? "sent" : "assigned"]);
+      status(t[result.replacement_confirmed ? "substituted" : result.recipients ? "sent" : "assigned"]);
     }), true);
     let force;
     panel.body.replaceChildren(list);
@@ -136,20 +148,21 @@ export function showRoster({ root, data, language, dateText, request, preview, r
     check(retry);
   }
 
-  function choose(slot) {
+  function choose(slot, replacement = null) {
     const panel = modal(t.suggest);
+    const scope = { ...target(slot), ...(replacement ? { replacement: replacement.id } : {}) };
     const heading = el("h3", slot.role);
     const loading = button(t.review, event => candidates(event.currentTarget));
     panel.body.append(heading, loading);
     function lookup(trigger, id, reference) {
-      panel.send(trigger, payload("review", { ...target(slot), person: id, reference }), request,
+      panel.send(trigger, payload("review", { ...scope, person: id, reference }), request,
         result => showReview(panel, result));
     }
     function candidates(trigger) {
-      panel.send(trigger, payload("candidates", target(slot)), request, result => {
+      panel.send(trigger, payload("candidates", scope), request, result => {
         loading.remove();
         const list = el("ul", "", { class: "workspace-list" });
-        const rows = result.candidates.filter(row => row.id !== result.self.id);
+        const rows = result.candidates.filter(row => row.id !== result.self?.id);
         if (!rows.length) panel.body.append(el("p", t.none));
         for (const person of rows) {
           const row = el("li");
@@ -157,7 +170,8 @@ export function showRoster({ root, data, language, dateText, request, preview, r
             button(t.pick, event => lookup(event.currentTarget, person.id)));
           list.append(row);
         }
-        panel.body.append(list, button(t.myself, event => lookup(event.currentTarget, result.self.id)));
+        panel.body.append(list);
+        if (result.self) panel.body.append(button(t.myself, event => lookup(event.currentTarget, result.self.id)));
         const form = el("form", "", { class: "import-fields" });
         const input = el("input", "", { id: "roster-lookup", required: "", maxlength: "64" });
         const submit = el("button", t.pick, { type: "submit" });
@@ -199,9 +213,27 @@ export function showRoster({ root, data, language, dateText, request, preview, r
     if (!slot.required) card.append(el("p", t.optional));
     else if (!slot.invitations.length) card.append(el("p", slot.preferred ? `${t.candidate} · ${slot.preferred.name}` : t.vacancy));
     for (const row of slot.invitations) {
-      card.append(el("p", `${row.name} · ${t[row.status]}`));
-      if (data.admin && !row.replacement) {
+      const summary = [row.name, t[row.status]];
+      if (row.needs_replacement) summary.push(t.waitingReplacement);
+      if (row.substituted) summary.push(t.substituted);
+      if (row.replacement) summary.push(t.candidateInvited);
+      card.append(el("p", summary.join(" · ")));
+      if (data.admin) {
         const controls = el("div", "", { class: "toolbar" });
+        if (data.upcoming && row.status === "confirmed") {
+          if (row.request) {
+            controls.append(button(t.findReplacement, () => choose(slot, row.request)),
+              button(t.cancelReplacement, () => confirm(
+                "cancelReplacement", payload("cancel_replacement", target(row.request)), row.name,
+                t.cancelReplacementHint,
+              )));
+          } else controls.append(button(t.requestReplacement, () => confirm(
+            "requestReplacement", payload("request_replacement", target(row)), `${slot.role} · ${row.name}`,
+          )));
+        }
+        if (row.replacement && row.status === "accepted") controls.append(button(t.approveReplacement, () => confirm(
+          "approveReplacement", payload("approve_replacement", target(row)), `${slot.role} · ${row.name}`,
+        ), true));
         if (data.upcoming && ["pending", "reconfirm", "conditional"].includes(row.status))
           controls.append(button(t.remind, () => confirm("remind", payload("remind", target(row)), row.name)));
         const action = row.status === "confirmed" ? "cancelBooking" : "cancel";

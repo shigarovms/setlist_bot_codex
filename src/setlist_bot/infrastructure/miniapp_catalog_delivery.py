@@ -6,7 +6,7 @@ from uuid import UUID
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.miniapp_catalog import MiniCatalog
 from setlist_bot.application.ports import Store
-from setlist_bot.application.workspace_gigs import GIG_REPLY
+from setlist_bot.application.workspace_gigs import GIG_REPLACEMENT, GIG_REPLY
 from setlist_bot.application.workspace_roster import ROSTER_KIND, WorkspaceRoster
 from setlist_bot.domain.entities import Confirmation, Outbox, User, now
 from setlist_bot.domain.rules import AppError, require
@@ -22,15 +22,16 @@ async def lock_catalog_people(store: Store, event: Outbox) -> AppError | None:
     data = json.loads(row.command)
     if data.get("status") != "pending":
         return None
-    if data.get("kind") == GIG_REPLY:
+    if data.get("kind") in (GIG_REPLY, GIG_REPLACEMENT):
         await store.lock_people({row.user_id})
-    if data.get("kind") == ROSTER_KIND and data["roster"]["action"] == "send":
+    if data.get("kind") == ROSTER_KIND:
         user = await store.get(User, row.user_id)
         try:
-            plan = await WorkspaceRoster(store, user).send_plan(data)
+            people = await WorkspaceRoster(store, user).delivery_people(data)
         except AppError as exc:
             return exc
-        await store.lock_people({UUID(target["person"]) for target in plan["targets"]})
+        if people:
+            await store.lock_people(people)
     return None
 
 

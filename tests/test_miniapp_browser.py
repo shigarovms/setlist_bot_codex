@@ -424,6 +424,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser_staff_directory(browser, engine, world.group.id, origin)
                 await browser_roster(browser, engine, world, origin)
                 await browser_guest_gig(browser, engine, world, origin)
+                await browser_approve_self_substitution(browser, engine, world, origin)
                 await browser_team(browser, engine, world.group.id, origin)
                 return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
@@ -1063,5 +1064,36 @@ async def browser_guest_gig(browser, engine, world, origin):
         await browser.wait(
             "document.querySelector('.workspace-list')?.innerText.includes('Участие подтверждено')"
         )
+        await browser.click_named(".workspace-list a", "Коллектив А · Второй концерт")
+        await browser.click_named("#workspace-content button", "Запросить подмену")
+        await browser.click_named("dialog[open] button", "Подтвердить")
+        await process_catalog_request(engine)
+        await browser.wait(
+            "document.querySelector('#workspace-content')?.innerText"
+            ".includes('Запрос на подмену отправлен.')"
+        )
     finally:
         await browser.call("Page.removeScriptToEvaluateOnNewDocument", script)
+
+
+async def browser_approve_self_substitution(browser, engine, world, origin):
+    await browser.call(
+        "Page.navigate",
+        {
+            "url": f"{origin}/miniapp/?workspace=1&band={world.group.id}"
+            f"&view=lineup&performance={world.concert2.id}",
+        },
+    )
+    await browser.click_named("#workspace-content button", "Подобрать замену")
+    await process_catalog_request(engine)
+    await browser.click_named("dialog[open] button", "Назначить себя")
+    await process_catalog_request(engine)
+    await browser.click_named("dialog[open] button", "Встать на подмену")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('.workspace-list li')?.innerText"
+        ".includes('1 · Подтверждено · Подмена утверждена')"
+    )
+    assert not await browser.js(
+        "document.querySelector('.workspace-list li').innerText.includes('3 · Подтверждено')"
+    )

@@ -227,7 +227,7 @@ async def api(request: web.Request) -> web.Response:
                 if section not in ("invitations", "confirmed", "history") or not 0 <= page <= 10000:
                     raise ValueError("Invalid personal invitation options")
                 return web.json_response(
-                    await WorkspaceGigs(uow.store, user).list(section, page, PAGE_SIZE)
+                    await WorkspaceGigs(uow.store, user).listing(section, page, PAGE_SIZE)
                 )
             if operation in ("gig_card", "gig_setlist") and request.method == "GET":
                 gigs = WorkspaceGigs(uow.store, user)
