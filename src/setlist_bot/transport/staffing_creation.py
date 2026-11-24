@@ -4,17 +4,11 @@ import json
 from typing import Any
 from uuid import UUID
 
-from setlist_bot.domain.cities import city_name
-from setlist_bot.domain.concerts import confirmation_date, parse_concert
+from setlist_bot.domain.concerts import confirmation_date
 from setlist_bot.domain.display import short_duration
 from setlist_bot.domain.entities import LineupTemplate
-from setlist_bot.domain.performance_input import (
-    SEPARATOR,
-    TYPE_ALIASES,
-    parse_performance,
-    performance_seconds,
-)
-from setlist_bot.domain.rules import normalize, require
+from setlist_bot.domain.performance_input import recognize_performance
+from setlist_bot.domain.rules import require
 from setlist_bot.transport.controller import Controller, Response
 from setlist_bot.transport.response_context import staffing_context
 from setlist_bot.transport.staffing import action
@@ -67,36 +61,8 @@ async def prepare(c: Controller, group_id: UUID, value: str) -> Response:
         await c.store.find(LineupTemplate, group_id=group_id),
         key=lambda row: (row.created_at, row.id),
     )
-    when, remainder = parse_concert(value)
-    selected = None
-    kept = []
-    # RU: Состав распознаётся как отдельное поле, как город и тип выступления.
-    # EN: Match whole fields only; a substring in a venue name must not pick a lineup.
-    for field in SEPARATOR.split(remainder):
-        key = normalize(field)
-        explicit = key.startswith("состав:") or key.startswith("lineup:")
-        if explicit:
-            key = normalize(field.split(":", 1)[1])
-        reserved = bool(
-            city_name(field)
-            or performance_seconds(field)
-            or any(
-                key == normalize(alias) for aliases in TYPE_ALIASES.values() for alias in aliases
-            )
-        )
-        matches = [
-            row
-            for row in lineups
-            if (explicit or not reserved)
-            and key in (row.name_key, row.name_key + " состав", "состав " + row.name_key)
-        ]
-        require(not explicit or bool(matches), "input")
-        if matches:
-            require(selected is None, "input")
-            selected = matches[0]
-        else:
-            kept.append(field)
-    payload = parse_performance(when.isoformat() + " " + "  ".join(kept)).payload()
+    recognized, selected = recognize_performance(value, lineups)
+    payload = recognized.payload()
     if selected or len(lineups) == 1:
         return await preview(c, group_id, payload, selected or lineups[0])
     if not lineups:

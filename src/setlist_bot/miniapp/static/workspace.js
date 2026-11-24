@@ -2,6 +2,7 @@ import { clock, numbered } from "./model.js";
 import { repertoireImport } from "./repertoire-import.js";
 import { repertoireMusic } from "./repertoire-music.js";
 import { mountSharedSetlist } from "./shared-setlist.js";
+import { performanceAction, performanceLabel } from "./workspace-performances.js";
 
 const copy = {
   ru: {
@@ -102,6 +103,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   const past = workspaceParams.get("past") === "1" ? "1" : "0";
   const page = Number(workspaceParams.get("page")) || 0;
   const performance = band && workspaceParams.get("view") === "performance" && workspaceParams.get("performance");
+  const trash = band && workspaceParams.get("view") === "performance-trash";
   const repertoire = band && workspaceParams.get("view") === "repertoire";
   const song = workspaceParams.get("song") || "";
   const proposals = repertoire && workspaceParams.get("proposals") === "1";
@@ -161,7 +163,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   if (band) {
     backButton?.show?.();
     backButton?.onClick?.(() => {
-      if (performance) location.assign(bandUrl(band, past, page));
+      if (performance || trash) location.assign(bandUrl(band, past, trash ? 0 : page));
       else if (repertoire) location.assign(song || proposals || importing || music ? repertoireList() : bandUrl(band));
       else location.assign(bandUrl());
     });
@@ -172,6 +174,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     try {
       let data;
       if (performance) data = await api("performance", { band, performance });
+      else if (trash) data = await api("performance_trash", { band, page });
       else if (music) data = await api("music_search", { band });
       else if (proposals) data = await api("repertoire_proposals", { band, page });
       else if (repertoire) data = await api("repertoire", { band, archived, page, query, song });
@@ -182,6 +185,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       title.textContent = band ? data.band : t("bands");
       status.textContent = "";
       if (performance) showPerformance(data);
+      else if (trash) showPerformanceTrash(data);
       else if (music) showMusic(data);
       else if (proposals) showProposals(data);
       else if (importing) showImport(data);
@@ -261,6 +265,12 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       }));
     }
     content.append(nav);
+    if (data.admin) {
+      const actions = element("div", "", { class: "toolbar" });
+      actions.append(managePerformance("create"), element("a", performanceLabel(language, "trash"),
+        { href: `${bandUrl(band, past)}&view=performance-trash` }));
+      content.append(actions);
+    }
     if (!data.performances.length) status.textContent = t("noPerformances");
     const list = element("ul", "", { class: "workspace-list" });
     for (const row of data.performances) {
@@ -285,6 +295,34 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   function dateText(value) {
     return new Intl.DateTimeFormat(language, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(value));
   }
+  function managePerformance(action, info) {
+    return performanceAction({
+      action, performance: info, language, dateText, request: catalogApi,
+      onDone: result => {
+        const tab = result.past ? "1" : "0";
+        if (action === "delete") location.assign(bandUrl(band, past));
+        else if (action === "update" && tab === past) return load();
+        else location.assign(performanceUrl(band, result.performance, tab, 0));
+      },
+    });
+  }
+  function showPerformanceTrash(data) {
+    const tManage = key => performanceLabel(language, key);
+    const nav = element("nav", "", { class: "workspace-nav" });
+    nav.append(element("a", t("performances"), { href: bandUrl(band, past) }));
+    content.append(nav, element("h2", tManage("trash")));
+    if (!data.performances.length) status.textContent = tManage("empty");
+    const list = element("ul", "", { class: "workspace-list" });
+    for (const row of data.performances) {
+      const item = element("li", "");
+      item.append(element("h3", row.title || dateText(row.date)),
+        element("p", [row.title ? dateText(row.date) : "", `${tManage("until")} ${dateText(row.until)}`].filter(Boolean).join(" · ")),
+        managePerformance("restore", row));
+      list.append(item);
+    }
+    content.append(list);
+    showPages(data.has_next, index => `${bandUrl(band, past, index)}&view=performance-trash`);
+  }
   function showPerformance(data) {
     const info = data.performance, list = data.setlist;
     const nav = element("nav", "", { class: "workspace-nav" });
@@ -292,6 +330,11 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     content.append(nav, element("h2", info.title || t("performance")),
       element("p", [dateText(info.date), info.city, info.type].filter(Boolean).join(" · ")));
     if (info.info) content.append(element("p", info.info, { class: "performance-info" }));
+    if (data.admin) {
+      const actions = element("div", "", { class: "toolbar" });
+      actions.append(managePerformance("update", info), managePerformance("delete", info));
+      content.append(actions);
+    }
     content.append(element("h3", t("shared")),
       element("p", `${t(list.approved ? "approvedVersion" : "workingVersion")} · ${t("version")} ${list.version}`));
     const timing = [`${t("total")} ${clock(list.seconds)}`];

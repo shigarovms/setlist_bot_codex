@@ -14,9 +14,10 @@ from setlist_bot.application.importing import Importer
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.miniapp_catalog import CATALOG_OPERATIONS, MiniCatalog
 from setlist_bot.application.repertoire_import import RepertoireImport
-from setlist_bot.application.workspace import Workspace
+from setlist_bot.application.workspace import PAGE_SIZE, Workspace
 from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_music import WorkspaceMusic
+from setlist_bot.application.workspace_performances import WorkspacePerformances
 from setlist_bot.application.workspace_setlists import WorkspaceSetlists
 from setlist_bot.domain.entities import Confirmation, User, now
 from setlist_bot.domain.miniapp_auth import verify_init_data
@@ -105,6 +106,7 @@ async def asset(request: web.Request) -> web.Response:
         "repertoire-music.js": "text/javascript",
         "shared-setlist.js": "text/javascript",
         "workspace-export.js": "text/javascript",
+        "workspace-performances.js": "text/javascript",
         "model.js": "text/javascript",
         "persistence.js": "text/javascript",
         "style.css": "text/css",
@@ -267,6 +269,15 @@ async def api(request: web.Request) -> web.Response:
                 return web.json_response(
                     await Workspace(uow.store, user).performance(
                         UUID(payload["band"]), UUID(payload["performance"])
+                    )
+                )
+            if operation == "performance_trash" and request.method == "GET":
+                page = int(payload.get("page", "0"))
+                if not 0 <= page <= 10000:
+                    raise ValueError("Invalid page")
+                return web.json_response(
+                    await WorkspacePerformances(uow.store, user).trash_page(
+                        UUID(payload["band"]), page, PAGE_SIZE
                     )
                 )
             if operation == "open_draft" and request.method == "POST":

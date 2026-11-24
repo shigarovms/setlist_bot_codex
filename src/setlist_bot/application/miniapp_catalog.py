@@ -19,6 +19,7 @@ from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.repertoire_import import RepertoireImport
 from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_music import WorkspaceMusic
+from setlist_bot.application.workspace_performances import WorkspacePerformances
 from setlist_bot.application.workspace_setlists import SETLIST_SESSION, WorkspaceSetlists
 from setlist_bot.domain.entities import (
     CatalogProposal,
@@ -41,6 +42,7 @@ CATALOG_OPERATIONS = {
     "music_action": "miniapp_music",
     "shared_action": "miniapp_shared",
     "export_action": "miniapp_export",
+    "performance_action": "miniapp_performance",
     "duration_save": "miniapp_duration",
 }
 
@@ -176,6 +178,10 @@ class MiniCatalog:
             details = {"shared": WorkspaceSetlists.command(payload)}
         elif operation == "export_action":
             details = {"export": WorkspaceExports.command(payload), "bot_username": bot_username}
+        elif operation == "performance_action":
+            require(concert is None, "input")
+            details = {"performance": WorkspacePerformances.command(payload)}
+            expires = min(expires, now() + timedelta(minutes=15))
         else:
             details = await self._catalog_details(group_id, payload)
         self.store.add(
@@ -340,6 +346,19 @@ class MiniCatalog:
             ).apply(group_id, concert.id, data["export"], pdf)
             row.command = json.dumps({**data, "status": "saved", "result": result_export})
             return result_export
+        if data["kind"] == "miniapp_performance":
+            require(concert is None, "miniapp_expired")
+            manager = WorkspacePerformances(self.store, self.user)
+            command = data["performance"]
+            if command["action"] == "confirm":
+                result_performance = await manager.confirm(
+                    group_id, target.parent.id, UUID(command["preview"])
+                )
+            else:
+                result_performance, change = await manager.preview(group_id, command)
+                data["change"] = change
+            row.command = json.dumps({**data, "status": "saved", "result": result_performance})
+            return result_performance
         song_id = UUID(data["song_id"]) if data["song_id"] else None
         if song_id:
             require(not (await self.catalog.song(group_id, song_id)).archived, "not_found")

@@ -420,6 +420,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     ".includes('Добавлено песен: 1.')"
                 )
                 await browser_music_search(browser, engine, world.group.id)
+                await browser_manage_performance(browser, engine, world.group.id, origin)
                 return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
             assert await browser.js(
@@ -839,3 +840,47 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             process.kill()
             process.wait(timeout=5)
         await server.close()
+
+
+async def browser_manage_performance(browser, engine, group_id, origin):
+    await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&band={group_id}"})
+    await browser.click_named("#workspace-content button", "Создать выступление")
+    await browser.js("""
+        document.getElementById('workspace-performance-date').value = '2099-06-05';
+        document.getElementById('workspace-performance-title').value = 'Летний концерт';
+    """)
+    await browser.click_named("dialog[open] button", "Предпросмотр")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('dialog[open] dl')?.innerText.includes('Летний концерт')"
+    )
+    await browser.click_named("dialog[open] button", "Подтвердить")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('#workspace-content h2')?.textContent === 'Летний концерт'"
+    )
+    await browser.click_named("#workspace-content button", "Параметры выступления")
+    await browser.js("document.getElementById('workspace-performance-city').value = 'Казань'")
+    await browser.click_named("dialog[open] button", "Предпросмотр")
+    await process_catalog_request(engine)
+    await browser.click_named("dialog[open] button", "Сохранить")
+    await process_catalog_request(engine)
+    await browser.wait("document.querySelector('#workspace-content')?.innerText.includes('Казань')")
+    await browser.click_named("#workspace-content button", "Переместить в корзину")
+    await process_catalog_request(engine)
+    await browser.click_named("dialog[open] button", "Подтвердить")
+    await process_catalog_request(engine)
+    await browser.click_named("#workspace-content a", "Корзина выступлений")
+    await browser.wait(
+        "document.querySelector('.workspace-list h3')?.textContent === 'Летний концерт'"
+    )
+    await browser.click_named("#workspace-content button", "Восстановить выступление")
+    await process_catalog_request(engine)
+    await browser.click_named("dialog[open] button", "Подтвердить")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('#workspace-content h2')?.textContent === 'Летний концерт'"
+    )
+    assert await browser.js(
+        "document.querySelector('#workspace-content').innerText.includes('Казань')"
+    )

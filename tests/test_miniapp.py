@@ -366,6 +366,25 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 headers=headers,
             )
             assert song_status.status == 200 and (await song_status.json())["status"] == "pending"
+            band = {"band": str(world.group.id)}
+            trash = await client.get("/miniapp/api/performance_trash", params=band, headers=headers)
+            assert trash.status == 200 and (await trash.json())["performances"] == []
+            scoped = await client.post("/miniapp/api/open_repertoire", json=band, headers=headers)
+            assert scoped.status == 200
+            queued_creation = await client.post(
+                "/miniapp/api/performance_action",
+                json={
+                    **(await scoped.json()),
+                    "action": "create",
+                    "quick": "05.06.2099  Летний концерт",
+                    "request_id": str(uuid4()),
+                },
+                headers=headers,
+            )
+            assert (
+                queued_creation.status == 200
+                and (await queued_creation.json())["status"] == "pending"
+            )
             for statement in (
                 "SELECT text FROM outbox",
                 "SELECT payload FROM outbox",
@@ -373,6 +392,8 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 "SELECT * FROM admin_sessions",
                 "SELECT token_ciphertext FROM calendar_subscriptions",
                 "UPDATE setlists SET approved=true",
+                "UPDATE concerts SET deleted_at=now()",
+                "SELECT slots FROM lineup_templates",
                 "UPDATE songs SET title='bad'",
                 "INSERT INTO song_aliases(id,group_id,song_id,title) "
                 "SELECT id,group_id,id,'bad' FROM songs",

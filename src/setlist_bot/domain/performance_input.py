@@ -7,6 +7,7 @@ from typing import Any
 
 from setlist_bot.domain.cities import city_name
 from setlist_bot.domain.concerts import parse_concert
+from setlist_bot.domain.entities import LineupTemplate
 from setlist_bot.domain.rules import normalize, parse_pause, require
 
 SEPARATOR = re.compile(r"[ \t]{2,}|(?<!\bг)(?<!\bул)(?<!\bим)(?<!\bпр)(?<!\bд)\.\s+", re.I)
@@ -120,3 +121,36 @@ def parse_performance(value: str) -> PerformanceInput:
         if field != "info":
             require(all(ord(char) >= 32 for char in fields.get(field, "")), "concert_input")
     return PerformanceInput(when, **fields)
+
+
+def recognize_performance(
+    value: str, lineups: list[LineupTemplate]
+) -> tuple[PerformanceInput, LineupTemplate | None]:
+    when, remainder = parse_concert(value)
+    selected = None
+    kept = []
+    for field in SEPARATOR.split(remainder):
+        key = normalize(field)
+        explicit = key.startswith(("состав:", "lineup:"))
+        if explicit:
+            key = normalize(field.split(":", 1)[1])
+        reserved = bool(
+            city_name(field)
+            or performance_seconds(field)
+            or any(
+                key == normalize(alias) for aliases in TYPE_ALIASES.values() for alias in aliases
+            )
+        )
+        matches = [
+            row
+            for row in lineups
+            if (explicit or not reserved)
+            and key in (row.name_key, row.name_key + " состав", "состав " + row.name_key)
+        ]
+        require(not explicit or bool(matches), "input")
+        if matches:
+            require(selected is None, "input")
+            selected = matches[0]
+        else:
+            kept.append(field)
+    return parse_performance(when.isoformat() + " " + "  ".join(kept)), selected

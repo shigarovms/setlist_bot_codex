@@ -61,10 +61,12 @@ class Workspace:
             past=past,
             group_id=group_id,
         )
+        member = (await self.store.find(Membership, group_id=group_id, user_id=self.user.id))[0]
         return {
             "language": self.user.language,
             "band": group.name,
             "can_edit_draft": can_edit,
+            "admin": member.role == "admin",
             "has_next": len(rows) > PAGE_SIZE,
             "performances": [
                 {
@@ -101,6 +103,8 @@ class Workspace:
                 "type": concert.performance_type,
                 "info": concert.extra_info,
                 "planned_seconds": concert.performance_duration_seconds,
+                "version": concert.metadata_version,
+                "epoch": concert.lifecycle_version,
             },
             "can_edit_draft": await can_open_draft(groups, group_id),
             "admin": member.role == "admin",
