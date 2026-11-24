@@ -38,6 +38,7 @@ class WorkspaceBandSettings:
         admin = member.role == "admin"
         return {
             "band": group.name,
+            "epoch": group.lifecycle_version,
             "language": self.user.language,
             "admin": admin,
             "settings": {

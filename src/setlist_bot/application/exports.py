@@ -29,6 +29,13 @@ Audience = Literal["musicians", "lights"]
 LAYOUT_VERSION = 5
 
 
+def export_audiences(audience: str) -> tuple[Audience, ...]:
+    require(audience in ("musicians", "lights", "all"), "input")
+    if audience == "all":
+        return ("musicians", "lights")
+    return ("musicians",) if audience == "musicians" else ("lights",)
+
+
 class PdfRenderer(Protocol):
     def render(
         self, payload: dict[str, Any], audience: Audience, language: str, transliterate: bool
@@ -241,12 +248,7 @@ class Exports:
 
         milestone("pdf_requested", export.concert_id, {"group_id": str(export.group_id)})
         result = []
-        targets: tuple[Audience, ...] = (
-            ("musicians", "lights")
-            if audience == "all"
-            else ("musicians" if audience == "musicians" else "lights",)
-        )
-        for target in targets:
+        for target in export_audiences(audience):
             existing = await self.store.find(
                 ExportFile,
                 export_id=export.id,

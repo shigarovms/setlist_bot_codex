@@ -450,6 +450,8 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 headers=performer,
             )
             assert support.status == 200 and (await support.json())["status"] == "pending"
+            band_trash = await client.get("/miniapp/api/band_trash", headers=headers)
+            assert band_trash.status == 200 and not (await band_trash.json())["bands"]
             team = await client.get("/miniapp/api/team", params=band, headers=headers)
             assert team.status == 200 and (await team.json())["admin"]
             template_card = await client.get(

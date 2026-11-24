@@ -22,6 +22,7 @@ from setlist_bot.application.workspace_band_settings import (
     BAND_SETTINGS_KIND,
     WorkspaceBandSettings,
 )
+from setlist_bot.application.workspace_band_trash import BAND_TRASH_KIND, WorkspaceBandTrash
 from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_gigs import (
     GIG_REPLACEMENT,
@@ -75,6 +76,7 @@ CATALOG_OPERATIONS = {
     "schedule_action": SCHEDULE_KIND,
     "profile_action": PROFILE_KIND,
     "support_submit": WORKSPACE_SUPPORT_KIND,
+    "band_trash_action": BAND_TRASH_KIND,
     "duration_save": "miniapp_duration",
 }
 
@@ -250,7 +252,7 @@ class MiniCatalog:
         target = await self.target(session)
         group_id, concert = target.group_id, target.concert
         kind = CATALOG_OPERATIONS[operation]
-        account = operation in ("profile_action", "schedule_action", "support_submit")
+        account = kind in (PROFILE_KIND, SCHEDULE_KIND, WORKSPACE_SUPPORT_KIND, BAND_TRASH_KIND)
         if group_id is None:
             require(account, "forbidden")
             return await self.queue_account(target, kind, payload, miniapp_key, browser=browser)
@@ -390,6 +392,8 @@ class MiniCatalog:
             return previous
         if kind == PROFILE_KIND:
             details = {"profile": WorkspaceProfile.command(payload)}
+        elif kind == BAND_TRASH_KIND:
+            details = {"trash": WorkspaceBandTrash.command(payload)}
         elif kind == WORKSPACE_SUPPORT_KIND:
             details = {
                 "support": {
@@ -491,7 +495,7 @@ class MiniCatalog:
             "miniapp_expired",
         )
         result = dict(data.get("result", {}))
-        if data["kind"] in (SCHEDULE_KIND, PROFILE_KIND, WORKSPACE_SUPPORT_KIND):
+        if data["kind"] in (SCHEDULE_KIND, PROFILE_KIND, WORKSPACE_SUPPORT_KIND, BAND_TRASH_KIND):
             require(row.expires_at > now(), "input_expired")
         if capsule := result.pop("calendar_capsule", None):
             require(data["kind"] == SCHEDULE_KIND and bool(miniapp_key), "input_expired")
@@ -552,6 +556,15 @@ class MiniCatalog:
             require(delivered, "support_unavailable")
             row.command = json.dumps({**data, "status": "saved"})
             return {}
+        if data["kind"] == BAND_TRASH_KIND:
+            require(group_id is None and concert is None, "forbidden")
+            result_trash, change = await WorkspaceBandTrash(self.store, self.user).apply(
+                target.parent.id, data["trash"]
+            )
+            if change is not None:
+                data["change"] = change
+            row.command = json.dumps({**data, "status": "saved", "result": result_trash})
+            return result_trash
         require(group_id is not None, "forbidden")
         assert group_id is not None
         if data["kind"] == BAND_SETTINGS_KIND:

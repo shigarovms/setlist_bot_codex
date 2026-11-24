@@ -32,11 +32,11 @@ class TestSources:
         return data, "choosing"
 
 
-async def deliver_request(engine, request_id):
+async def deliver_request(engine, request_id, *, bot=None):
     async with PostgresUnitOfWork(engine) as uow:
         events = await uow.store.find(Outbox, support_kind="catalog", sent=False)
         event = next(row for row in events if row.payload["request_id"] == request_id)
-        return await deliver_catalog(uow, event)
+        return await deliver_catalog(uow, event, bot=bot)
 
 
 async def ready_worker(engine, group_id):

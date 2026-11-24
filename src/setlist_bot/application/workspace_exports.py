@@ -1,11 +1,9 @@
 """Create and read owner-bound copies of the bot's approved PDF exports."""
 
-from io import BytesIO
 from typing import Any
 from uuid import UUID
-from zipfile import ZIP_DEFLATED, ZipFile
 
-from setlist_bot.application.exports import Exports, PdfRenderer
+from setlist_bot.application.exports import Exports, PdfRenderer, export_audiences
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.application.workspace_gigs import WorkspaceGigs
@@ -41,6 +39,8 @@ class WorkspaceExports:
             payload.get(key) for key in ("language", "audience", "version")
         )
         require(language in ("ru", "en") and audience in ("lights", "musicians", "all"), "input")
+        delivery = payload.get("delivery", "download")
+        require(delivery in ("download", "telegram"), "input")
         require(type(version) is int and version > 0, "input")
         revision = payload.get("revision")
         require(revision is None or isinstance(revision, str), "input")
@@ -48,6 +48,7 @@ class WorkspaceExports:
             "action": action,
             "language": language,
             "audience": audience,
+            "delivery": delivery,
             "version": version,
             "revision": str(UUID(revision)) if revision is not None else None,
         }
@@ -112,11 +113,12 @@ class WorkspaceExports:
             "export": str(export.id),
             "language": data["language"],
             "audience": data["audience"],
+            "delivery": data.get("delivery", "download"),
         }
 
-    async def download(
-        self, group_id: UUID, concert_id: UUID, result: dict[str, Any]
-    ) -> tuple[str, str, bytes]:
+    async def downloads(
+        self, group_id: UUID, concert_id: UUID, result: dict[str, Any], audience: str | None
+    ) -> list[ExportFile]:
         require(result.get("status") == "saved" and bool(result.get("export")), "not_found")
         export = await self.exports.load(UUID(result["export"]))
         require(
@@ -129,9 +131,12 @@ class WorkspaceExports:
             guest = await self.gigs.confirmed(self.invitation_id)
             _, version, approved = await self.gigs.shared(guest)
             require(approved and version == export.payload["version"], "export_expired")
-        audience, language = result["audience"], result["language"]
-        targets = ("musicians", "lights") if audience == "all" else (audience,)
-        files = []
+        language = result["language"]
+        targets = export_audiences(result["audience"])
+        if audience is not None:
+            require(audience in targets, "not_found")
+            targets = export_audiences(audience)
+        files: list[ExportFile] = []
         for target in targets:
             matches = await self.store.find(
                 ExportFile,
@@ -142,11 +147,4 @@ class WorkspaceExports:
             )
             require(bool(matches), "not_found")
             files.append(matches[0])
-        if len(files) == 1:
-            return files[0].filename, "application/pdf", files[0].content
-        output = BytesIO()
-        with ZipFile(output, "w", ZIP_DEFLATED) as bundle:
-            for item in files:
-                bundle.writestr(item.filename, item.content)
-        name = files[0].filename.replace("-musicians-", "-all-").removesuffix(".pdf")
-        return name + ".zip", "application/zip", output.getvalue()
+        return files

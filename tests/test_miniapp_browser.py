@@ -318,28 +318,45 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     "document.querySelector('#workspace-content').innerText.includes('Утверждён')"
                 )
                 await browser.click_named("#workspace-content button", "Экспорт PDF")
-                await browser.click_named(".shared-tools button", "Подготовить файл")
-                await process_catalog_request(engine)
-                await browser.wait(
-                    "!!document.querySelector('.shared-tools a[download]:not([hidden])')"
-                )
                 downloads = tmp_path / "downloads"
                 await browser.call(
                     "Browser.setDownloadBehavior",
                     {"behavior": "allow", "downloadPath": str(downloads)},
                 )
-                filename = await browser.js("""
-                    (() => {
-                        const link = document.querySelector('.shared-tools a[download]');
-                        link.click();
-                        return link.download;
-                    })()
-                """)
+                await browser.click_named(".shared-tools button", "Скачать PDF")
+                await process_catalog_request(engine)
+                await browser.wait("!!document.querySelector('.workspace-pdf-downloads a')")
+                filename = await browser.js(
+                    "document.querySelector('.workspace-pdf-downloads a').download"
+                )
                 for _ in range(100):
                     if (downloads / filename).is_file():
                         break
                     await asyncio.sleep(0.05)
                 assert (downloads / filename).read_bytes().startswith(b"%PDF-")
+                (downloads / filename).unlink()
+                await browser.js("""
+                    document.getElementById('workspace-pdf-audience').value = 'all';
+                """)
+                await browser.click_named(".shared-tools button", "Скачать PDF")
+                await process_catalog_request(engine)
+                await browser.wait(
+                    "document.querySelectorAll('.workspace-pdf-downloads a[download]').length === 2"
+                )
+                for index in range(2):
+                    filename = await browser.js(f"""
+                        (() => {{
+                            const links = document.querySelectorAll('.workspace-pdf-downloads a');
+                            const link = links[{index}];
+                            link.click();
+                            return link.download;
+                        }})()
+                    """)
+                    for _ in range(100):
+                        if (downloads / filename).is_file():
+                            break
+                        await asyncio.sleep(0.05)
+                    assert (downloads / filename).read_bytes().startswith(b"%PDF-")
                 await browser.click_named(".shared-tools button", "Закрыть")
                 await browser.click_named("#workspace-content button", "Вернуть в работу")
                 await process_catalog_request(engine)
@@ -432,6 +449,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser_profile(browser, engine, origin)
                 await browser_band_settings(browser, engine, world.group.id, origin)
                 await browser_help(browser, engine, world.admin, origin)
+                await browser_band_trash(browser, engine, world.other.id, origin)
                 await browser_team(browser, engine, world.group.id, origin)
                 return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
@@ -1068,7 +1086,7 @@ async def browser_guest_gig(browser, engine, world, origin):
             "document.querySelector('.shared-setlist')?.innerText.includes('Комета')"
         )
         await browser.click_named("#workspace-content button", "Экспорт PDF")
-        await browser.click_named("dialog[open] button", "Подготовить файл")
+        await browser.click_named("dialog[open] button", "Скачать PDF")
         await process_catalog_request(engine)
         await browser.wait("!!document.querySelector('dialog[open] a[download]:not([hidden])')")
         await browser.click_named("dialog[open] button", "Закрыть")
@@ -1237,3 +1255,26 @@ async def browser_help(browser, engine, actor, origin):
     async with PostgresUnitOfWork(engine) as uow:
         (event,) = await uow.store.find(Outbox, support_kind="request")
         assert event.chat_id == -900 and "Вопрос о репертуаре" in event.text
+
+
+async def browser_band_trash(browser, engine, band, origin):
+    await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&band={band}"})
+    await browser.click_named("#workspace-content a", "Настройки коллектива")
+    await browser.click_named("#workspace-content button", "Переместить коллектив в корзину")
+    await browser.click_named("dialog[open] button", "Продолжить")
+    await process_catalog_request(engine)
+    await browser.wait("!!document.getElementById('band-trash-name')")
+    await browser.js("document.getElementById('band-trash-name').value = 'Коллектив Б'")
+    await browser.click_named("dialog[open] button", "Переместить в корзину")
+    await process_catalog_request(engine)
+    await browser.wait("location.search.includes('view=band-trash')")
+    await browser.click_named("#workspace-content button", "Восстановить")
+    await browser.click_named("dialog[open] button", "Восстановить")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.getElementById('workspace-status').textContent.includes('восстановлен')"
+    )
+    await browser.click_named("#workspace-content a", "Мои коллективы")
+    await browser.wait(
+        "document.querySelector('.workspace-list')?.innerText.includes('Коллектив Б')"
+    )

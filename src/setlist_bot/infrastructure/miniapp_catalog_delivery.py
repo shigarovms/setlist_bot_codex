@@ -3,10 +3,15 @@
 import json
 from uuid import UUID
 
+from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.types import BufferedInputFile, InputMediaDocument
+
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.miniapp_catalog import MiniCatalog
 from setlist_bot.application.ports import Store
 from setlist_bot.application.support import WORKSPACE_SUPPORT_KIND
+from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_gigs import GIG_REPLACEMENT, GIG_REPLY
 from setlist_bot.application.workspace_profile import PROFILE_KIND
 from setlist_bot.application.workspace_roster import ROSTER_KIND, WorkspaceRoster
@@ -50,6 +55,7 @@ async def deliver_catalog(
     people_locked: bool = False,
     preflight: AppError | None = None,
     calendar: CalendarRuntime | None = None,
+    bot: Bot | None = None,
 ) -> bool:
     identifier = UUID(event.payload["request_id"])
     rows = await uow.store.find(Confirmation, id=identifier)
@@ -82,6 +88,30 @@ async def deliver_catalog(
 
                 renderer = PdfDocuments()
             result = await service.execute(target, identifier, pdf=renderer, calendar=calendar)
+            if (
+                data.get("kind") == "miniapp_export"
+                and data.get("status") == "pending"
+                and result.get("delivery") == "telegram"
+            ):
+                require(bot is not None, "export_chat_unavailable")
+                assert (
+                    bot is not None and target.group_id is not None and target.concert is not None
+                )
+                files = await WorkspaceExports(
+                    uow.store, user, invitation_id=target.invitation_id
+                ).downloads(target.group_id, target.concert.id, {**result, "status": "saved"}, None)
+                uploads = [
+                    BufferedInputFile(file.content, filename=file.filename) for file in files
+                ]
+                try:
+                    if len(uploads) == 1:
+                        await bot.send_document(user.telegram_id, uploads[0])
+                    else:
+                        await bot.send_media_group(
+                            user.telegram_id, [InputMediaDocument(media=file) for file in uploads]
+                        )
+                except (TelegramForbiddenError, TelegramBadRequest) as exc:
+                    raise AppError("export_chat_unavailable") from exc
             if notice := result.get("notify"):
                 from setlist_bot.transport.shared_requests import queue_admin_request
 

@@ -16,6 +16,7 @@ from setlist_bot.application.miniapp_catalog import CATALOG_OPERATIONS, MiniCata
 from setlist_bot.application.repertoire_import import RepertoireImport
 from setlist_bot.application.workspace import PAGE_SIZE, Workspace
 from setlist_bot.application.workspace_band_settings import WorkspaceBandSettings
+from setlist_bot.application.workspace_band_trash import WorkspaceBandTrash
 from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_gigs import WorkspaceGigs
 from setlist_bot.application.workspace_music import WorkspaceMusic
@@ -115,6 +116,7 @@ async def asset(request: web.Request) -> web.Response:
         "workspace-export.js": "text/javascript",
         "workspace-performances.js": "text/javascript",
         "workspace-band-settings.js": "text/javascript",
+        "workspace-band-trash.js": "text/javascript",
         "workspace-team.js": "text/javascript",
         "workspace-staffing.js": "text/javascript",
         "workspace-roster.js": "text/javascript",
@@ -324,6 +326,13 @@ async def api(request: web.Request) -> web.Response:
                 return web.json_response(
                     await WorkspaceBandSettings(uow.store, user).view(UUID(payload["band"]))
                 )
+            if operation == "band_trash" and request.method == "GET":
+                page = int(payload.get("page", "0"))
+                if not 0 <= page <= 10000:
+                    raise ValueError("Invalid page")
+                return web.json_response(
+                    await WorkspaceBandTrash(uow.store, user).view(page, PAGE_SIZE)
+                )
             if operation == "team_inbox" and request.method == "GET":
                 return web.json_response(await WorkspaceTeam(uow.store, user).inbox())
             if operation == "team" and request.method == "GET":
@@ -514,13 +523,16 @@ async def api(request: web.Request) -> web.Response:
                 assert target.concert is not None
                 assert target.group_id is not None
                 record = await scoped.status(identifier, UUID(payload["request"]))
-                name, content_type, content = await WorkspaceExports(
+                audience = payload.get("audience", record.get("audience"))
+                require(audience in ("musicians", "lights"), "input")
+                files = await WorkspaceExports(
                     uow.store, user, invitation_id=target.invitation_id
-                ).download(target.group_id, target.concert.id, record)
+                ).downloads(target.group_id, target.concert.id, record, audience)
+                (file,) = files
                 return web.Response(
-                    body=content,
-                    content_type=content_type,
-                    headers={"Content-Disposition": f'attachment; filename="{name}"'},
+                    body=file.content,
+                    content_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{file.filename}"'},
                 )
             elif request.method == "GET" and operation == "catalog_status":
                 result = await MiniCatalog(service).status(

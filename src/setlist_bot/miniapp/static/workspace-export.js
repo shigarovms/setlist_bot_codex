@@ -1,18 +1,22 @@
 const words = {
   ru: {
     pdf: "Экспорт PDF", language: "Язык", audience: "Для кого", musicians: "Для музыкантов",
-    lights: "Для световика", all: "Оба PDF в ZIP", font: "Шрифт", size: "Размер, pt", align: "Выравнивание",
+    lights: "Для световика", all: "Для всех · два PDF", font: "Шрифт", size: "Размер, pt", align: "Выравнивание",
     left: "По левому краю", center: "По центру", options: "Оформление PDF для музыкантов",
-    settings: "Сохранить оформление", prepare: "Подготовить файл", download: "Скачать файл",
-    waiting: "Запрос обрабатывается…", ready: "Файл готов к скачиванию.", saved: "Оформление сохранено.",
+    settings: "Сохранить оформление", download: "Скачать PDF", send: "Отправить в личный чат",
+    downloadMusicians: "Скачать PDF для музыкантов", downloadLights: "Скачать PDF для световика",
+    waiting: "Запрос обрабатывается…", ready: "PDF готовы к скачиванию.", saved: "Оформление сохранено.",
+    sent: "PDF отправлены в личный чат с ботом.",
     retry: "Проверить результат",
   },
   en: {
     pdf: "Export PDF", language: "Language", audience: "Audience", musicians: "For musicians",
-    lights: "For lighting", all: "Both PDFs in a ZIP", font: "Font", size: "Size, pt", align: "Alignment",
+    lights: "For lighting", all: "For everyone · two PDFs", font: "Font", size: "Size, pt", align: "Alignment",
     left: "Left", center: "Center", options: "Musician PDF appearance",
-    settings: "Save appearance", prepare: "Prepare file", download: "Download file",
-    waiting: "Processing your request…", ready: "The file is ready to download.", saved: "Appearance saved.",
+    settings: "Save appearance", download: "Download PDF", send: "Send to private chat",
+    downloadMusicians: "Download musician PDF", downloadLights: "Download lighting PDF",
+    waiting: "Processing your request…", ready: "The PDFs are ready to download.", saved: "Appearance saved.",
+    sent: "The bot sent the PDFs to your private chat.",
     retry: "Check result",
   },
 };
@@ -51,9 +55,10 @@ export function mountPdfExport({ root, dialog, message, options, language, versi
   const controls = el("div", "", { class: "toolbar" });
   const appearance = el("details", "");
   appearance.append(el("summary", t.options));
-  const download = el("a", t.download, { hidden: "" });
+  const downloads = el("div", "", { class: "toolbar workspace-pdf-downloads" });
   const check = el("button", t.retry, { hidden: "", type: "button" });
-  let pending = null, working = false, fileUrl;
+  const urls = [];
+  let pending = null, working = false;
 
   const pdfLanguage = select(fields, "workspace-pdf-language", t.language,
     [["ru", "Русский"], ["en", "English"]], options.language);
@@ -63,25 +68,31 @@ export function mountPdfExport({ root, dialog, message, options, language, versi
   const save = el("button", t.settings, { type: "button" });
   save.addEventListener("click", () => begin({ action: "settings", settings: readAppearance() }));
   appearance.append(save);
-  const prepare = el("button", t.prepare, { type: "button", class: "primary" });
-  prepare.addEventListener("click", () => begin({ action: "generate", audience: audience.value,
-    language: pdfLanguage.value, version, revision }));
-  controls.append(prepare);
-  fields.append(appearance, controls);
-  root.append(fields, check, download);
-
-  function clearFile() {
-    if (fileUrl) URL.revokeObjectURL(fileUrl);
-    fileUrl = undefined;
-    download.hidden = true;
+  const methods = window.Telegram?.WebApp?.initData ? ["telegram", "download"] : ["download", "telegram"];
+  for (const [index, delivery] of methods.entries()) {
+    const button = el("button", t[delivery === "telegram" ? "send" : "download"],
+      { type: "button", ...(index === 0 ? { class: "primary" } : {}) });
+    button.addEventListener("click", () => begin({ action: "generate", audience: audience.value,
+      language: pdfLanguage.value, version, revision, delivery }));
+    controls.append(button);
   }
-  dialog.addEventListener("close", clearFile, { once: true });
-  for (const node of [pdfLanguage, audience]) node.addEventListener("change", clearFile);
+  fields.append(appearance, controls);
+  root.append(fields, check, downloads);
+
+  function clearFiles() {
+    for (const url of urls.splice(0)) URL.revokeObjectURL(url);
+    downloads.replaceChildren();
+  }
+  dialog.addEventListener("close", clearFiles, { once: true });
+  for (const node of [pdfLanguage, audience]) node.addEventListener("change", () => {
+    clearFiles();
+    message.textContent = "";
+  });
   check.addEventListener("click", process);
 
   function begin(body) {
     if (pending) return;
-    clearFile();
+    clearFiles();
     pending = { payload: { ...body, request_id: crypto.randomUUID() } };
     void process();
   }
@@ -96,19 +107,27 @@ export function mountPdfExport({ root, dialog, message, options, language, versi
       pending.receipt = result.request;
       for (let i = 0; result.status === "pending" && i < 8; i++) {
         await new Promise(resolve => setTimeout(resolve, 1000));
-        if (!download.isConnected || !dialog.open) return;
+        if (!downloads.isConnected || !dialog.open) return;
         result = await request("catalog_status", { request: pending.receipt });
       }
       if (result.status === "pending") return;
       if (result.status === "failed") { pending = null; message.textContent = result.message; return; }
-      if (result.export) {
-        const file = await request("export_download", { request: result.request });
-        if (!download.isConnected || !dialog.open) return;
-        fileUrl = URL.createObjectURL(file.blob);
-        download.download = file.name;
-        download.href = fileUrl;
-        download.hidden = false;
+      if (result.delivery === "telegram") message.textContent = t.sent;
+      else if (result.export) {
+        const targets = result.audience === "all" ? ["musicians", "lights"] : [result.audience];
+        const files = await Promise.all(targets.map(audience => request("export_download", {
+          request: result.request, audience,
+        })));
+        if (!downloads.isConnected || !dialog.open) return;
+        for (const [index, file] of files.entries()) {
+          const url = URL.createObjectURL(file.blob);
+          urls.push(url);
+          downloads.append(el("a", targets[index] === "musicians" ? t.downloadMusicians : t.downloadLights, {
+            href: url, download: file.name,
+          }));
+        }
         message.textContent = t.ready;
+        if (files.length === 1) downloads.firstElementChild.click();
       } else message.textContent = t.saved;
       pending = null;
     } catch (error) {

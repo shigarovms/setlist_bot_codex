@@ -173,7 +173,12 @@ async def deliver_one_outbox(
                 from setlist_bot.infrastructure.miniapp_catalog_delivery import deliver_catalog
 
                 return await deliver_catalog(
-                    uow, event, people_locked=True, preflight=catalog_preflight, calendar=calendar
+                    uow,
+                    event,
+                    people_locked=True,
+                    preflight=catalog_preflight,
+                    calendar=calendar,
+                    bot=bot,
                 )
             if event.support_kind == "staffing":
                 from setlist_bot.infrastructure.staffing_delivery import deliver_staffing

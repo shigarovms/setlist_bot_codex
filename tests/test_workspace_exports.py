@@ -1,7 +1,10 @@
 from io import BytesIO
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
-from zipfile import ZipFile
 
+from aiogram.exceptions import TelegramForbiddenError
+from aiogram.methods import SendDocument
 from aiohttp.test_utils import TestClient, TestServer
 from pypdf import PdfReader
 from test_miniapp import settings
@@ -86,18 +89,22 @@ async def test_workspace_exports_use_approved_snapshots_and_shared_settings(engi
             session,
             {**generate, "revision": revision["id"], "audience": "all", "language": "en"},
         )
-        package = await client.get(
-            endpoint, params={**session, "request": historical["request"]}, headers=headers(actor)
-        )
-        assert package.status == 200 and package.content_type == "application/zip"
-        with ZipFile(BytesIO(await package.read())) as bundle:
-            assert len(bundle.namelist()) == 2
-            lights = next(name for name in bundle.namelist() if "-lights-" in name)
-            musicians = next(name for name in bundle.namelist() if "-musicians-" in name)
-            assert "Kometa" in pdf_text(bundle.read(musicians))
-            assert "147" in pdf_text(bundle.read(lights)) and "03:38" in pdf_text(
-                bundle.read(lights)
+        contents = {}
+        for target in ("musicians", "lights"):
+            pdf = await client.get(
+                endpoint,
+                params={**session, "request": historical["request"], "audience": target},
+                headers=headers(actor),
             )
+            assert pdf.status == 200 and pdf.content_type == "application/pdf"
+            assert f"-{target}-en-latin.pdf" in pdf.headers["Content-Disposition"]
+            contents[target] = pdf_text(await pdf.read())
+        assert "Kometa" in contents["musicians"]
+        assert "147" in contents["lights"] and "03:38" in contents["lights"]
+        denied_file = await client.get(
+            endpoint, params={**params, "audience": "lights"}, headers=headers(actor)
+        )
+        assert denied_file.status == 403
         still_published = await client.get(endpoint, params=params, headers=headers(actor))
         assert await still_published.read() == original
         async with PostgresUnitOfWork(engine) as uow:
@@ -106,3 +113,77 @@ async def test_workspace_exports_use_approved_snapshots_and_shared_settings(engi
             ]
             member.status = "left"
         assert (await client.get(endpoint, params=params, headers=headers(actor))).status == 403
+
+
+async def test_workspace_can_send_one_or_two_pdfs_to_the_authenticated_private_chat(engine, world):
+    await setup_workspace(engine, world)
+    async with PostgresUnitOfWork(engine) as uow:
+        lists = Setlists(uow.store, world.admin)
+        await lists.edit_songs(world.group.id, world.concert.id, 0, ["Комета"])
+        await lists.approve(world.group.id, world.concert.id, 1)
+    bot = SimpleNamespace(send_document=AsyncMock(), send_media_group=AsyncMock())
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        session = await post(client, 2, "open_shared", scope(world))
+        payload = {
+            **session,
+            "action": "generate",
+            "version": 2,
+            "language": "ru",
+            "delivery": "telegram",
+            "chat_id": -100,
+        }
+        for audience in ("lights", "all"):
+            command = {**payload, "request_id": str(uuid4()), "audience": audience}
+            queued = await post(client, 2, "export_action", command)
+            assert queued["status"] == "pending"
+            assert await deliver_request(engine, queued["request"], bot=bot)
+            result = await post(client, 2, "export_action", command)
+            assert result["status"] == "saved" and result["delivery"] == "telegram"
+    bot.send_document.assert_awaited_once()
+    chat, upload = bot.send_document.await_args.args
+    assert chat == 2 and "-lights-" in upload.filename and upload.data.startswith(b"%PDF-")
+    bot.send_media_group.assert_awaited_once()
+    chat, media = bot.send_media_group.await_args.args
+    assert chat == 2 and len(media) == 2
+    assert [document.type for document in media] == ["document", "document"]
+    assert "-musicians-" in media[0].media.filename and "-lights-" in media[1].media.filename
+    assert all(document.media.data.startswith(b"%PDF-") for document in media)
+
+
+async def test_workspace_reports_unavailable_chat_and_can_retry_with_a_download(engine, world):
+    await setup_workspace(engine, world)
+    async with PostgresUnitOfWork(engine) as uow:
+        lists = Setlists(uow.store, world.admin)
+        await lists.edit_songs(world.group.id, world.concert.id, 0, ["Комета"])
+        await lists.approve(world.group.id, world.concert.id, 1)
+    blocked = TelegramForbiddenError(
+        method=SendDocument(chat_id=2, document="unused"), message="Test blocked chat"
+    )
+    bot = SimpleNamespace(
+        send_document=AsyncMock(side_effect=blocked), send_media_group=AsyncMock()
+    )
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        session = await post(client, 2, "open_shared", scope(world))
+        payload = {"action": "generate", "version": 2, "language": "ru", "audience": "musicians"}
+        queued = await post(
+            client,
+            2,
+            "export_action",
+            {
+                **session,
+                **payload,
+                "request_id": str(uuid4()),
+                "delivery": "telegram",
+            },
+        )
+        assert not await deliver_request(engine, queued["request"], bot=bot)
+        result = await get(client, 2, "catalog_status", **session, request=queued["request"])
+        assert result["status"] == "failed" and result["error"] == "export_chat_unavailable"
+        saved = await execute(client, engine, 2, session, {**payload, "delivery": "download"})
+        assert saved["status"] == "saved"
+        pdf = await client.get(
+            "/miniapp/api/export_download",
+            params={**session, "request": saved["request"]},
+            headers=headers(2),
+        )
+        assert pdf.status == 200 and pdf.content_type == "application/pdf"
