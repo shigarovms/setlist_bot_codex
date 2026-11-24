@@ -6,6 +6,7 @@ from test_repertoire_workspace_actions import get
 
 from setlist_bot.application import workspace
 from setlist_bot.application.catalog import Catalog
+from setlist_bot.application.groups import Groups
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.domain.entities import (
     Concert,
@@ -40,6 +41,7 @@ async def test_workspace_reuses_membership_and_performance_permissions(engine, w
         assert (await client.get("/miniapp/api/bands")).status == 401
         bands = await (await client.get("/miniapp/api/bands", headers=member)).json()
         assert bands["bands"] == [{"id": band, "name": world.group.name}]
+        assert bands["connect_url"] == "https://t.me/botToPract696_bot?startgroup=connect_band"
         first = await (await client.get(performances, headers=admin)).json()
         assert first["has_next"] and first["performances"][0]["id"] == str(world.concert.id)
         second = await (await client.get(performances + "&page=1", headers=admin)).json()
@@ -75,6 +77,30 @@ async def test_workspace_reuses_membership_and_performance_permissions(engine, w
             )[0]
             membership.status = "left"
         assert (await client.get(state_url, headers=member)).status == 403
+
+
+async def test_telegram_actions_only_offer_what_each_role_can_start(engine, world):
+    async with PostgresUnitOfWork(engine) as uow:
+        uow.store.add(DeploymentIdentity(bot_id=1110437563, environment="sandbox"))
+    band = str(world.group.id)
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        root = await get(client, 3, "bands")
+        assert not root["bands"] and root["connect_url"].endswith("?startgroup=connect_band")
+        owner = (await get(client, 1, "band_settings", band=band))["telegram"]
+        assert owner == {
+            "transfer_url": f"https://t.me/botToPract696_bot?start=transfer_{world.group.id.hex}",
+            "cleanup_url": f"https://t.me/botToPract696_bot?startgroup=cleanup_{world.group.id.hex}",
+        }
+        member = (await get(client, 2, "band_settings", band=band))["telegram"]
+        assert member == {"transfer_url": None, "cleanup_url": None}
+        await get(client, 3, "band_settings", 403, band=band)
+        async with PostgresUnitOfWork(engine) as uow:
+            (membership,) = await uow.store.find(
+                Membership, group_id=world.group.id, user_id=world.member.id
+            )
+            await Groups(uow.store, world.admin).administrator(world.group.id, membership.id, True)
+        admin = (await get(client, 2, "band_settings", band=band))["telegram"]
+        assert admin == {"transfer_url": None, "cleanup_url": owner["cleanup_url"]}
 
 
 async def test_repertoire_without_event_access_and_with_isolated_song_ids(engine, world):

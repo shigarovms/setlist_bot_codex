@@ -267,6 +267,11 @@ class Controller:
         if command == "group":
             command = "new_band"
         args = args.strip()
+        if command == "start":
+            from setlist_bot.transport.collectives import handle_collective_start
+
+            if collective := await handle_collective_start(self, args):
+                return collective
         if command in ("profile", "pf_go") or command == "start" and args == "profile":
             from setlist_bot.transport.profiles import begin
             from setlist_bot.transport.profiles import handle as profile_handle

@@ -1208,6 +1208,15 @@ async def browser_band_settings(browser, engine, group_id, origin):
         "Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&band={group_id}&past=1"}
     )
     await browser.click_named("#workspace-content a", "Настройки коллектива")
+    await browser.wait("!!document.querySelector('#workspace-content a[href*=startgroup]')")
+    assert await browser.js(
+        f"document.querySelector('a[href$=\"?start=transfer_{group_id.hex}\"]')"
+        "?.textContent === 'Перенести в другой чат'"
+    )
+    assert await browser.js(
+        f"document.querySelector('a[href$=\"?startgroup=cleanup_{group_id.hex}\"]')"
+        "?.textContent === 'Прибраться в чате'"
+    )
     await browser.click_named("#workspace-content button", "Изменить настройки")
     await browser.js("""
         document.getElementById('band-setting-setlist_style').value = 'article';
@@ -1235,6 +1244,14 @@ async def browser_help(browser, engine, actor, origin):
     async with PostgresUnitOfWork(engine) as uow:
         await Support(uow.store, actor).configure(-900, "shigarovms")
     await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1"})
+    await browser.wait("!!document.querySelector('a[href$=\"?startgroup=connect_band\"]')")
+    await browser.js("window.Telegram.WebApp.openTelegramLink = url => { window.chatLink = url; }")
+    await browser.click_named("#workspace-content a", "Подключить коллектив в Telegram")
+    assert await browser.js("window.chatLink.endsWith('?startgroup=connect_band')")
+    await browser.click_named("#workspace-content summary", "Как вступить в коллектив")
+    assert await browser.js(
+        "document.querySelector('details[open] p')?.textContent.includes('/register')"
+    )
     await browser.click_named("#workspace-content a", "Справка и поддержка")
     await browser.click_named("#workspace-content summary", "Репертуар")
     assert await browser.js(

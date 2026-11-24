@@ -199,9 +199,9 @@ async def test_cleanup_known_panels_confirmed_and_preserves_database(engine, wor
     processor = Processor(engine)
     ids = count(5000)
 
-    async def send(text, user=1):
+    async def send(text, user=1, chat=-100):
         return await processor.process(
-            next(ids), user, -100, text, private=False, is_callback=not text.startswith("/")
+            next(ids), user, chat, text, private=chat > 0, is_callback=not text.startswith("/")
         )
 
     panel = await send(f"/use_concert {world.concert.id}")
@@ -213,8 +213,14 @@ async def test_cleanup_known_panels_confirmed_and_preserves_database(engine, wor
         await lists.edit_songs(world.group.id, world.concert.id, 0, ["Комета"], private=True)
     denied = await send("/cleanup_chat", user=2)
     assert not denied.buttons and "администратор" in denied.text.lower()
-    confirm = await send("/cleanup_chat")
+    deep_link = f"/start@setlist_test_bot cleanup_{world.group.id.hex}"
+    assert not (await send(deep_link, user=2)).buttons
+    wrong = await send(deep_link, chat=-200)
+    assert not wrong.buttons and "привязан к этому коллективу" in wrong.text
+    assert not (await send(deep_link, chat=1)).buttons
+    confirm = await send(deep_link)
     assert "за последние 48 часов" in confirm.text
+    assert not confirm.delete_message_ids
     assert confirm.buttons[0][0] == "Да, прибраться"
     result = await send(confirm.buttons[0][1])
     assert 80 in result.delete_message_ids

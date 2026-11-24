@@ -65,7 +65,7 @@ def action(response, prefix):
 
 async def test_worker_can_register_but_only_verified_chat_owner_can_create(engine, world):
     send = client(engine)
-    prompt = await send("/group", actor=2, chat=-300, remember=10)
+    prompt = await send("/start@test_bot connect_band", actor=2, chat=-300, remember=10)
     assert prompt.force_reply
     preview = await send("Туровая группа", actor=2, chat=-300, reply=10)
     assert "владелец" in preview.text and "администратором" in preview.text
@@ -178,13 +178,20 @@ async def test_transfer_requires_both_owners_and_preserves_data_and_old_chat_unt
 ):
     send = client(engine)
     old = await send(f"/use_concert {world.concert.id}", remember=90)
+    entry = f"/start transfer_{world.group.id.hex}"
+    assert not (await send(entry, actor=2, private=True)).buttons
+    assert not (await send(entry, chat=-100)).buttons
+    move = await send(entry, private=True)
+    assert world.group.name in move.text
+    code = await send(action(move, "ct_code"), private=True)
+    link = next(url for _, url in code.buttons if url.startswith("https://t.me/test_bot?"))
+    command = "/start@test_bot " + link.split("?startgroup=")[1]
+    assert command.startswith("/start@test_bot move_")
     async with PostgresUnitOfWork(engine) as uow:
-        service = Collectives(uow.store, world.admin, 1)
-        token = (await service.begin_transfer(world.group.id)).id
         counts_before = {table: len(await uow.store.find(table)) for table in (Group, Membership)}
-    denied = await send(f"/chat_transfer {token.hex}", actor=2, chat=-300)
+    denied = await send(command, actor=2, chat=-300)
     assert "Привязать коллектив" not in str(denied.buttons)
-    review = await send(f"/chat_transfer {token.hex}", chat=-300)
+    review = await send(command, chat=-300)
     assert "Владельцем коллектива останется" in review.text
     async with PostgresUnitOfWork(engine) as uow:
         assert (await uow.store.find(ChatBinding, group_id=world.group.id))[0].chat_id == -100

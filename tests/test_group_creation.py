@@ -111,6 +111,14 @@ async def test_bound_chat_rejected_before_name_prompt_or_validation(engine, worl
     assert (await bound_group(engine, -100)).id == world.group.id
 
 
+async def test_workspace_connect_link_reopens_bound_chat_without_creating_a_session(engine, world):
+    send = messenger(engine)
+    response = await send("/start@setlist_test_bot connect_band", chat=-100)
+    assert world.group.name in response.text and not response.force_reply
+    async with PostgresUnitOfWork(engine) as uow:
+        assert not await uow.store.find(Confirmation, chat_id=-100)
+
+
 async def test_edit_name_rotates_prompt_and_confirmation_and_invalid_input_can_be_retried(
     engine, world
 ):

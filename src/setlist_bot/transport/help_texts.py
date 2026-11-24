@@ -174,8 +174,8 @@ WORKSPACE_HELP = {
     "ru": {
         "start": (
             "Начните с «Моих коллективов». В «Моём профиле» можно изменить анкету, язык "
-            "приложения и оформление PDF. Для подключения нового коллектива откройте "
-            "групповой чат в Telegram."
+            "приложения и оформление PDF. Кнопка «Подключить коллектив в Telegram» "
+            "откроет выбор чата, а его владелец подтвердит подключение."
         ),
         "events": (
             "Выберите коллектив и откройте предстоящие или прошедшие выступления. "
@@ -206,8 +206,8 @@ WORKSPACE_HELP = {
     "en": {
         "start": (
             "Start with My bands. In My profile you can edit your details, choose the app "
-            "language and set PDF appearance. To connect a new band, open its group chat "
-            "in Telegram."
+            "language and set PDF appearance. Choose Connect a band in Telegram to pick "
+            "a chat. Its owner confirms the connection."
         ),
         "events": (
             "Choose a band and view upcoming or past performances. Admins can create a "

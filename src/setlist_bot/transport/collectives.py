@@ -10,6 +10,28 @@ from setlist_bot.transport.controller import Controller, Response
 from setlist_bot.transport.i18n import tr
 
 
+async def handle_collective_start(c: Controller, parameter: str) -> Response | None:
+    if parameter == "connect_band":
+        require(not c.private, "new_band_private")
+        if await c.store.find(ChatBinding, chat_id=c.chat_id):
+            return await handle_collective(c, "on_added", "")
+        return await c.execute("/new_band")
+    if parameter.startswith("transfer_"):
+        return await handle_collective(c, "ct_begin", parameter.removeprefix("transfer_"))
+    if parameter.startswith("move_"):
+        return await handle_collective(c, "chat_transfer", parameter.removeprefix("move_"))
+    if parameter.startswith("cleanup_"):
+        require(not c.private, "group_only")
+        group_id = UUID(parameter.removeprefix("cleanup_"))
+        await c.groups.access(group_id, admin=True)
+        require(
+            bool(await c.store.find(ChatBinding, chat_id=c.chat_id, group_id=group_id)),
+            "cleanup_wrong_chat",
+        )
+        return await c.execute("cleanup_chat")
+    return None
+
+
 async def restricted(controller: Controller, group_id: UUID) -> Response:
     await controller.groups.access(group_id)
     service = Collectives(controller.store, controller.user, controller.chat_id)
@@ -110,10 +132,21 @@ async def handle_collective(c: Controller, command: str, args: str) -> Response:
         )
     if command == "ct_code":
         row = await service.begin_transfer(UUID(args))
+        buttons = (
+            [
+                (
+                    t("transfer_choose_chat"),
+                    f"https://t.me/{c.bot_username}?startgroup=move_{row.id.hex}",
+                )
+            ]
+            if c.bot_username
+            else []
+        )
         return Response(
             (await c.store.get(Group, UUID(json.loads(row.command)["group_id"]))).name
             + "\n\n"
             + t("transfer_code", token=row.id.hex),
+            buttons,
             workflow_id=row.id,
         )
     if command == "chat_transfer":

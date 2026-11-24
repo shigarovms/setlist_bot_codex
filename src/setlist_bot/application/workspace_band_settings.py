@@ -7,7 +7,7 @@ from setlist_bot.application.activity import record_activity
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.message_refresh import queue_card_refreshes
 from setlist_bot.application.ports import Store
-from setlist_bot.domain.entities import Membership, User
+from setlist_bot.domain.entities import ChatBinding, Membership, User
 from setlist_bot.domain.rules import require
 
 BAND_SETTINGS_KIND = "miniapp_band_settings"
@@ -36,11 +36,16 @@ class WorkspaceBandSettings:
         group = await self.groups.access(group_id)
         member = (await self.store.find(Membership, group_id=group_id, user_id=self.user.id))[0]
         admin = member.role == "admin"
+        bound = admin and bool(await self.store.find(ChatBinding, group_id=group_id))
         return {
             "band": group.name,
             "epoch": group.lifecycle_version,
             "language": self.user.language,
             "admin": admin,
+            "chat_actions": {
+                "cleanup": bound,
+                "transfer": bound and group.owner_id == self.user.id,
+            },
             "settings": {
                 key: getattr(group, key) for key in SETTING_FIELDS if admin or key in SETLIST_FIELDS
             },

@@ -21,6 +21,11 @@ const copy = {
     draft: "Открыть личный черновик", restricted: "Черновики доступны администраторам коллектива.",
     previous: "Назад", next: "Дальше", retry: "Повторить", loading: "Загрузка…",
     auth: "Откройте приложение через бота в Telegram.", performances: "К выступлениям",
+    connectBand: "Подключить коллектив в Telegram", joinBand: "Как вступить в коллектив",
+    joinBandHelp: "В чате коллектива отправьте /register и укажите свои роли. Администратор рассмотрит заявку. Если вам уже прислали приглашение, откройте его здесь.",
+    telegramChat: "Действия в Telegram", transferChat: "Перенести в другой чат",
+    cleanupChat: "Прибраться в чате",
+    chatActionsHelp: "Уборку можно открыть и прямо в чате коллектива из «Опций» в карточке сет-листа.",
     login: "Войти через Telegram", logout: "Выйти", openBot: "Открыть бота",
     loginFailed: "Не удалось войти. Попробуйте ещё раз.",
     startBot: "Откройте бота и нажмите «Старт», затем повторите вход.",
@@ -46,6 +51,11 @@ const copy = {
     draft: "Open private draft", restricted: "Drafts are available to band admins.",
     previous: "Previous", next: "Next", retry: "Try again", loading: "Loading…",
     auth: "Open the app from the bot in Telegram.", performances: "Back to performances",
+    connectBand: "Connect a band in Telegram", joinBand: "How to join a band",
+    joinBandHelp: "Send /register in the band's chat and enter your roles. An admin will review your request. If you already have an invitation, open it here.",
+    telegramChat: "Telegram chat actions", transferChat: "Move to another chat",
+    cleanupChat: "Clean up chat",
+    chatActionsHelp: "You can also open cleanup from Options on a setlist card in the band's chat.",
     login: "Sign in with Telegram", logout: "Sign out", openBot: "Open the bot",
     loginFailed: "Could not sign in. Try again.",
     startBot: "Open the bot and press Start, then sign in again.",
@@ -97,6 +107,17 @@ function element(tag, label, attributes = {}) {
   node.textContent = label;
   for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
   return node;
+}
+
+function telegramLink(label, href) {
+  const link = element("a", label, { href, target: "_blank", rel: "noopener noreferrer" });
+  link.addEventListener("click", event => {
+    const webApp = window.Telegram?.WebApp;
+    if (!webApp?.initData || !webApp.openTelegramLink) return;
+    event.preventDefault();
+    webApp.openTelegramLink(href);
+  });
+  return link;
 }
 
 export function workspaceText(language, key) {
@@ -302,6 +323,14 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
           root: content, data, language, request: catalogApi, refresh: load,
           status: message => { status.textContent = message; },
         });
+        const { transfer_url: transfer, cleanup_url: cleanup } = data.telegram;
+        if (transfer || cleanup) {
+          const actions = element("div", "", { class: "toolbar" });
+          if (transfer) actions.append(telegramLink(t("transferChat"), transfer));
+          if (cleanup) actions.append(telegramLink(t("cleanupChat"), cleanup));
+          content.append(element("h3", t("telegramChat")), actions);
+          if (cleanup) content.append(element("p", t("chatActionsHelp")));
+        }
         if (data.admin) content.append(bandDeleteButton({
           data, band, language, request: accountApi, onDelete: () => location.assign(bandTrashUrl()),
         }));
@@ -330,6 +359,10 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
           list.append(item);
         }
         content.append(list);
+        const join = element("details", "");
+        join.append(element("summary", t("joinBand")), element("p", t("joinBandHelp")),
+          element("a", teamLabel(language, "inbox"), { href: inboxUrl() }));
+        content.append(telegramLink(t("connectBand"), data.connect_url), join);
       }
       if (login?.enabled) content.append(signOutButton());
     } catch (error) {

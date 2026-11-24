@@ -321,11 +321,25 @@ async def api(request: web.Request) -> web.Response:
                 result = await WorkspaceMusic(uow.store, user).view(UUID(payload["band"]))
                 return web.json_response(result)
             if operation == "bands" and request.method == "GET":
-                return web.json_response(await Workspace(uow.store, user).bands())
-            if operation == "band_settings" and request.method == "GET":
-                return web.json_response(
-                    await WorkspaceBandSettings(uow.store, user).view(UUID(payload["band"]))
+                bands = await Workspace(uow.store, user).bands()
+                bands["connect_url"] = (
+                    f"https://t.me/{settings.bot_username}?startgroup=connect_band"
                 )
+                return web.json_response(bands)
+            if operation == "band_settings" and request.method == "GET":
+                group_id = UUID(payload["band"])
+                band_settings = await WorkspaceBandSettings(uow.store, user).view(group_id)
+                actions = band_settings.pop("chat_actions")
+                bot_url = f"https://t.me/{settings.bot_username}"
+                band_settings["telegram"] = {
+                    "cleanup_url": f"{bot_url}?startgroup=cleanup_{group_id.hex}"
+                    if actions["cleanup"]
+                    else None,
+                    "transfer_url": f"{bot_url}?start=transfer_{group_id.hex}"
+                    if actions["transfer"]
+                    else None,
+                }
+                return web.json_response(band_settings)
             if operation == "band_trash" and request.method == "GET":
                 page = int(payload.get("page", "0"))
                 if not 0 <= page <= 10000:
