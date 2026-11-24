@@ -150,6 +150,16 @@ class Team:
         await self.notice(member, "team_withdrawn")
         return member
 
+    async def retry(self, identifier: UUID, expected: int) -> Membership:
+        member = await self.store.get(Membership, identifier)
+        await self.groups.access(member.group_id, admin=True)
+        member = await self.store.get(Membership, identifier, lock=True)
+        require(member.version == expected and member.invitation is not None, "input_expired")
+        assert member.invitation is not None
+        roles = member.invitation["roles"]
+        member.invitation = None
+        return await self.invite(member.group_id, member.user_id, roles)
+
     async def check_remove(self, member: Membership) -> Group:
         group = await self.groups.access(member.group_id, admin=member.user_id != self.user.id)
         require(member.status == "active", "input_expired")

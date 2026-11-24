@@ -200,11 +200,7 @@ async def handle(c: Controller, command: str, args: str) -> Response:
     if command == "tm_cancel":
         await service.cancel(member.id, version)
     elif command == "tm_retry":
-        require(member.invitation is not None, "input_expired")
-        assert member.invitation is not None
-        roles = member.invitation["roles"]
-        member.invitation = None
-        await service.invite(group.id, member.user_id, roles)
+        await service.retry(member.id, version)
     elif command in ("tm_approve", "tm_reject"):
         await c.groups.decide_member(group.id, member.id, command == "tm_approve", version)
     elif command == "tm_rights":

@@ -26,6 +26,8 @@ READ_TABLES = (
     "professional_roles",
     "groups",
     "memberships",
+    "staff_roles",
+    "staff_contacts",
     "concerts",
     "setlists",
     "blocks",

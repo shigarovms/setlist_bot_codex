@@ -21,6 +21,7 @@ from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.application.workspace_performances import WorkspacePerformances
 from setlist_bot.application.workspace_setlists import SETLIST_SESSION, WorkspaceSetlists
+from setlist_bot.application.workspace_team import TEAM_SESSION, WorkspaceTeam
 from setlist_bot.domain.entities import (
     CatalogProposal,
     Concert,
@@ -43,6 +44,7 @@ CATALOG_OPERATIONS = {
     "shared_action": "miniapp_shared",
     "export_action": "miniapp_export",
     "performance_action": "miniapp_performance",
+    "team_action": "miniapp_team",
     "duration_save": "miniapp_duration",
 }
 
@@ -53,6 +55,7 @@ class CatalogTarget:
     group_id: UUID
     concert: Concert | None = None
     shared: bool = False
+    membership_id: UUID | None = None
 
 
 class MiniCatalog:
@@ -78,11 +81,31 @@ class MiniCatalog:
         self.store.add(parent)
         return parent
 
+    async def open_team_membership(self, identifier: UUID) -> Confirmation:
+        member, group = await WorkspaceTeam(self.store, self.user).own_membership(
+            identifier, opening=True
+        )
+        parent = Confirmation(
+            user_id=self.user.id,
+            chat_id=self.user.telegram_id,
+            expires_at=now() + timedelta(hours=1),
+            command=json.dumps(
+                {
+                    "kind": TEAM_SESSION,
+                    "group_id": str(group.id),
+                    "group_epoch": group.lifecycle_version,
+                    "membership_id": str(member.id),
+                }
+            ),
+        )
+        self.store.add(parent)
+        return parent
+
     async def target(self, session: UUID) -> CatalogTarget:
         parent = await self.store.get(Confirmation, session)
         data = json.loads(parent.command)
         kind = data.get("kind")
-        if kind not in ("miniapp_repertoire", SETLIST_SESSION):
+        if kind not in ("miniapp_repertoire", SETLIST_SESSION, TEAM_SESSION):
             parent, _, concert = await self.drafts.load(session)
             return CatalogTarget(parent, concert.group_id, concert)
         require(
@@ -91,6 +114,16 @@ class MiniCatalog:
             and parent.expires_at > now(),
             "miniapp_expired",
         )
+        if kind == TEAM_SESSION:
+            member, group = await WorkspaceTeam(self.store, self.user).own_membership(
+                UUID(data["membership_id"])
+            )
+            require(
+                str(group.id) == data["group_id"]
+                and group.lifecycle_version == data["group_epoch"],
+                "miniapp_expired",
+            )
+            return CatalogTarget(parent, group.id, membership_id=member.id)
         group = await self.drafts.groups.access(UUID(data["group_id"]))
         require(group.lifecycle_version == data["group_epoch"], "miniapp_expired")
         if kind == SETLIST_SESSION:
@@ -107,6 +140,7 @@ class MiniCatalog:
 
     async def read(self, session: UUID, song_id: UUID) -> dict[str, Any]:
         target = await self.target(session)
+        require(target.membership_id is None, "forbidden")
         song = await self.catalog.song(target.group_id, song_id)
         require(target.concert is None or not song.archived, "not_found")
         aliases = await self.store.find(SongAlias, group_id=target.group_id, song_id=song.id)
@@ -125,7 +159,15 @@ class MiniCatalog:
         kind = CATALOG_OPERATIONS[operation]
         workspace_operations = ("shared_action", "export_action")
         require(target.shared == (operation in workspace_operations), "input")
-        if operation not in ("catalog_save", *workspace_operations):
+        personal = target.membership_id is not None
+        require(not personal or operation == "team_action", "forbidden")
+        team_command = None
+        if operation == "team_action":
+            require(concert is None, "input")
+            team_command = WorkspaceTeam.command(payload, personal=personal)
+            if not personal and team_command["action"] != "request_roles":
+                await self.drafts.groups.access(group_id, admin=True)
+        elif operation not in ("catalog_save", *workspace_operations):
             await self.drafts.groups.access(group_id, admin=True)
         request = payload.get("request_id")
         require(isinstance(request, str) and str(UUID(request)) == request, "input")
@@ -182,6 +224,8 @@ class MiniCatalog:
             require(concert is None, "input")
             details = {"performance": WorkspacePerformances.command(payload)}
             expires = min(expires, now() + timedelta(minutes=15))
+        elif team_command is not None:
+            details = {"team": team_command}
         else:
             details = await self._catalog_details(group_id, payload)
         self.store.add(
@@ -276,6 +320,7 @@ class MiniCatalog:
             and row.expires_at > now(),
             "miniapp_expired",
         )
+        require(target.membership_id is None or data["kind"] == "miniapp_team", "forbidden")
         if data["status"] != "pending":
             return dict(data.get("result", {}))
         if data["kind"] == "miniapp_duration":
@@ -359,6 +404,13 @@ class MiniCatalog:
                 data["change"] = change
             row.command = json.dumps({**data, "status": "saved", "result": result_performance})
             return result_performance
+        if data["kind"] == "miniapp_team":
+            require(concert is None and not target.shared, "miniapp_expired")
+            result_team = await WorkspaceTeam(self.store, self.user).apply(
+                group_id, data["team"], target.membership_id
+            )
+            row.command = json.dumps({**data, "status": "saved", "result": result_team})
+            return result_team
         song_id = UUID(data["song_id"]) if data["song_id"] else None
         if song_id:
             require(not (await self.catalog.song(group_id, song_id)).archived, "not_found")

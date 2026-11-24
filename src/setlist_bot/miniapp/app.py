@@ -19,6 +19,7 @@ from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.application.workspace_performances import WorkspacePerformances
 from setlist_bot.application.workspace_setlists import WorkspaceSetlists
+from setlist_bot.application.workspace_team import WorkspaceTeam, text_field
 from setlist_bot.domain.entities import Confirmation, User, now
 from setlist_bot.domain.miniapp_auth import verify_init_data
 from setlist_bot.domain.rules import AppError, require
@@ -107,6 +108,7 @@ async def asset(request: web.Request) -> web.Response:
         "shared-setlist.js": "text/javascript",
         "workspace-export.js": "text/javascript",
         "workspace-performances.js": "text/javascript",
+        "workspace-team.js": "text/javascript",
         "model.js": "text/javascript",
         "persistence.js": "text/javascript",
         "style.css": "text/css",
@@ -256,6 +258,29 @@ async def api(request: web.Request) -> web.Response:
                 return web.json_response(result)
             if operation == "bands" and request.method == "GET":
                 return web.json_response(await Workspace(uow.store, user).bands())
+            if operation == "team_inbox" and request.method == "GET":
+                return web.json_response(await WorkspaceTeam(uow.store, user).inbox())
+            if operation == "team" and request.method == "GET":
+                page = int(payload.get("page", "0"))
+                if not 0 <= page <= 10000:
+                    raise ValueError("Invalid page")
+                return web.json_response(
+                    await WorkspaceTeam(uow.store, user).view(
+                        UUID(payload["band"]), page, PAGE_SIZE
+                    )
+                )
+            if operation == "team_contact" and request.method == "GET":
+                return web.json_response(
+                    await WorkspaceTeam(uow.store, user).contact(
+                        UUID(payload["band"]), UUID(payload["contact"])
+                    )
+                )
+            if operation == "team_recipient" and request.method == "POST":
+                return web.json_response(
+                    await WorkspaceTeam(uow.store, user).recipient(
+                        UUID(payload["band"]), text_field(payload, "reference", 64)
+                    )
+                )
             if operation == "performances" and request.method == "GET":
                 past, page = payload.get("past", "0"), int(payload.get("page", "0"))
                 if past not in ("0", "1") or not 0 <= page <= 10000:
@@ -286,6 +311,11 @@ async def api(request: web.Request) -> web.Response:
             if operation == "open_repertoire" and request.method == "POST":
                 repertoire = await MiniCatalog(service).open_repertoire(UUID(payload["band"]))
                 return web.json_response({"session": str(repertoire.id)})
+            if operation == "open_team_membership" and request.method == "POST":
+                member = await MiniCatalog(service).open_team_membership(
+                    UUID(text_field(payload, "membership", 36))
+                )
+                return web.json_response({"session": str(member.id)})
             if operation == "repertoire_import_preview" and request.method == "POST":
                 source = RepertoireImport.from_payload(payload)
                 importer = Importer(uow.store, user, user.telegram_id)

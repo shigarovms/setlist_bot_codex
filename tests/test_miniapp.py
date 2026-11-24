@@ -18,6 +18,7 @@ from sqlalchemy.exc import DBAPIError
 
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.setlists import Setlists
+from setlist_bot.application.team import Team
 from setlist_bot.domain.entities import (
     Concert,
     Confirmation,
@@ -244,6 +245,7 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
     identifier, initial = await session(engine, world)
     async with PostgresUnitOfWork(engine) as uow:
         uow.store.add(DeploymentIdentity(bot_id=1110437563, environment="sandbox"))
+        await Team(uow.store, world.admin).invite(world.group.id, world.stranger.id, ["Световик"])
     spec = importlib.util.spec_from_file_location(
         "miniapp_setup", Path(__file__).parents[1] / "scripts/setup-sandbox-miniapp.py"
     )
@@ -367,6 +369,30 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
             )
             assert song_status.status == 200 and (await song_status.json())["status"] == "pending"
             band = {"band": str(world.group.id)}
+            team = await client.get("/miniapp/api/team", params=band, headers=headers)
+            assert team.status == 200 and (await team.json())["admin"]
+            guest_headers = {**headers, "Authorization": "tma " + signed(actor=3)}
+            inbox = await client.get("/miniapp/api/team_inbox", headers=guest_headers)
+            assert inbox.status == 200
+            invitation = (await inbox.json())["invitations"][0]
+            personal = await client.post(
+                "/miniapp/api/open_team_membership",
+                json={"membership": invitation["id"]},
+                headers=guest_headers,
+            )
+            assert personal.status == 200
+            response = await client.post(
+                "/miniapp/api/team_action",
+                json={
+                    **(await personal.json()),
+                    "action": "respond",
+                    "accept": True,
+                    "version": invitation["version"],
+                    "request_id": str(uuid4()),
+                },
+                headers=guest_headers,
+            )
+            assert response.status == 200 and (await response.json())["status"] == "pending"
             trash = await client.get("/miniapp/api/performance_trash", params=band, headers=headers)
             assert trash.status == 200 and (await trash.json())["performances"] == []
             scoped = await client.post("/miniapp/api/open_repertoire", json=band, headers=headers)
@@ -402,6 +428,8 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 "UPDATE music_searches SET status='cancelled'",
                 "UPDATE export_files SET filename='forbidden.pdf'",
                 "UPDATE memberships SET role='admin'",
+                "UPDATE staff_contacts SET permanent=true",
+                "UPDATE staff_roles SET name='forbidden'",
                 "UPDATE groups SET name='forbidden'",
                 "UPDATE groups SET owner_id=NULL",
                 "DELETE FROM personal_drafts",

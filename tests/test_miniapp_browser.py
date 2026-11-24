@@ -421,6 +421,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 )
                 await browser_music_search(browser, engine, world.group.id)
                 await browser_manage_performance(browser, engine, world.group.id, origin)
+                await browser_team(browser, engine, world.group.id, origin)
                 return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
             assert await browser.js(
@@ -883,4 +884,51 @@ async def browser_manage_performance(browser, engine, group_id, origin):
     )
     assert await browser.js(
         "document.querySelector('#workspace-content').innerText.includes('Казань')"
+    )
+
+
+async def browser_team(browser, engine, group_id, origin):
+    await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&band={group_id}"})
+    await browser.click_named("#workspace-content a", "Постоянная команда")
+    await browser.click_named("#workspace-content button", "Пригласить в команду")
+    await browser.js("""
+        document.getElementById('team-recipient').value = '3';
+        document.getElementById('team-roles-input').value = 'Световик';
+    """)
+    await browser.click_named("dialog[open] button", "Предпросмотр")
+    await browser.wait(
+        "document.querySelector('dialog[open]')?.innerText.includes('Telegram ID 3')"
+    )
+    await browser.click_named("dialog[open] button", "Пригласить в команду")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('#workspace-content')?.innerText.includes('Световик')"
+    )
+    await browser.call(
+        "Page.addScriptToEvaluateOnNewDocument",
+        {
+            "source": "window.Telegram.WebApp.initData = " + json.dumps(signed(actor=3)),
+        },
+    )
+    await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1"})
+    await browser.wait(
+        "document.getElementById('workspace-status')?.textContent === 'У вас пока нет коллективов.'"
+    )
+    await browser.click_named("#workspace-content a", "Приглашения в команду")
+    await browser.wait(
+        "document.querySelector('#workspace-content')?.innerText.includes('Световик')"
+    )
+    await browser.click_named("#workspace-content button", "Вступить в постоянную команду")
+    await browser.click_named("dialog[open] button", "Подтвердить")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('#workspace-content')?.innerText"
+        ".includes('Приглашений в команду пока нет.')"
+    )
+    await browser.click_named("#workspace-content a", "Мои коллективы")
+    await browser.click_named(".workspace-list a", "Коллектив А")
+    await browser.click_named("#workspace-content a", "Постоянная команда")
+    await browser.wait("document.querySelector('.workspace-list')?.innerText.includes('Световик')")
+    assert await browser.js(
+        "!document.querySelector('#workspace-content').innerText.includes('Пригласить в команду')"
     )
