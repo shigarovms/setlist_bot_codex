@@ -1,3 +1,5 @@
+import { clock } from "./model.js";
+
 const copy = {
   ru: {
     bands: "Мои коллективы", upcoming: "Предстоящие", past: "Прошедшие",
@@ -13,6 +15,12 @@ const copy = {
     search: "Найти песню", noSongs: "В этом разделе пока нет песен.", noMatches: "Песни не найдены.",
     toSongs: "К списку песен", duration: "Длительность", lights: "Свет", comment: "Комментарий",
     aliases: "Альтернативные названия", archived: "В архиве",
+    addSong: "Добавить песню", editSong: "Редактировать", copySong: "Копировать",
+    archiveSong: "В архив", restoreSong: "Восстановить песню",
+    proposals: "Предложения", noProposals: "Предложений на рассмотрении нет.",
+    approve: "Одобрить", reject: "Отклонить", proposedBy: "Автор", forSong: "Песня",
+    approved: "Предложение одобрено.", rejected: "Предложение отклонено.",
+    pending: "Запрос обрабатывается.", check: "Проверить результат",
   },
   en: {
     bands: "My bands", upcoming: "Upcoming", past: "Past",
@@ -28,6 +36,12 @@ const copy = {
     search: "Find a song", noSongs: "There are no songs here yet.", noMatches: "No matching songs.",
     toSongs: "Back to song list", duration: "Duration", lights: "Lights", comment: "Notes",
     aliases: "Alternate titles", archived: "Archived",
+    addSong: "Add a song", editSong: "Edit", copySong: "Copy",
+    archiveSong: "Archive", restoreSong: "Restore song",
+    proposals: "Suggestions", noProposals: "There are no pending suggestions.",
+    approve: "Approve", reject: "Reject", proposedBy: "Author", forSong: "Song",
+    approved: "Suggestion approved.", rejected: "Suggestion rejected.",
+    pending: "The request is being processed.", check: "Check result",
   },
 };
 
@@ -41,12 +55,13 @@ export function bandUrl(band, past = "0", page = 0) {
   return `./?${params}`;
 }
 
-function repertoireUrl(band, { archived = "0", page = 0, query = "", song = "" } = {}) {
+function repertoireUrl(band, { archived = "0", page = 0, query = "", song = "", proposals = false } = {}) {
   const params = new URLSearchParams({ workspace: "1", band, view: "repertoire" });
   if (archived === "1") params.set("archived", archived);
   if (page) params.set("page", page);
   if (query) params.set("query", query);
   if (song) params.set("song", song);
+  if (proposals) params.set("proposals", "1");
   return `./?${params}`;
 }
 
@@ -61,7 +76,7 @@ export function workspaceText(language, key) {
   return copy[language === "en" ? "en" : "ru"][key];
 }
 
-export async function showWorkspace({ api, authenticated, backButton }) {
+export async function showWorkspace({ api, openSong, authenticated, backButton }) {
   const main = document.getElementById("workspace-home");
   const title = document.getElementById("workspace-title");
   const content = document.getElementById("workspace-content");
@@ -71,11 +86,13 @@ export async function showWorkspace({ api, authenticated, backButton }) {
   const page = Number(workspaceParams.get("page")) || 0;
   const repertoire = band && workspaceParams.get("view") === "repertoire";
   const song = workspaceParams.get("song") || "";
+  const proposals = repertoire && workspaceParams.get("proposals") === "1";
   const archived = workspaceParams.get("archived") === "1" ? "1" : "0";
   const query = workspaceParams.get("query") || "";
   const repertoireList = () => repertoireUrl(band, { archived, page, query });
   let language = navigator.language.startsWith("ru") ? "ru" : "en";
   let login;
+  let catalogSession;
   const t = (key) => workspaceText(language, key);
   main.hidden = false;
   title.textContent = t("bands");
@@ -123,21 +140,22 @@ export async function showWorkspace({ api, authenticated, backButton }) {
   if (band) {
     backButton?.show?.();
     backButton?.onClick?.(() => {
-      location.assign(repertoire ? (song ? repertoireList() : bandUrl(band)) : bandUrl());
+      location.assign(repertoire ? (song || proposals ? repertoireList() : bandUrl(band)) : bandUrl());
     });
   }
   async function load() {
     content.replaceChildren();
     status.textContent = t("loading");
     try {
-      const data = repertoire
+      const data = proposals ? await api("repertoire_proposals", { band, page }) : repertoire
         ? await api("repertoire", { band, archived, page, query, song })
         : band ? await api("performances", { band, past, page }) : await api("bands");
       language = data.language === "en" ? "en" : "ru";
       document.documentElement.lang = language;
       title.textContent = band ? data.band : t("bands");
       status.textContent = "";
-      if (repertoire) showRepertoire(data);
+      if (proposals) showProposals(data);
+      else if (repertoire) showRepertoire(data);
       else if (band) showPerformances(data);
       else if (data.bands.length === 0) status.textContent = t("noBands");
       else {
@@ -161,6 +179,35 @@ export async function showWorkspace({ api, authenticated, backButton }) {
       if (band) content.append(element("a", t("bands"), { href: bandUrl() }));
       content.append(retry);
     }
+  }
+  async function catalogApi(operation, payload, method) {
+    if (operation === "song") {
+      const data = await api("repertoire", { band, song: payload.song_id });
+      return data.song;
+    }
+    catalogSession ??= api("open_repertoire", { band }, "POST");
+    const opening = catalogSession;
+    let session;
+    try {
+      ({ session } = await opening);
+      return await api(operation, { ...payload, session }, method);
+    } catch (error) {
+      if (catalogSession === opening && (!session || error.data?.error === "miniapp_expired"))
+        catalogSession = null;
+      throw error;
+    }
+  }
+  function songButton(label, admin, id = null, mode = "edit") {
+    const button = element("button", t(label), { type: "button" });
+    button.addEventListener("click", () => openSong(id, {
+      api: catalogApi,
+      language,
+      admin,
+      archiveLabel: t("archiveSong"),
+      refresh: load,
+      status: message => { status.textContent = message; },
+    }, mode));
+    return button;
   }
   function showPerformances(data) {
     const nav = element("nav", "", { class: "workspace-nav" });
@@ -209,6 +256,12 @@ export async function showWorkspace({ api, authenticated, backButton }) {
         if (value) details.append(element("dt", label), element("dd", value));
       }
       content.append(details);
+      const actions = element("div", "", { class: "toolbar" });
+      if (data.song.archived && data.admin)
+        actions.append(songButton("restoreSong", true, data.song.id, "restore"));
+      if (!data.song.archived) actions.append(songButton("editSong", data.admin, data.song.id));
+      actions.append(songButton("copySong", data.admin, data.song.id, "copy"));
+      content.append(actions);
       return;
     }
     for (const [tab, key] of [["0", "active"], ["1", "archive"]]) {
@@ -217,6 +270,8 @@ export async function showWorkspace({ api, authenticated, backButton }) {
         ...(archived === tab ? { "aria-current": "page" } : {}),
       }));
     }
+    if (data.admin) nav.append(element("a", t("proposals"), { href: repertoireUrl(band, { proposals: true }) }));
+    if (archived === "0") content.append(songButton("addSong", data.admin));
     const form = element("form", "", { action: "./", method: "get", class: "workspace-search" });
     for (const [name, value] of Object.entries({ workspace: "1", band, view: "repertoire", archived }))
       form.append(element("input", "", { type: "hidden", name, value }));
@@ -237,6 +292,70 @@ export async function showWorkspace({ api, authenticated, backButton }) {
     }
     content.append(list);
     showPages(data.has_next, (index) => repertoireUrl(band, { archived, page: index, query }));
+  }
+  const decisions = new Map();
+  function showProposals(data) {
+    const nav = element("nav", "", { class: "workspace-nav" });
+    nav.append(element("a", t("toSongs"), { href: repertoireUrl(band) }));
+    content.append(nav, element("h2", t("proposals")));
+    if (!data.proposals.length) status.textContent = t("noProposals");
+    const list = element("ul", "", { class: "workspace-list" });
+    for (const row of data.proposals) {
+      const item = element("li", "");
+      const fields = row.fields;
+      item.append(element("h3", fields.title || fields.alias), element("p", `${t("proposedBy")}: ${row.author}`));
+      const details = element("dl", "", { class: "song-details" });
+      for (const [label, value] of [
+        [t("forSong"), row.original_title], [t("duration"), fields.duration_seconds && clock(fields.duration_seconds)],
+        ["BPM", fields.bpm], [t("lights"), fields.lights], [t("comment"), fields.comment],
+        [t("aliases"), fields.alias || (fields.aliases ? fields.aliases.join(" · ") || "—" : null)],
+      ]) {
+        if (value) details.append(element("dt", label), element("dd", value));
+      }
+      item.append(details);
+      const actions = element("div", "", { class: "toolbar" });
+      decisionButtons(row.id, actions);
+      item.append(actions);
+      list.append(item);
+    }
+    content.append(list);
+    showPages(data.has_next, index => repertoireUrl(band, { proposals: true, page: index }));
+  }
+  function decisionButtons(proposalId, container) {
+    const existing = decisions.get(proposalId);
+    container.replaceChildren();
+    for (const approve of existing ? [existing.payload.approve] : [true, false]) {
+      const button = element("button", t(existing ? "check" : approve ? "approve" : "reject"), { type: "button" });
+      button.addEventListener("click", () => decideProposal(proposalId, approve, container));
+      container.append(button);
+    }
+  }
+  async function decideProposal(proposalId, approve, container) {
+    const attempt = decisions.get(proposalId) ?? {
+      payload: { proposal_id: proposalId, approve, request_id: crypto.randomUUID() },
+    };
+    decisions.set(proposalId, attempt);
+    for (const button of container.querySelectorAll("button")) button.disabled = true;
+    status.textContent = t("pending");
+    try {
+      let result = attempt.receipt
+        ? await catalogApi("catalog_status", { request: attempt.receipt })
+        : await catalogApi("catalog_decide", attempt.payload, "POST");
+      attempt.receipt = result.request;
+      for (let i = 0; result.status === "pending" && i < 10; i++) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        result = await catalogApi("catalog_status", { request: attempt.receipt });
+      }
+      if (result.status === "pending") return;
+      decisions.delete(proposalId);
+      await load();
+      status.textContent = result.status === "failed" ? result.message : t(result.approved ? "approved" : "rejected");
+    } catch (error) {
+      if (error.data && !attempt.receipt) decisions.delete(proposalId);
+      status.textContent = error.message;
+    } finally {
+      decisionButtons(proposalId, container);
+    }
   }
   function showPages(hasNext, href) {
     const pages = element("nav", "", { class: "workspace-nav" });

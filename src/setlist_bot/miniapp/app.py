@@ -212,6 +212,16 @@ async def api(request: web.Request) -> web.Response:
             if operation == "open_draft" and request.method == "POST":
                 editor = await service.create(UUID(payload["band"]), UUID(payload["performance"]))
                 return web.json_response({"session": str(editor.id)})
+            if operation == "open_repertoire" and request.method == "POST":
+                repertoire = await MiniCatalog(service).open_repertoire(UUID(payload["band"]))
+                return web.json_response({"session": str(repertoire.id)})
+            if operation == "repertoire_proposals" and request.method == "GET":
+                page = int(payload.get("page", "0"))
+                if not 0 <= page <= 10000:
+                    raise ValueError("Invalid page")
+                return web.json_response(
+                    await Workspace(uow.store, user).proposals(UUID(payload["band"]), page)
+                )
             if operation == "repertoire" and request.method == "GET":
                 archived, page = payload.get("archived", "0"), int(payload.get("page", "0"))
                 query = payload.get("query", "").strip()
@@ -254,6 +264,8 @@ async def api(request: web.Request) -> web.Response:
             elif request.method == "POST" and operation in (
                 "catalog_save",
                 "catalog_archive",
+                "catalog_restore",
+                "catalog_decide",
                 "duration_save",
             ):
                 result = await MiniCatalog(service).queue(
@@ -261,6 +273,8 @@ async def api(request: web.Request) -> web.Response:
                     payload,
                     planned_duration=operation == "duration_save",
                     archive=operation == "catalog_archive",
+                    restore=operation == "catalog_restore",
+                    decide=operation == "catalog_decide",
                 )
             elif request.method == "GET" and operation == "catalog_status":
                 result = await MiniCatalog(service).status(identifier, UUID(payload["request"]))

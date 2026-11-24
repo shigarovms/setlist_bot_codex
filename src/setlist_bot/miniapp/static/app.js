@@ -74,6 +74,8 @@ const words = {
     requestAccess: "Запросить права у владельца",
     reload: "Обновите редактор, чтобы получить актуальный каталог.",
     editSong: "Редактировать песню", addSong: "＋ Добавить песню",
+    copySong: "Копировать песню", restoreSong: "Восстановить песню",
+    songRestored: "Песня восстановлена в репертуаре.",
     songTitle: "Название *", songDuration: "Длительность ММ:СС *",
     songLights: "Цвета / свет", songComment: "Комментарий",
     songAliases: "Альтернативные названия — по одному на строку",
@@ -154,6 +156,8 @@ const words = {
     requestAccess: "Request administrator access",
     reload: "Reopen the editor to refresh the catalog.",
     editSong: "Edit song", addSong: "＋ Add song",
+    copySong: "Copy song", restoreSong: "Restore song",
+    songRestored: "Song restored to the repertoire.",
     songTitle: "Title *", songDuration: "Duration MM:SS *",
     songLights: "Colors / lighting", songComment: "Comment",
     songAliases: "Alternative titles — one per line",
@@ -413,15 +417,18 @@ function render() {
     : tg?.disableClosingConfirmation?.();
   renderCatalog();
 }
-function renderCatalog() {
-  if (!state) return;
-  $("add-song").textContent = t("addSong");
+function songLabels() {
   for (const [id, word] of Object.entries({
     "song-title-label": "songTitle", "song-duration-label": "songDuration",
     "song-lights-label": "songLights", "song-comment-label": "songComment",
     "song-aliases-label": "songAliases", "song-scope": "songScope",
     "song-cancel": catalogAttempt ? "close" : "cancel", "song-reload": "songReload",
   })) $(id).textContent = t(word);
+}
+function renderCatalog() {
+  if (!state) return;
+  $("add-song").textContent = t("addSong");
+  songLabels();
   const query = $("search").value.toLocaleLowerCase().replaceAll("ё", "е");
   const songs = state.catalog.filter((song) =>
     song.title.toLocaleLowerCase().replaceAll("ё", "е").includes(query),
@@ -714,6 +721,9 @@ $("page-next").addEventListener("click", () => {
   renderCatalog();
 });
 let editingSong = null, catalogAttempt = null, catalogRequest = null, songSubmitting = false;
+let songWorkspace = null, catalogOperation = null, songMode = "edit";
+const songApi = (...args) => (songWorkspace?.api ?? api)(...args);
+const songActionLabel = () => t(songMode === "restore" ? "restoreSong" : "songSave");
 function fillSong(song) {
   $("song-title").value = song?.title ?? "";
   $("song-duration").value = song?.duration ?? "";
@@ -725,8 +735,8 @@ function fillSong(song) {
 function lockSongFields(locked) {
   for (const element of $("song-form").querySelectorAll("input, textarea")) element.disabled = locked;
 }
-async function openSong(id = null) {
-  if (!state || busy || preview) return;
+async function openSong(id = null, workspace = null, mode = "edit") {
+  if ((!state && !workspace) || busy || preview) return;
   if (catalogAttempt) {
     // RU: Потерянный ответ повторяется с прежним ID, а не создаёт новую песню.
     // EN: Resume an unresolved operation before accepting another catalog mutation.
@@ -737,17 +747,24 @@ async function openSong(id = null) {
   busy = true;
   render();
   try {
-    editingSong = id ? await api("song", { song_id: id }) : null;
-    fillSong(editingSong);
-    lockSongFields(false);
+    songWorkspace = workspace;
+    songMode = mode;
+    if (workspace) lang = workspace.language;
+    const source = id ? await songApi("song", { song_id: id }) : null;
+    editingSong = mode === "copy" ? null : source;
+    fillSong(mode === "copy" ? { ...source, title: "", aliases: [] } : source);
+    lockSongFields(mode === "restore");
+    songLabels();
     $("song-error").textContent = "";
-    $("song-dialog-title").textContent = t(id ? "repertoireSong" : "addSong");
-    $("song-submit").textContent = t("songSave");
-    $("song-delete").textContent = t("songDelete");
-    $("song-delete").hidden = !editingSong || !state.can_set_group_default;
+    $("song-dialog-title").textContent = t(
+      mode === "copy" ? "copySong" : mode === "restore" ? "restoreSong" : id ? "repertoireSong" : "addSong",
+    );
+    $("song-submit").textContent = songActionLabel();
+    $("song-delete").textContent = workspace?.archiveLabel ?? t("songDelete");
+    $("song-delete").hidden = !editingSong || !!editingSong.archived || !(workspace?.admin ?? state?.can_set_group_default);
     $("song-reload").hidden = true;
     $("song-dialog").showModal();
-  } catch (error) { status(error.message, true); }
+  } catch (error) { (workspace?.status ?? status)(error.message, true); }
   finally { busy = false; render(); }
 }
 $("add-song").addEventListener("click", () => openSong());
@@ -760,7 +777,7 @@ $("song-dialog").addEventListener("cancel", event => {
 $("song-reload").addEventListener("click", async () => {
   if (!editingSong || songSubmitting) return;
   try {
-    editingSong = await api("song", { song_id: editingSong.id });
+    editingSong = await songApi("song", { song_id: editingSong.id });
     fillSong(editingSong);
     $("song-error").textContent = "";
     $("song-reload").hidden = true;
@@ -782,17 +799,17 @@ async function refreshRepertoire() {
   render();
 }
 $("song-delete").addEventListener("click", () => {
-  if (!editingSong || !state?.can_set_group_default || catalogAttempt || songSubmitting) return;
+  if (!editingSong || !(songWorkspace?.admin ?? state?.can_set_group_default) || catalogAttempt || songSubmitting) return;
   const used = current.some(item => item.song_id === editingSong.id);
   const warning = used ? `\n\n${t("songArchiveDraft")}` : "";
-  if (confirm(`${editingSong.title}\n\n${t("songArchiveConfirm")}${warning}`)) void submitSong(true);
+  if (confirm(`${editingSong.title}\n\n${t("songArchiveConfirm")}${warning}`)) void submitSong("catalog_archive");
 });
 $("song-form").addEventListener("submit", event => {
   event.preventDefault();
-  void submitSong();
+  void submitSong(songMode === "restore" ? "catalog_restore" : "catalog_save");
 });
-async function submitSong(archive = false) {
-  if (songSubmitting || !saver) return;
+async function submitSong(operation) {
+  if (songSubmitting || (!saver && !songWorkspace)) return;
   const song = editingSong;
   songSubmitting = true;
   busy = true;
@@ -800,18 +817,17 @@ async function submitSong(archive = false) {
   $("song-cancel").disabled = true;
   $("song-reload").disabled = true;
   $("song-delete").disabled = true;
-  saver.pause();
+  saver?.pause();
   render();
   try {
     if (!catalogAttempt) {
-      await saver.flush();
+      await saver?.flush();
+      catalogOperation = operation;
       catalogAttempt = {
         request_id: crypto.randomUUID(), song_id: song?.id ?? null,
         expected: song?.version ?? null,
       };
-      if (archive) {
-        catalogAttempt.archive = true;
-      } else {
+      if (operation === "catalog_save") {
         catalogAttempt.fields = {
           title: $("song-title").value.trim(), duration_seconds: $("song-duration").value.trim(),
           bpm: $("song-bpm").value ? Number($("song-bpm").value) : null,
@@ -823,12 +839,12 @@ async function submitSong(archive = false) {
     lockSongFields(true);
     $("song-error").textContent = t("songPending");
     let result = catalogRequest
-      ? await api("catalog_status", { request: catalogRequest })
-      : await api(catalogAttempt.archive ? "catalog_archive" : "catalog_save", catalogAttempt, "POST");
+      ? await songApi("catalog_status", { request: catalogRequest })
+      : await songApi(catalogOperation, catalogAttempt, "POST");
     catalogRequest = result.request;
     for (let i = 0; result.status === "pending" && i < 30; i++) {
       await new Promise(resolve => setTimeout(resolve, 1000));
-      result = await api("catalog_status", { request: catalogRequest });
+      result = await songApi("catalog_status", { request: catalogRequest });
     }
     if (result.status === "pending") {
       $("song-error").textContent = t("songQueued");
@@ -842,24 +858,28 @@ async function submitSong(archive = false) {
       throw error;
     }
     // Keep the receipt until catalog refresh succeeds; retry must not save twice.
-    await refreshRepertoire();
+    if (songWorkspace) await songWorkspace.refresh();
+    else await refreshRepertoire();
     catalogAttempt = catalogRequest = null;
     $("song-dialog").close();
-    status(t(result.archived ? "songArchived" : result.proposed ? "songProposed" : "songSaved"));
+    (songWorkspace?.status ?? status)(t(
+      result.archived ? "songArchived" : catalogOperation === "catalog_restore" ? "songRestored"
+        : result.proposed ? "songProposed" : "songSaved",
+    ));
   } catch (error) {
     // Explicit validation rejection means nothing was queued. Network failures stay retryable.
     if (!catalogRequest && error.data) catalogAttempt = null;
     $("song-error").textContent = error.message;
-    if (!catalogAttempt) lockSongFields(false);
+    if (!catalogAttempt) lockSongFields(songMode === "restore");
     $("song-reload").hidden = !editingSong || error.data?.error !== "conflict";
-    $("song-submit").textContent = t(catalogAttempt ? "songCheck" : "songSave");
+    $("song-submit").textContent = catalogAttempt ? t("songCheck") : songActionLabel();
   } finally {
     songSubmitting = busy = false;
     $("song-submit").disabled = false;
     $("song-cancel").disabled = false;
     $("song-reload").disabled = false;
     $("song-delete").disabled = !!catalogAttempt;
-    saver.resume();
+    saver?.resume();
     render();
   }
 }
@@ -1196,7 +1216,7 @@ async function boot() {
   // Dispatch only. The API checks the signature before trusting the launch target.
   const launch = new URLSearchParams(tg?.initData ?? "").get("start_param");
   if (!session && (workspaceParams.has("workspace") || !launch?.startsWith("sl_"))) {
-    await showWorkspace({ api, authenticated: Boolean(tg?.initData), backButton: tg?.BackButton });
+    await showWorkspace({ api, openSong, authenticated: Boolean(tg?.initData), backButton: tg?.BackButton });
     return;
   }
   $("editor").hidden = false;
@@ -1223,7 +1243,7 @@ async function boot() {
   } catch (error) {
     if (!tg && error.data?.error === "miniapp_auth") {
       $("editor").hidden = true;
-      await showWorkspace({ api, authenticated: false });
+      await showWorkspace({ api, openSong, authenticated: false });
       return;
     }
     status(error.message, true);

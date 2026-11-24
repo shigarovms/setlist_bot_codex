@@ -24,15 +24,15 @@ async def deliver_catalog(uow: PostgresUnitOfWork, event: Outbox) -> bool:
         async with uow.session.begin_nested():
             user = await uow.store.get(User, row.user_id)
             session = UUID(data["session"])
-            service = MiniDrafts(uow.store, user)
-            _, _, concert = await service.load(session)
+            service = MiniCatalog(MiniDrafts(uow.store, user))
+            target = await service.target(session)
             require(
-                concert.group_id == event.group_id
-                and concert.id == event.concert_id
+                target.group_id == event.group_id
+                and (target.concert.id if target.concert else None) == event.concert_id
                 and user.telegram_id == event.chat_id,
                 "miniapp_expired",
             )
-            await MiniCatalog(service).execute(session, identifier)
+            await service.execute(target, identifier)
     except AppError as exc:
         row = await uow.store.get(Confirmation, identifier, lock=True)
         row.command = json.dumps({**data, "status": "failed", "result": {"error": exc.code}})

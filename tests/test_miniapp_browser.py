@@ -229,6 +229,11 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 },
             )
             if launch_mode == "workspace":
+                from aiogram import Bot
+                from test_telegram import FakeTelegram
+
+                from setlist_bot.main import deliver_one_outbox
+
                 await browser.wait("document.querySelectorAll('.workspace-list a').length === 2")
                 await browser.tap(".workspace-list a")
                 await browser.wait(
@@ -255,6 +260,29 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.wait(
                     "document.querySelector('.song-details')?.innerText.includes('110')"
                 )
+                await browser.js(
+                    "Array.from(document.querySelectorAll('#workspace-content button'))"
+                    ".find(b => b.textContent === 'Копировать').click()"
+                )
+                await browser.wait("document.getElementById('song-dialog').open")
+                assert await browser.js("document.getElementById('song-title').value") == ""
+                assert await browser.js("document.getElementById('song-duration').value") == "03:38"
+                await browser.js("""
+                    document.getElementById('song-title').value = 'Комета акустика';
+                    document.getElementById('song-form').requestSubmit();
+                """)
+                async with Bot("123456:TEST", session=FakeTelegram()) as worker:
+                    for _ in range(50):
+                        if await deliver_one_outbox(worker, engine):
+                            break
+                        await asyncio.sleep(0.1)
+                    else:
+                        pytest.fail("Catalog request did not reach the bot worker")
+                await browser.wait(
+                    "document.getElementById('workspace-status').textContent"
+                    " === 'Репертуар обновлён.'"
+                )
+                assert not await browser.js("document.getElementById('song-dialog').open")
                 await browser.js(
                     "Array.from(document.links)"
                     ".find(a => a.textContent === 'К списку песен').click()"

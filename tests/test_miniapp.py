@@ -277,6 +277,12 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
             assert "frame-ancestors" in response.headers["Content-Security-Policy"]
             assert (await client.get("/miniapp/.env")).status == 404
             assert (await client.get("/healthz")).status == 200
+            queue = await client.get(
+                "/miniapp/api/repertoire_proposals",
+                params={"band": str(world.group.id)},
+                headers=headers,
+            )
+            assert queue.status == 200 and (await queue.json())["proposals"] == []
             query = {"session": str(identifier)}
             assert (await client.get("/miniapp/api/state", params=query)).status == 401
             assert (
@@ -367,6 +373,7 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 "INSERT INTO song_aliases(id,group_id,song_id,title) "
                 "SELECT id,group_id,id,'bad' FROM songs",
                 "DELETE FROM song_aliases",
+                "UPDATE catalog_proposals SET status='approved'",
                 "UPDATE memberships SET role='admin'",
                 "UPDATE groups SET name='forbidden'",
                 "UPDATE groups SET owner_id=NULL",

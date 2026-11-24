@@ -6,6 +6,8 @@ Confirmation/outbox records; the bot revalidates permissions before calling Cata
 
 import hashlib
 import json
+from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 from uuid import UUID, uuid5
 
@@ -19,11 +21,25 @@ from setlist_bot.domain.entities import (
     Outbox,
     Song,
     SongAlias,
+    now,
 )
 from setlist_bot.domain.performance_input import performance_seconds
 from setlist_bot.domain.rules import duration, require, validate_song
 
-CATALOG_REQUESTS = ("miniapp_catalog", "miniapp_catalog_archive", "miniapp_duration")
+CATALOG_REQUESTS = (
+    "miniapp_catalog",
+    "miniapp_catalog_archive",
+    "miniapp_catalog_restore",
+    "miniapp_catalog_decide",
+    "miniapp_duration",
+)
+
+
+@dataclass(frozen=True)
+class CatalogTarget:
+    parent: Confirmation
+    group_id: UUID
+    concert: Concert | None = None
 
 
 class MiniCatalog:
@@ -32,12 +48,45 @@ class MiniCatalog:
         self.store, self.user = drafts.store, drafts.user
         self.catalog = Catalog(self.store, self.user)
 
+    async def open_repertoire(self, group_id: UUID) -> Confirmation:
+        group = await self.drafts.groups.access(group_id)
+        parent = Confirmation(
+            user_id=self.user.id,
+            chat_id=self.user.telegram_id,
+            expires_at=now() + timedelta(hours=24),
+            command=json.dumps(
+                {
+                    "kind": "miniapp_repertoire",
+                    "group_id": str(group_id),
+                    "group_epoch": group.lifecycle_version,
+                }
+            ),
+        )
+        self.store.add(parent)
+        return parent
+
+    async def target(self, session: UUID) -> CatalogTarget:
+        parent = await self.store.get(Confirmation, session)
+        data = json.loads(parent.command)
+        if data.get("kind") != "miniapp_repertoire":
+            parent, _, concert = await self.drafts.load(session)
+            return CatalogTarget(parent, concert.group_id, concert)
+        require(
+            parent.user_id == self.user.id
+            and parent.chat_id == self.user.telegram_id
+            and parent.expires_at > now(),
+            "miniapp_expired",
+        )
+        group = await self.drafts.groups.access(UUID(data["group_id"]))
+        require(group.lifecycle_version == data["group_epoch"], "miniapp_expired")
+        return CatalogTarget(parent, group.id)
+
     async def read(self, session: UUID, song_id: UUID) -> dict[str, Any]:
-        _, _, concert = await self.drafts.load(session)
-        song = await self.catalog.song(concert.group_id, song_id)
-        require(not song.archived, "not_found")
-        aliases = await self.store.find(SongAlias, group_id=concert.group_id, song_id=song.id)
-        return song_data(song, aliases)
+        target = await self.target(session)
+        song = await self.catalog.song(target.group_id, song_id)
+        require(target.concert is None or not song.archived, "not_found")
+        aliases = await self.store.find(SongAlias, group_id=target.group_id, song_id=song.id)
+        return {**song_data(song, aliases), "archived": song.archived}
 
     async def queue(
         self,
@@ -46,13 +95,20 @@ class MiniCatalog:
         *,
         planned_duration: bool = False,
         archive: bool = False,
+        restore: bool = False,
+        decide: bool = False,
     ) -> dict[str, Any]:
-        parent, _, concert = await self.drafts.load(session)
-        if planned_duration or archive:
-            await self.drafts.groups.access(concert.group_id, admin=True)
+        target = await self.target(session)
+        group_id, concert = target.group_id, target.concert
+        if planned_duration or archive or restore or decide:
+            await self.drafts.groups.access(group_id, admin=True)
         kind = "miniapp_duration" if planned_duration else "miniapp_catalog"
         if archive:
             kind = "miniapp_catalog_archive"
+        if restore:
+            kind = "miniapp_catalog_restore"
+        if decide:
+            kind = "miniapp_catalog_decide"
         request = payload.get("request_id")
         require(isinstance(request, str) and str(UUID(request)) == request, "input")
         assert isinstance(request, str)
@@ -65,6 +121,8 @@ class MiniCatalog:
             require(data.get("kind") == kind and data.get("fingerprint") == fingerprint, "input")
             return await self.status(session, identifier)
         if planned_duration:
+            require(concert is not None, "not_found")
+            assert concert is not None
             expected = payload.get("expected")
             require(type(expected) is int and concert.metadata_version == expected, "conflict")
             value = payload.get("value")
@@ -72,29 +130,35 @@ class MiniCatalog:
             assert isinstance(value, str)
             require(value == "-" or performance_seconds(value) is not None, "pause_duration")
             details = {"value": value, "expected": expected}
-        elif archive:
+        elif archive or restore:
             song_id = payload.get("song_id")
             require(isinstance(song_id, str), "input")
             assert isinstance(song_id, str)
-            song = await self.catalog.song(concert.group_id, UUID(song_id))
-            require(not song.archived, "not_found")
+            song = await self.catalog.song(group_id, UUID(song_id))
             expected = payload.get("expected")
             require(type(expected) is int and song.version == expected, "conflict")
+            require(song.archived == restore, "conflict")
             details = {"song_id": str(song.id), "expected": expected}
+        elif decide:
+            proposal = await self.store.get(CatalogProposal, UUID(payload["proposal_id"]))
+            require(proposal.group_id == group_id, "not_found")
+            require(proposal.status == "pending", "already_done")
+            require(type(payload.get("approve")) is bool, "input")
+            details = {"proposal_id": str(proposal.id), "approve": payload["approve"]}
         else:
-            details = await self._catalog_details(concert, payload)
+            details = await self._catalog_details(group_id, payload)
         self.store.add(
             Confirmation(
                 id=identifier,
                 user_id=self.user.id,
                 chat_id=self.user.telegram_id,
-                expires_at=parent.expires_at,
+                expires_at=target.parent.expires_at,
                 command=json.dumps(
                     {
                         "kind": kind,
                         "session": str(session),
-                        "group_id": str(concert.group_id),
-                        "concert_id": str(concert.id),
+                        "group_id": str(group_id),
+                        "concert_id": str(concert.id) if concert else None,
                         "fingerprint": fingerprint,
                         "status": "pending",
                         **details,
@@ -106,8 +170,8 @@ class MiniCatalog:
             Outbox(
                 chat_id=self.user.telegram_id,
                 text="",
-                group_id=concert.group_id,
-                concert_id=concert.id,
+                group_id=group_id,
+                concert_id=concert.id if concert else None,
                 support_kind="catalog",
                 actor=f"telegram:{self.user.telegram_id}",
                 source="miniapp",
@@ -116,7 +180,7 @@ class MiniCatalog:
         )
         return {"status": "pending", "request": str(identifier)}
 
-    async def _catalog_details(self, concert: Concert, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _catalog_details(self, group_id: UUID, payload: dict[str, Any]) -> dict[str, Any]:
         song_id = UUID(payload["song_id"]) if payload.get("song_id") else None
         fields = payload.get("fields")
         require(isinstance(fields, dict) and set(fields) == {*SONG_FIELDS, "aliases"}, "song_input")
@@ -130,15 +194,15 @@ class MiniCatalog:
         require(type(data["bpm"]) is int or data["bpm"] is None, "song_input")
         expected = payload.get("expected")
         if song_id:
-            song = await self.catalog.song(concert.group_id, song_id)
+            song = await self.catalog.song(group_id, song_id)
             require(not song.archived, "not_found")
             require(type(expected) is int and song.version == expected, "conflict")
         else:
             require(expected is None, "input")
-        match = await self.catalog.exact_song(concert.group_id, data["title"])
+        match = await self.catalog.exact_song(group_id, data["title"])
         require(match is None or match.id == song_id, "alias_collision")
         aliases = await self.catalog.validate_aliases(
-            concert.group_id, song_id, data["title"], fields["aliases"]
+            group_id, song_id, data["title"], fields["aliases"]
         )
         return {
             "fields": data,
@@ -148,7 +212,7 @@ class MiniCatalog:
         }
 
     async def status(self, session: UUID, identifier: UUID) -> dict[str, Any]:
-        await self.drafts.load(session)
+        await self.target(session)
         row = await self.store.get(Confirmation, identifier)
         data = json.loads(row.command)
         require(
@@ -159,24 +223,29 @@ class MiniCatalog:
         )
         return {"request": str(identifier), "status": data["status"], **data.get("result", {})}
 
-    async def execute(self, session: UUID, identifier: UUID) -> dict[str, Any]:
+    async def execute(self, target: CatalogTarget, identifier: UUID) -> dict[str, Any]:
         """Called only by the bot worker with normal database privileges."""
-        _, _, concert = await self.drafts.load(session)
+        group_id, concert = target.group_id, target.concert
         row = await self.store.get(Confirmation, identifier, lock=True)
         data = json.loads(row.command)
         require(
             row.user_id == self.user.id
             and data.get("kind") in CATALOG_REQUESTS
-            and data.get("session") == str(session),
+            and data.get("session") == str(target.parent.id)
+            and data.get("group_id") == str(group_id)
+            and data.get("concert_id") == (str(concert.id) if concert else None)
+            and row.expires_at > now(),
             "miniapp_expired",
         )
         if data["status"] != "pending":
             return dict(data.get("result", {}))
         if data["kind"] == "miniapp_duration":
-            await self.drafts.groups.access(concert.group_id, admin=True)
+            require(concert is not None, "not_found")
+            assert concert is not None
+            await self.drafts.groups.access(group_id, admin=True)
             require(concert.metadata_version == data["expected"], "conflict")
             saved_event = await ConcertDetails(self.store, self.user).update(
-                concert.group_id, concert.id, "concert_duration", data["value"]
+                group_id, concert.id, "concert_duration", data["value"]
             )
             duration_result = {
                 "planned_seconds": saved_event.performance_duration_seconds,
@@ -184,27 +253,33 @@ class MiniCatalog:
             }
             row.command = json.dumps({**data, "status": "saved", "result": duration_result})
             return duration_result
-        if data["kind"] == "miniapp_catalog_archive":
+        if data["kind"] in ("miniapp_catalog_archive", "miniapp_catalog_restore"):
+            archived = data["kind"] == "miniapp_catalog_archive"
             await self.catalog.archive(
-                concert.group_id, UUID(data["song_id"]), data["expected"], archived=True
+                group_id, UUID(data["song_id"]), data["expected"], archived=archived
             )
-            archive_result = {"archived": True}
+            archive_result = {"archived": archived}
             row.command = json.dumps({**data, "status": "saved", "result": archive_result})
             return archive_result
+        if data["kind"] == "miniapp_catalog_decide":
+            await self.catalog.decide(group_id, UUID(data["proposal_id"]), data["approve"])
+            decision = {"approved": data["approve"]}
+            row.command = json.dumps({**data, "status": "saved", "result": decision})
+            return decision
         song_id = UUID(data["song_id"]) if data["song_id"] else None
         if song_id:
-            require(not (await self.catalog.song(concert.group_id, song_id)).archived, "not_found")
-        match = await self.catalog.exact_song(concert.group_id, data["fields"]["title"])
+            require(not (await self.catalog.song(group_id, song_id)).archived, "not_found")
+        match = await self.catalog.exact_song(group_id, data["fields"]["title"])
         require(match is None or match.id == song_id, "alias_collision")
         saved = await self.catalog.save(
-            concert.group_id, data["fields"], song_id, data["expected"], aliases=data["aliases"]
+            group_id, data["fields"], song_id, data["expected"], aliases=data["aliases"]
         )
         proposed = isinstance(saved, CatalogProposal)
         result: dict[str, Any] = {"proposed": proposed}
         if not proposed:
             assert isinstance(saved, Song)
             result["song"] = song_data(
-                saved, await self.store.find(SongAlias, group_id=concert.group_id, song_id=saved.id)
+                saved, await self.store.find(SongAlias, group_id=group_id, song_id=saved.id)
             )
         row.command = json.dumps({**data, "status": "saved", "result": result})
         return result

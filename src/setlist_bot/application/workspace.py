@@ -3,11 +3,11 @@
 from typing import Any
 from uuid import UUID
 
-from setlist_bot.application.catalog import Catalog, song_data
+from setlist_bot.application.catalog import SONG_FIELDS, Catalog, song_data
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.domain.concerts import today
-from setlist_bot.domain.entities import Group, Membership, SongAlias, User
+from setlist_bot.domain.entities import CatalogProposal, Group, Membership, Song, SongAlias, User
 from setlist_bot.domain.rules import AppError, clock
 
 PAGE_SIZE = 20
@@ -68,7 +68,12 @@ class Workspace:
     ) -> dict[str, Any]:
         group = await Groups(self.store, self.user).access(group_id)
         catalog = Catalog(self.store, self.user)
-        context = {"language": self.user.language, "band": group.name}
+        membership = (await self.store.find(Membership, group_id=group_id, user_id=self.user.id))[0]
+        context = {
+            "language": self.user.language,
+            "band": group.name,
+            "admin": membership.role == "admin",
+        }
         if song_id is not None:
             song = await catalog.song(group_id, song_id)
             aliases = await self.store.find(SongAlias, group_id=group_id, song_id=song.id)
@@ -85,5 +90,36 @@ class Workspace:
             "songs": [
                 {"id": str(song.id), "title": song.title, "duration": clock(song.duration_seconds)}
                 for song in songs[start : start + PAGE_SIZE]
+            ],
+        }
+
+    async def proposals(self, group_id: UUID, page: int) -> dict[str, Any]:
+        groups = Groups(self.store, self.user)
+        group = await groups.access(group_id, admin=True)
+        pending = await self.store.find(CatalogProposal, group_id=group_id, status="pending")
+        pending.sort(key=lambda proposal: proposal.id)
+        start = page * PAGE_SIZE
+        rows = pending[start : start + PAGE_SIZE]
+        songs = await self.store.get_many(Song, {row.song_id for row in rows if row.song_id})
+        titles = {song.id: song.title for song in songs if song.group_id == group_id}
+        authors = {
+            user_id: await groups.name(group_id, user_id) for user_id in {r.author_id for r in rows}
+        }
+        return {
+            "language": self.user.language,
+            "band": group.name,
+            "has_next": start + PAGE_SIZE < len(pending),
+            "proposals": [
+                {
+                    "id": str(row.id),
+                    "author": authors[row.author_id],
+                    "original_title": titles.get(row.song_id) if row.song_id else None,
+                    "fields": {
+                        key: row.payload[key]
+                        for key in (*SONG_FIELDS, "alias", "aliases")
+                        if key in row.payload
+                    },
+                }
+                for row in rows
             ],
         }
