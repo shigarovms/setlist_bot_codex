@@ -16,6 +16,7 @@ from setlist_bot.application.concert_details import ConcertDetails
 from setlist_bot.application.importing import Importer
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.repertoire_import import RepertoireImport
+from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.domain.entities import (
     CatalogProposal,
     Concert,
@@ -34,6 +35,7 @@ CATALOG_OPERATIONS = {
     "catalog_restore": "miniapp_catalog_restore",
     "catalog_decide": "miniapp_catalog_decide",
     "catalog_import": "miniapp_catalog_import",
+    "music_action": "miniapp_music",
     "duration_save": "miniapp_duration",
 }
 
@@ -147,6 +149,9 @@ class MiniCatalog:
             Importer.check_plan(plan, payload["fingerprint"])
             details = {**source.data(), "import_fingerprint": plan.fingerprint}
             expires = min(expires, now() + timedelta(minutes=30))
+        elif operation == "music_action":
+            require(concert is None, "input")
+            details = {"music": WorkspaceMusic.command(payload)}
         else:
             details = await self._catalog_details(group_id, payload)
         self.store.add(
@@ -282,6 +287,12 @@ class MiniCatalog:
             receipt = {key: value for key, value in data.items() if key != "source"}
             row.command = json.dumps({**receipt, "status": "saved", "result": summary})
             return summary
+        if data["kind"] == "miniapp_music":
+            music_result = await WorkspaceMusic(self.store, self.user).apply(
+                group_id, data["music"]
+            )
+            row.command = json.dumps({**data, "status": "saved", "result": music_result})
+            return music_result
         song_id = UUID(data["song_id"]) if data["song_id"] else None
         if song_id:
             require(not (await self.catalog.song(group_id, song_id)).archived, "not_found")

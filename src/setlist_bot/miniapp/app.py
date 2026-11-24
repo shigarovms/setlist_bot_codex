@@ -15,6 +15,7 @@ from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.miniapp_catalog import CATALOG_OPERATIONS, MiniCatalog
 from setlist_bot.application.repertoire_import import RepertoireImport
 from setlist_bot.application.workspace import Workspace
+from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.domain.entities import Confirmation, User, now
 from setlist_bot.domain.miniapp_auth import verify_init_data
 from setlist_bot.domain.rules import AppError
@@ -99,6 +100,7 @@ async def asset(request: web.Request) -> web.Response:
         "app.js": "text/javascript",
         "workspace.js": "text/javascript",
         "repertoire-import.js": "text/javascript",
+        "repertoire-music.js": "text/javascript",
         "model.js": "text/javascript",
         "persistence.js": "text/javascript",
         "style.css": "text/css",
@@ -201,6 +203,9 @@ async def api(request: web.Request) -> web.Response:
                 user = users[0]
             request[LANGUAGE] = user.language
             service = MiniDrafts(uow.store, user)
+            if operation == "music_search" and request.method == "GET":
+                result = await WorkspaceMusic(uow.store, user).view(UUID(payload["band"]))
+                return web.json_response(result)
             if operation == "bands" and request.method == "GET":
                 return web.json_response(await Workspace(uow.store, user).bands())
             if operation == "performances" and request.method == "GET":

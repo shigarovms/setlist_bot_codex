@@ -10,9 +10,18 @@ from uuid import UUID
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.importing import Importer, ImportPlan
 from setlist_bot.application.ports import Store
-from setlist_bot.domain.entities import MusicCache, MusicSearch, Outbox, Song, SongAlias, User, now
-from setlist_bot.domain.music_discovery import catalog_titles, default_exclusions
-from setlist_bot.domain.rules import clock, require
+from setlist_bot.domain.entities import (
+    CatalogImport,
+    MusicCache,
+    MusicSearch,
+    Outbox,
+    Song,
+    SongAlias,
+    User,
+    now,
+)
+from setlist_bot.domain.music_discovery import catalog_titles, default_exclusions, query_target
+from setlist_bot.domain.rules import clock, duration, require
 
 ACTIVE = frozenset({"searching", "artists", "choosing", "preview"})
 
@@ -27,7 +36,10 @@ class MusicSearches:
         group = await Groups(self.store, self.user).access(group_id, admin=True)
         require(self.chat_id == self.user.telegram_id, "private_only")
         require(0 < len(query.strip()) <= 300, "input")
+        query_target(query.strip())
         for old in await self.store.find(MusicSearch, owner_id=self.user.id):
+            if old.group_id == group_id and old.group_epoch != group.lifecycle_version:
+                continue
             if old.status in ACTIVE and old.expires_at > now():
                 require(old.group_id == group_id and old.query == query.strip(), "music_busy")
                 return old
@@ -102,6 +114,27 @@ class MusicSearches:
         excluded = set(job.data.get("excluded", []))
         excluded.symmetric_difference_update({index})
         self.write(job, excluded=sorted(excluded))
+
+    def cancel(self, job: MusicSearch) -> None:
+        require(job.status in ACTIVE, "already_done")
+        job.status = "cancelled"
+        self.write(job)
+
+    def select_all(self, job: MusicSearch, enabled: bool) -> None:
+        require(job.status == "choosing", "input_expired")
+        self.write(job, excluded=[] if enabled else list(range(len(job.data["tracks"]))), page=0)
+
+    def set_duration(self, job: MusicSearch, index: int, value: str) -> None:
+        require(job.status == "choosing", "input_expired")
+        require(0 <= index < len(job.data["tracks"]), "input")
+        self.write(job, durations={**job.data.get("durations", {}), str(index): duration(value)})
+
+    async def back(self, job: MusicSearch) -> None:
+        require(job.status == "preview", "input_expired")
+        pending = await self.store.get(CatalogImport, UUID(job.data["import_id"]))
+        pending.status = "cancelled"
+        job.status = "choosing"
+        self.write(job, page=0, preview_token="")
 
     def selected(self, job: MusicSearch) -> list[tuple[int, dict[str, Any]]]:
         excluded = set(job.data.get("excluded", []))

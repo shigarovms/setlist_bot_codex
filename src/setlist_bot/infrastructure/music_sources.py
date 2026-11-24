@@ -10,13 +10,16 @@ import json
 import re
 from typing import Any
 from urllib.parse import urlencode, urlparse
-from uuid import UUID
 
 import aiohttp
 from unidecode import unidecode
 
-from setlist_bot.domain.music_discovery import recording_index, recording_known, title_key
-from setlist_bot.domain.rules import AppError
+from setlist_bot.domain.music_discovery import (
+    query_target,
+    recording_index,
+    recording_known,
+    title_key,
+)
 
 MAX_BYTES = 3_000_000
 HOSTS = frozenset(
@@ -40,30 +43,6 @@ class SourceError(Exception):
 
 def artist_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", unidecode(value).lower()).strip("-")
-
-
-def query_target(value: str) -> tuple[str, str]:
-    """Validate URLs before scheduling. Never let user input become an HTTP host."""
-    if not re.match(r"https?://", value, re.I):
-        if "://" in value:
-            raise AppError("music_bad_link")
-        return "name", value
-    parsed = urlparse(value)
-    if parsed.scheme != "https" or parsed.username or parsed.password or parsed.port:
-        raise AppError("music_bad_link")
-    host = parsed.hostname
-    path = parsed.path.rstrip("/")
-    if host == "music.apple.com" and re.search(r"/artist/(?:[^/]+/)?\d+$", path):
-        return "apple", path.rsplit("/", 1)[-1]
-    if host == "musicbrainz.org" and re.fullmatch(r"/artist/[a-fA-F0-9-]{36}", path):
-        return "mb", str(UUID(path.rsplit("/", 1)[-1]))
-    if host == "open.spotify.com" and re.fullmatch(
-        r"/(?:intl-[a-z]+/)?artist/[A-Za-z0-9]{22}", path
-    ):
-        return "web", "https://open.spotify.com/artist/" + path.rsplit("/", 1)[-1]
-    if host in ("music.yandex.ru", "music.yandex.com") and re.fullmatch(r"/artist/\d+", path):
-        return "web", f"https://{host}{path}"
-    raise AppError("music_bad_link")
 
 
 class MusicSources:

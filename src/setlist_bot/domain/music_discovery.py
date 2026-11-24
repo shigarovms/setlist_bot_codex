@@ -5,13 +5,45 @@ import unicodedata
 from collections import Counter
 from collections.abc import Iterable
 from typing import Any
+from urllib.parse import urlparse
+from uuid import UUID
 
-from setlist_bot.domain.rules import normalize
+from setlist_bot.domain.rules import AppError, normalize
 
 MAX_TRACKS = 500
 PAGE_SIZE = 20
 FEATURED = re.compile(r"\(\s*feat\b[^)]*\)|\[\s*feat\b[^\]]*\]", re.IGNORECASE)
 QUALIFIER = re.compile(r"\([^()]*\)|\[[^\[\]]*\]")
+
+
+def query_target(value: str) -> tuple[str, str]:
+    """Validate URLs before scheduling. Never let user input become an HTTP host."""
+    if not re.match(r"https?://", value, re.I):
+        if "://" in value:
+            raise AppError("music_bad_link")
+        return "name", value
+    try:
+        parsed = urlparse(value)
+        host, port = parsed.hostname, parsed.port
+    except ValueError:
+        raise AppError("music_bad_link") from None
+    if parsed.scheme != "https" or parsed.username or parsed.password or port is not None:
+        raise AppError("music_bad_link")
+    path = parsed.path.rstrip("/")
+    if host == "music.apple.com" and re.search(r"/artist/(?:[^/]+/)?\d+$", path):
+        return "apple", path.rsplit("/", 1)[-1]
+    if host == "musicbrainz.org" and re.fullmatch(r"/artist/[a-fA-F0-9-]{36}", path):
+        try:
+            return "mb", str(UUID(path.rsplit("/", 1)[-1]))
+        except ValueError:
+            raise AppError("music_bad_link") from None
+    if host == "open.spotify.com" and re.fullmatch(
+        r"/(?:intl-[a-z]+/)?artist/[A-Za-z0-9]{22}", path
+    ):
+        return "web", "https://open.spotify.com/artist/" + path.rsplit("/", 1)[-1]
+    if host in ("music.yandex.ru", "music.yandex.com") and re.fullmatch(r"/artist/\d+", path):
+        return "web", f"https://{host}{path}"
+    raise AppError("music_bad_link")
 
 
 def without_featured(title: str) -> str:

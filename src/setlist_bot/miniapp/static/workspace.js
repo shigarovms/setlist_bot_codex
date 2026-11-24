@@ -1,5 +1,6 @@
 import { clock } from "./model.js";
 import { repertoireImport } from "./repertoire-import.js";
+import { repertoireMusic } from "./repertoire-music.js";
 
 const copy = {
   ru: {
@@ -23,6 +24,7 @@ const copy = {
     approved: "Предложение одобрено.", rejected: "Предложение отклонено.",
     pending: "Запрос обрабатывается.", check: "Проверить результат",
     importSongs: "Импорт таблицы", adminOnly: "Импорт доступен администратору коллектива.",
+    music: "Поиск песен в интернете",
   },
   en: {
     bands: "My bands", upcoming: "Upcoming", past: "Past",
@@ -45,6 +47,7 @@ const copy = {
     approved: "Suggestion approved.", rejected: "Suggestion rejected.",
     pending: "The request is being processed.", check: "Check result",
     importSongs: "Import a table", adminOnly: "Only band admins can import songs.",
+    music: "Find songs online",
   },
 };
 
@@ -58,7 +61,7 @@ export function bandUrl(band, past = "0", page = 0) {
   return `./?${params}`;
 }
 
-function repertoireUrl(band, { archived = "0", page = 0, query = "", song = "", proposals = false, importing = false } = {}) {
+function repertoireUrl(band, { archived = "0", page = 0, query = "", song = "", proposals = false, importing = false, music = false } = {}) {
   const params = new URLSearchParams({ workspace: "1", band, view: "repertoire" });
   if (archived === "1") params.set("archived", archived);
   if (page) params.set("page", page);
@@ -66,6 +69,7 @@ function repertoireUrl(band, { archived = "0", page = 0, query = "", song = "", 
   if (song) params.set("song", song);
   if (proposals) params.set("proposals", "1");
   if (importing) params.set("import", "1");
+  if (music) params.set("music", "1");
   return `./?${params}`;
 }
 
@@ -92,6 +96,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   const song = workspaceParams.get("song") || "";
   const proposals = repertoire && workspaceParams.get("proposals") === "1";
   const importing = repertoire && workspaceParams.get("import") === "1";
+  const music = repertoire && workspaceParams.get("music") === "1";
   const archived = workspaceParams.get("archived") === "1" ? "1" : "0";
   const query = workspaceParams.get("query") || "";
   const repertoireList = () => repertoireUrl(band, { archived, page, query });
@@ -145,21 +150,22 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   if (band) {
     backButton?.show?.();
     backButton?.onClick?.(() => {
-      location.assign(repertoire ? (song || proposals || importing ? repertoireList() : bandUrl(band)) : bandUrl());
+      location.assign(repertoire ? (song || proposals || importing || music ? repertoireList() : bandUrl(band)) : bandUrl());
     });
   }
   async function load() {
     content.replaceChildren();
     status.textContent = t("loading");
     try {
-      const data = proposals ? await api("repertoire_proposals", { band, page }) : repertoire
+      const data = music ? await api("music_search", { band }) : proposals ? await api("repertoire_proposals", { band, page }) : repertoire
         ? await api("repertoire", { band, archived, page, query, song })
         : band ? await api("performances", { band, past, page }) : await api("bands");
       language = data.language === "en" ? "en" : "ru";
       document.documentElement.lang = language;
       title.textContent = band ? data.band : t("bands");
       status.textContent = "";
-      if (proposals) showProposals(data);
+      if (music) showMusic(data);
+      else if (proposals) showProposals(data);
       else if (importing) showImport(data);
       else if (repertoire) showRepertoire(data);
       else if (band) showPerformances(data);
@@ -278,7 +284,8 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     }
     if (data.admin) nav.append(element("a", t("proposals"), { href: repertoireUrl(band, { proposals: true }) }));
     if (data.admin && archived === "0")
-      nav.append(element("a", t("importSongs"), { href: repertoireUrl(band, { importing: true }) }));
+      nav.append(element("a", t("importSongs"), { href: repertoireUrl(band, { importing: true }) }),
+        element("a", t("music"), { href: repertoireUrl(band, { music: true }) }));
     if (archived === "0") content.append(songButton("addSong", data.admin));
     const form = element("form", "", { action: "./", method: "get", class: "workspace-search" });
     for (const [name, value] of Object.entries({ workspace: "1", band, view: "repertoire", archived }))
@@ -311,6 +318,13 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       root: content, language,
       preview: input => api("repertoire_import_preview", { ...input, band }, "POST"),
       request: catalogApi,
+    });
+  }
+  function showMusic(data) {
+    content.append(element("a", t("toSongs"), { href: repertoireUrl(band) }));
+    repertoireMusic({
+      root: content, language, band: data.band, search: data.search,
+      read: () => api("music_search", { band }), request: catalogApi,
     });
   }
   const decisions = new Map();

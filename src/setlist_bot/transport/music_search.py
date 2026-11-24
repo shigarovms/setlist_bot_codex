@@ -4,12 +4,11 @@ from typing import Any
 from uuid import UUID
 
 from setlist_bot.application.collectives import Collectives
-from setlist_bot.application.music_search import ACTIVE, MusicSearches, notify_search
+from setlist_bot.application.music_search import MusicSearches, notify_search
 from setlist_bot.application.ports import Store
-from setlist_bot.domain.entities import CatalogImport, ChatBinding, Group, MusicSearch
+from setlist_bot.domain.entities import ChatBinding, Group, MusicSearch
 from setlist_bot.domain.music_discovery import PAGE_SIZE
-from setlist_bot.domain.rules import clock, duration, require
-from setlist_bot.infrastructure.music_sources import query_target
+from setlist_bot.domain.rules import clock, require
 from setlist_bot.transport.articles import ArticlePage
 from setlist_bot.transport.controller import Controller, Response
 
@@ -286,7 +285,6 @@ async def handle_music(controller: Controller, command: str, args: str) -> Respo
         return await music_view(controller, job)
     service = MusicSearches(controller.store, controller.user, controller.user.telegram_id)
     if command == "music_query":
-        query_target(args)
         context = await controller.groups.context(controller.chat_id, controller.private)
         require(context.group_id is not None, "select_group")
         assert context.group_id is not None
@@ -322,9 +320,7 @@ async def handle_music(controller: Controller, command: str, args: str) -> Respo
                 ],
             )
     if command == "mi_cancel":
-        require(job.status in ACTIVE, "already_done")
-        job.status = "cancelled"
-        service.write(job)
+        service.cancel(job)
     elif command == "mi_artist":
         await service.choose_artist(job, int(values[1]))
     elif command == "mi_toggle":
@@ -337,8 +333,7 @@ async def handle_music(controller: Controller, command: str, args: str) -> Respo
         if command == "mi_filter":
             service.write(job, selected_only=enabled, page=0)
         else:
-            excluded = [] if enabled else list(range(len(job.data["tracks"])))
-            service.write(job, excluded=excluded, page=0)
+            service.select_all(job, enabled)
         await notify_search(controller.store, job, debounce=True)
         return Response("", deferred=True)
     elif command == "mi_page":
@@ -365,18 +360,10 @@ async def handle_music(controller: Controller, command: str, args: str) -> Respo
             return Response(prompt, force_reply=True, command_input_id=row.id)
         await service.preview(job)
     elif command == "music_duration":
-        require(job.status == "choosing", "input_expired")
-        index = int(values[1])
-        require(0 <= index < len(job.data["tracks"]), "input")
-        seconds = duration(values[2])
-        service.write(job, durations={**job.data.get("durations", {}), str(index): seconds})
+        service.set_duration(job, int(values[1]), values[2])
         return await handle_music(controller, "mi_preview", job.id.hex)
     elif command == "mi_back":
-        require(job.status == "preview", "input_expired")
-        pending = await controller.store.get(CatalogImport, UUID(job.data["import_id"]))
-        pending.status = "cancelled"
-        job.status = "choosing"
-        service.write(job, page=0, preview_token="")
+        await service.back(job)
     elif command == "mi_commit":
         await service.commit(job, values[1])
     else:

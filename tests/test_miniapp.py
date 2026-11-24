@@ -283,6 +283,10 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 headers=headers,
             )
             assert queue.status == 200 and (await queue.json())["proposals"] == []
+            music = await client.get(
+                "/miniapp/api/music_search", params={"band": str(world.group.id)}, headers=headers
+            )
+            assert music.status == 200 and (await music.json())["search"] is None
             query = {"session": str(identifier)}
             assert (await client.get("/miniapp/api/state", params=query)).status == 401
             assert (
@@ -374,6 +378,7 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 "SELECT id,group_id,id,'bad' FROM songs",
                 "DELETE FROM song_aliases",
                 "UPDATE catalog_proposals SET status='approved'",
+                "UPDATE music_searches SET status='cancelled'",
                 "UPDATE memberships SET role='admin'",
                 "UPDATE groups SET name='forbidden'",
                 "UPDATE groups SET owner_id=NULL",

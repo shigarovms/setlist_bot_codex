@@ -13,8 +13,9 @@ from aiohttp.test_utils import TestServer
 from test_miniapp import session, settings, signed
 
 from setlist_bot.application.setlists import Setlists
-from setlist_bot.domain.entities import DeploymentIdentity
+from setlist_bot.domain.entities import DeploymentIdentity, Outbox
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
+from setlist_bot.infrastructure.miniapp_catalog_delivery import deliver_catalog
 from setlist_bot.miniapp.app import create_app
 
 
@@ -35,16 +36,13 @@ async def browser_tab(client, port, process):
 
 
 async def process_catalog_request(engine):
-    from aiogram import Bot
-    from test_telegram import FakeTelegram
-
-    from setlist_bot.main import deliver_one_outbox
-
-    async with Bot("123456:TEST", session=FakeTelegram()) as worker:
-        for _ in range(50):
-            if await deliver_one_outbox(worker, engine):
+    for _ in range(50):
+        async with PostgresUnitOfWork(engine) as uow:
+            events = await uow.store.find(Outbox, support_kind="catalog", sent=False)
+            if events:
+                assert await deliver_catalog(uow, events[0])
                 return
-            await asyncio.sleep(0.1)
+        await asyncio.sleep(0.1)
     pytest.fail("Catalog request did not reach the bot worker")
 
 
@@ -105,6 +103,12 @@ class Browser:
         page = await self.js("({url: location.href, text: document.body?.innerText.slice(0, 500)})")
         raise AssertionError(f"Browser condition failed: {expression}. Page: {page}")
 
+    async def click_named(self, selector, title):
+        match = f"Array.from(document.querySelectorAll({json.dumps(selector)})).find("
+        match += f"element => element.textContent.trim() === {json.dumps(title)})"
+        await self.wait(f"!!({match})")
+        await self.js(f"{match}.click()")
+
     async def tap(self, selector):
         point = await self.js(
             f"(()=>{{const r=document.querySelector({json.dumps(selector)})"
@@ -144,6 +148,42 @@ class Browser:
             "Input.dispatchMouseEvent",
             {"type": "mouseReleased", **end, "button": "left", "buttons": 0, "clickCount": 1},
         )
+
+
+async def browser_music_search(browser, engine, band):
+    from test_repertoire_workspace_music import ready_worker
+
+    await browser.click_named("a", "К списку песен")
+    await browser.click_named("a", "Поиск песен в интернете")
+    await browser.wait("!!document.querySelector('#music-query')")
+    await browser.js("""
+        const input = document.querySelector('#music-query');
+        input.value = 'Example artist';
+        input.form.requestSubmit();
+    """)
+    await process_catalog_request(engine)
+    await ready_worker(engine, band)
+    await browser.call("Page.reload")
+    await browser.click_named("button", "Example artist")
+    await process_catalog_request(engine)
+    await ready_worker(engine, band)
+    await browser.call("Page.reload")
+    await browser.wait("!!document.querySelector('input[id^=track-time]')")
+    await browser.js("""
+        const input = document.querySelector('input[id^=track-time]');
+        input.value = '03:30';
+        input.form.requestSubmit();
+    """)
+    await process_catalog_request(engine)
+    await browser.wait("!document.querySelector('input[id^=track-time]')")
+    await browser.click_named("button", "Предпросмотр импорта")
+    await process_catalog_request(engine)
+    await browser.wait("document.querySelector('#workspace-content').innerText.includes('03:30')")
+    await browser.click_named("button", "Добавить 1 песню")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('#workspace-content').innerText.includes('Добавлено песен: 1.')"
+    )
 
 
 @pytest.mark.skipif(
@@ -316,6 +356,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     "document.querySelector('#workspace-content').innerText"
                     ".includes('Добавлено песен: 1.')"
                 )
+                await browser_music_search(browser, engine, world.group.id)
                 return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
             assert await browser.js(
