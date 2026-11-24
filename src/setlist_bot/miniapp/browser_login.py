@@ -42,8 +42,10 @@ class BrowserLogin:
         )
         self.flow = Fernet(base64.urlsafe_b64encode(key))
 
-    def begin(self) -> web.Response:
+    def begin(self, invitation_id: UUID | None = None) -> web.Response:
         flow = {key: secrets.token_urlsafe(32) for key in ("state", "nonce", "verifier")}
+        if invitation_id is not None:
+            flow["invitation"] = str(invitation_id)
         challenge = base64.urlsafe_b64encode(hashlib.sha256(flow["verifier"].encode()).digest())
         authorize = urlencode(
             {
@@ -69,14 +71,16 @@ class BrowserLogin:
         )
         return response
 
-    async def verify_callback(self, request: web.Request) -> int:
+    async def verify_callback(self, request: web.Request) -> tuple[int, UUID | None]:
         try:
             raw = request.cookies.get(FLOW_COOKIE, "")
             flow = json.loads(self.flow.decrypt(raw.encode(), ttl=FLOW_TTL))
             state, code = request.query.get("state", ""), request.query.get("code", "")
             require(hmac.compare_digest(state.encode(), flow["state"].encode()), "miniapp_auth")
             require(0 < len(code) <= 2048 and "error" not in request.query, "miniapp_auth")
-            return await self.exchange(code, flow["verifier"], flow["nonce"])
+            invitation = UUID(flow["invitation"]) if flow.get("invitation") else None
+            actor = await self.exchange(code, flow["verifier"], flow["nonce"])
+            return actor, invitation
         except (
             InvalidToken,
             jwt.PyJWTError,

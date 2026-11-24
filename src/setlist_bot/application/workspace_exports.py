@@ -8,16 +8,28 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from setlist_bot.application.exports import Exports, PdfRenderer
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
-from setlist_bot.domain.entities import ExportFile, Group, Revision, User
+from setlist_bot.application.workspace_gigs import WorkspaceGigs
+from setlist_bot.domain.entities import ExportFile, Revision, User
 from setlist_bot.domain.export_settings import FONTS, settings
 from setlist_bot.domain.rules import require
 
 
 class WorkspaceExports:
-    def __init__(self, store: Store, user: User, bot_username: str = "") -> None:
+    def __init__(
+        self,
+        store: Store,
+        user: User,
+        bot_username: str = "",
+        *,
+        invitation_id: UUID | None = None,
+    ) -> None:
         self.store, self.user = store, user
         self.lists = Setlists(store, user)
-        self.exports = Exports(store, user, user.telegram_id, bot_username=bot_username)
+        self.gigs = WorkspaceGigs(store, user)
+        self.invitation_id = invitation_id
+        self.exports = Exports(
+            store, user, user.telegram_id, bot_username=bot_username, invitation_id=invitation_id
+        )
 
     @staticmethod
     def command(payload: dict[str, Any]) -> dict[str, Any]:
@@ -50,8 +62,7 @@ class WorkspaceExports:
         }
 
     async def options(self, group_id: UUID, concert_id: UUID) -> dict[str, Any]:
-        await self.lists.load(group_id, concert_id)
-        group = await self.store.get(Group, group_id)
+        group, _ = await self.exports.event(group_id, concert_id)
         return {
             "settings": settings(self.user.export_settings),
             "fonts": FONTS,
@@ -61,11 +72,26 @@ class WorkspaceExports:
     async def apply(
         self, group_id: UUID, concert_id: UUID, data: dict[str, Any], renderer: PdfRenderer | None
     ) -> dict[str, Any]:
-        current = await self.lists.load(group_id, concert_id)
+        current = None
+        guest = None
+        if self.invitation_id is not None:
+            guest = await self.gigs.confirmed(self.invitation_id)
+            require(
+                guest.group.id == group_id
+                and guest.event.id == concert_id
+                and not data.get("revision"),
+                "forbidden",
+            )
+        else:
+            current = await self.lists.load(group_id, concert_id)
         if data["action"] == "settings":
             self.user.export_settings = settings(data["settings"])
             return {"settings": self.user.export_settings}
-        if data["revision"]:
+        if guest:
+            snapshot, version, approved = await self.gigs.shared(guest)
+            require(approved, "export_approved_only")
+        elif data["revision"]:
+            assert current is not None
             revision = await self.store.get(Revision, UUID(data["revision"]))
             require(
                 revision.group_id == group_id and revision.setlist_id == current.id, "not_found"
@@ -108,6 +134,10 @@ class WorkspaceExports:
             and export.concert_id == concert_id,
             "not_found",
         )
+        if self.invitation_id is not None:
+            guest = await self.gigs.confirmed(self.invitation_id)
+            _, version, approved = await self.gigs.shared(guest)
+            require(approved and version == export.payload["version"], "export_expired")
         audience, language = result["audience"], result["language"]
         targets = ("musicians", "lights") if audience == "all" else (audience,)
         files = []

@@ -18,6 +18,7 @@ from setlist_bot.application.importing import Importer
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.repertoire_import import RepertoireImport
 from setlist_bot.application.workspace_exports import WorkspaceExports
+from setlist_bot.application.workspace_gigs import GIG_REPLY, GIG_SESSION, WorkspaceGigs
 from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.application.workspace_performances import WorkspacePerformances
 from setlist_bot.application.workspace_roster import ROSTER_KIND, WorkspaceRoster
@@ -49,6 +50,7 @@ CATALOG_OPERATIONS = {
     "team_action": "miniapp_team",
     "staff_action": "miniapp_staff",
     "roster_action": ROSTER_KIND,
+    "gig_reply": GIG_REPLY,
     "duration_save": "miniapp_duration",
 }
 
@@ -60,6 +62,7 @@ class CatalogTarget:
     concert: Concert | None = None
     shared: bool = False
     membership_id: UUID | None = None
+    invitation_id: UUID | None = None
 
 
 class MiniCatalog:
@@ -109,7 +112,7 @@ class MiniCatalog:
         parent = await self.store.get(Confirmation, session)
         data = json.loads(parent.command)
         kind = data.get("kind")
-        if kind not in ("miniapp_repertoire", SETLIST_SESSION, TEAM_SESSION):
+        if kind not in ("miniapp_repertoire", SETLIST_SESSION, TEAM_SESSION, GIG_SESSION):
             parent, _, concert = await self.drafts.load(session)
             return CatalogTarget(parent, concert.group_id, concert)
         require(
@@ -118,6 +121,22 @@ class MiniCatalog:
             and parent.expires_at > now(),
             "miniapp_expired",
         )
+        if kind == GIG_SESSION:
+            scope = await WorkspaceGigs(self.store, self.user).scope(
+                UUID(data["invitation_id"]), active=False
+            )
+            require(
+                scope.group.deleted_at is None
+                and scope.event.deleted_at is None
+                and data["group_id"] == str(scope.group.id)
+                and data["concert_id"] == str(scope.event.id)
+                and data["group_epoch"] == scope.group.lifecycle_version
+                and data["concert_epoch"] == scope.event.lifecycle_version,
+                "miniapp_expired",
+            )
+            return CatalogTarget(
+                parent, scope.group.id, scope.event, invitation_id=scope.invitation.id
+            )
         if kind == TEAM_SESSION:
             member, group = await WorkspaceTeam(self.store, self.user).own_membership(
                 UUID(data["membership_id"])
@@ -142,9 +161,29 @@ class MiniCatalog:
             return CatalogTarget(parent, group.id, concert, shared=True)
         return CatalogTarget(parent, group.id)
 
+    async def open_gig(self, identifier: UUID) -> Confirmation:
+        scope = await WorkspaceGigs(self.store, self.user).scope(identifier)
+        parent = Confirmation(
+            user_id=self.user.id,
+            chat_id=self.user.telegram_id,
+            expires_at=now() + timedelta(hours=1),
+            command=json.dumps(
+                {
+                    "kind": GIG_SESSION,
+                    "invitation_id": str(scope.invitation.id),
+                    "group_id": str(scope.group.id),
+                    "group_epoch": scope.group.lifecycle_version,
+                    "concert_id": str(scope.event.id),
+                    "concert_epoch": scope.event.lifecycle_version,
+                }
+            ),
+        )
+        self.store.add(parent)
+        return parent
+
     async def read(self, session: UUID, song_id: UUID) -> dict[str, Any]:
         target = await self.target(session)
-        require(target.membership_id is None, "forbidden")
+        require(target.membership_id is None and target.invitation_id is None, "forbidden")
         song = await self.catalog.song(target.group_id, song_id)
         require(target.concert is None or not song.archived, "not_found")
         aliases = await self.store.find(SongAlias, group_id=target.group_id, song_id=song.id)
@@ -162,7 +201,13 @@ class MiniCatalog:
         group_id, concert = target.group_id, target.concert
         kind = CATALOG_OPERATIONS[operation]
         workspace_operations = ("shared_action", "export_action", "roster_action")
-        require(target.shared == (operation in workspace_operations), "input")
+        if target.invitation_id is not None:
+            require(operation in ("gig_reply", "export_action"), "forbidden")
+        else:
+            require(
+                operation != "gig_reply" and target.shared == (operation in workspace_operations),
+                "input",
+            )
         personal = target.membership_id is not None
         require(not personal or operation == "team_action", "forbidden")
         team_command = None
@@ -171,7 +216,7 @@ class MiniCatalog:
             team_command = WorkspaceTeam.command(payload, personal=personal)
             if not personal and team_command["action"] != "request_roles":
                 await self.drafts.groups.access(group_id, admin=True)
-        elif operation not in ("catalog_save", "shared_action", "export_action"):
+        elif operation not in ("catalog_save", "shared_action", "export_action", "gig_reply"):
             await self.drafts.groups.access(group_id, admin=True)
         request = payload.get("request_id")
         require(isinstance(request, str) and str(UUID(request)) == request, "input")
@@ -235,6 +280,9 @@ class MiniCatalog:
             details = {"staff": WorkspaceStaffing.command(payload)}
         elif operation == "roster_action":
             details = {"roster": WorkspaceRoster.command(payload)}
+            expires = min(expires, now() + timedelta(minutes=15))
+        elif operation == "gig_reply":
+            details = {"gig_reply": WorkspaceGigs.command(payload)}
             expires = min(expires, now() + timedelta(minutes=15))
         else:
             details = await self._catalog_details(group_id, payload)
@@ -331,6 +379,10 @@ class MiniCatalog:
             "miniapp_expired",
         )
         require(target.membership_id is None or data["kind"] == "miniapp_team", "forbidden")
+        require(
+            target.invitation_id is None or data["kind"] in (GIG_REPLY, "miniapp_export"),
+            "forbidden",
+        )
         if data["status"] != "pending":
             return dict(data.get("result", {}))
         if data["kind"] == "miniapp_duration":
@@ -394,10 +446,13 @@ class MiniCatalog:
             row.command = json.dumps({**data, "status": "saved", "result": public})
             return shared_result
         if data["kind"] == "miniapp_export":
-            require(target.shared and concert is not None, "miniapp_expired")
+            require(
+                (target.shared or target.invitation_id is not None) and concert is not None,
+                "miniapp_expired",
+            )
             assert concert is not None
             result_export = await WorkspaceExports(
-                self.store, self.user, data["bot_username"]
+                self.store, self.user, data["bot_username"], invitation_id=target.invitation_id
             ).apply(group_id, concert.id, data["export"], pdf)
             row.command = json.dumps({**data, "status": "saved", "result": result_export})
             return result_export
@@ -438,6 +493,14 @@ class MiniCatalog:
                 data["delivery"] = delivery
             row.command = json.dumps({**data, "status": "saved", "result": result_roster})
             return result_roster
+        if data["kind"] == GIG_REPLY:
+            require(target.invitation_id is not None, "miniapp_expired")
+            assert target.invitation_id is not None
+            result_reply = await WorkspaceGigs(self.store, self.user).reply(
+                target.invitation_id, data
+            )
+            row.command = json.dumps({**data, "status": "saved", "result": result_reply})
+            return result_reply
         song_id = UUID(data["song_id"]) if data["song_id"] else None
         if song_id:
             require(not (await self.catalog.song(group_id, song_id)).archived, "not_found")

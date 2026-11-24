@@ -16,6 +16,7 @@ from setlist_bot.application.miniapp_catalog import CATALOG_OPERATIONS, MiniCata
 from setlist_bot.application.repertoire_import import RepertoireImport
 from setlist_bot.application.workspace import PAGE_SIZE, Workspace
 from setlist_bot.application.workspace_exports import WorkspaceExports
+from setlist_bot.application.workspace_gigs import WorkspaceGigs
 from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.application.workspace_performances import WorkspacePerformances
 from setlist_bot.application.workspace_roster import WorkspaceRoster
@@ -113,6 +114,7 @@ async def asset(request: web.Request) -> web.Response:
         "workspace-team.js": "text/javascript",
         "workspace-staffing.js": "text/javascript",
         "workspace-roster.js": "text/javascript",
+        "workspace-gigs.js": "text/javascript",
         "workspace-request-dialog.js": "text/javascript",
         "model.js": "text/javascript",
         "persistence.js": "text/javascript",
@@ -136,7 +138,8 @@ async def login_config(request: web.Request) -> web.Response:
 
 
 async def login_begin(request: web.Request) -> web.Response:
-    return BrowserLogin(request.app[SETTINGS]).begin()
+    invitation = request.query.get("invitation")
+    return BrowserLogin(request.app[SETTINGS]).begin(UUID(invitation) if invitation else None)
 
 
 async def login_callback(request: web.Request) -> web.Response:
@@ -146,13 +149,15 @@ async def login_callback(request: web.Request) -> web.Response:
         raise web.HTTPServiceUnavailable()
     async with gate:
         try:
-            actor = await login.verify_callback(request)
+            actor, invitation = await login.verify_callback(request)
         except AppError:
             response = web.Response(status=303, headers={"Location": "/miniapp/?login=failed"})
         else:
             async with PostgresUnitOfWork(request.app[ENGINE]) as uow:
                 users = await uow.store.find(User, telegram_id=actor)
                 target = "/miniapp/" if users else "/miniapp/?login=start_bot"
+                if users and invitation is not None:
+                    target = f"/miniapp/?workspace=1&view=my-gigs&invitation={invitation}"
                 response = web.Response(status=303, headers={"Location": target})
                 if users:
                     start_session(uow.store, users[0], response)
@@ -216,7 +221,37 @@ async def api(request: web.Request) -> web.Response:
                 user = users[0]
             request[LANGUAGE] = user.language
             service = MiniDrafts(uow.store, user)
+            if operation == "my_gigs" and request.method == "GET":
+                section = payload.get("section", "invitations")
+                page = int(payload.get("page", "0"))
+                if section not in ("invitations", "confirmed", "history") or not 0 <= page <= 10000:
+                    raise ValueError("Invalid personal invitation options")
+                return web.json_response(
+                    await WorkspaceGigs(uow.store, user).list(section, page, PAGE_SIZE)
+                )
+            if operation in ("gig_card", "gig_setlist") and request.method == "GET":
+                gigs = WorkspaceGigs(uow.store, user)
+                invitation_id = UUID(payload["invitation"])
+                data = (
+                    await gigs.card(invitation_id)
+                    if operation == "gig_card"
+                    else await gigs.setlist(invitation_id)
+                )
+                return web.json_response(data)
+            if operation == "open_gig" and request.method == "POST":
+                guest = await MiniCatalog(service).open_gig(UUID(payload["invitation"]))
+                return web.json_response({"session": str(guest.id)})
             if operation == "export_options" and request.method == "GET":
+                if payload.get("invitation"):
+                    scope = await WorkspaceGigs(uow.store, user).confirmed(
+                        UUID(payload["invitation"])
+                    )
+                    guest_exports = WorkspaceExports(
+                        uow.store, user, invitation_id=scope.invitation.id
+                    )
+                    return web.json_response(
+                        await guest_exports.options(scope.group.id, scope.event.id)
+                    )
                 return web.json_response(
                     await WorkspaceExports(uow.store, user).options(
                         UUID(payload["band"]), UUID(payload["performance"])
@@ -440,12 +475,16 @@ async def api(request: web.Request) -> web.Response:
             elif request.method == "GET" and operation == "export_download":
                 scoped = MiniCatalog(service)
                 target = await scoped.target(identifier)
-                require(target.shared and target.concert is not None, "miniapp_expired")
+                require(
+                    (target.shared or target.invitation_id is not None)
+                    and target.concert is not None,
+                    "miniapp_expired",
+                )
                 assert target.concert is not None
                 record = await scoped.status(identifier, UUID(payload["request"]))
-                name, content_type, content = await WorkspaceExports(uow.store, user).download(
-                    target.group_id, target.concert.id, record
-                )
+                name, content_type, content = await WorkspaceExports(
+                    uow.store, user, invitation_id=target.invitation_id
+                ).download(target.group_id, target.concert.id, record)
                 return web.Response(
                     body=content,
                     content_type=content_type,

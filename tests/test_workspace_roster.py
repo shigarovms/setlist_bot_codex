@@ -1,16 +1,19 @@
 import asyncio
 from uuid import UUID, uuid4
 
+from aiogram import Bot
 from aiohttp.test_utils import TestClient, TestServer
 from sqlalchemy import text
 from test_miniapp import settings
 from test_repertoire_workspace_actions import get, post
 from test_repertoire_workspace_music import deliver_request
+from test_telegram import FakeTelegram
 from test_workspace_shared_setlist import setup_workspace
 
 from setlist_bot.application.staffing import Staffing
 from setlist_bot.domain.entities import GigInvitation, GigSlot, Outbox
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
+from setlist_bot.main import deliver_one_outbox
 from setlist_bot.miniapp.app import create_app
 
 
@@ -191,8 +194,17 @@ async def test_worker_waits_for_people_before_locking_band(engine, world):
         review = await step(client, engine, session, "review", version=roster["version"])
         identifier, _ = await queue(client, session, "send", preview=review["request"])
         async with PostgresUnitOfWork(engine) as uow:
+            for row in await uow.store.find(Outbox, sent=False):
+                if row.payload.get("request_id") != identifier:
+                    row.sent = True
+
+        async def dispatch():
+            async with Bot("123456:TEST", session=FakeTelegram()) as bot:
+                return await deliver_one_outbox(bot, engine)
+
+        async with PostgresUnitOfWork(engine) as uow:
             await uow.store.lock_people({world.member.id})
-            delivery = asyncio.create_task(deliver_request(engine, identifier))
+            delivery = asyncio.create_task(dispatch())
             try:
                 # The worker must wait for the person lock while the band stays available.
                 for _ in range(100):

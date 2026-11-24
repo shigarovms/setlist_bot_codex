@@ -832,6 +832,16 @@ class PostgresStore:
         )
 
     async def roster_invitations(self, group_id: UUID, concert_id: UUID) -> list[e.GigInvitation]:
+        return await self._invitation_projection(group_id=group_id, concert_id=concert_id)
+
+    async def personal_invitations(
+        self, user_id: UUID, invitation_id: UUID | None = None
+    ) -> list[e.GigInvitation]:
+        if invitation_id is not None:
+            return await self._invitation_projection(user_id=user_id, id=invitation_id)
+        return await self._invitation_projection(user_id=user_id)
+
+    async def _invitation_projection(self, **filters: UUID) -> list[e.GigInvitation]:
         invites = metadata.tables["gig_invitations"]
         columns = (
             "id",
@@ -848,7 +858,7 @@ class PostgresStore:
             "created_at",
         )
         query = select(*(invites.c[column] for column in columns)).where(
-            invites.c.group_id == group_id, invites.c.concert_id == concert_id
+            *(invites.c[key] == value for key, value in filters.items())
         )
         rows = (await self.session.execute(query)).mappings()
         return [e.GigInvitation(**row) for row in rows]

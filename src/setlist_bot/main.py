@@ -140,6 +140,11 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
             if pending is None:
                 return False
             event_id = pending.id
+            catalog_preflight = None
+            if pending.support_kind == "catalog":
+                from setlist_bot.infrastructure.miniapp_catalog_delivery import lock_catalog_people
+
+                catalog_preflight = await lock_catalog_people(uow.store, pending)
             group = (
                 await uow.store.get(Group, pending.group_id, lock=True)
                 if pending.group_id
@@ -159,11 +164,18 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
             if event.support_kind == "catalog":
                 from setlist_bot.infrastructure.miniapp_catalog_delivery import deliver_catalog
 
-                return await deliver_catalog(uow, event)
+                return await deliver_catalog(
+                    uow, event, people_locked=True, preflight=catalog_preflight
+                )
             if event.support_kind == "staffing":
                 from setlist_bot.infrastructure.staffing_delivery import deliver_staffing
 
-                return await deliver_staffing(bot, uow, event)
+                return await deliver_staffing(
+                    bot,
+                    uow,
+                    event,
+                    miniapp_public_base_url=os.environ.get("MINIAPP_PUBLIC_BASE_URL", ""),
+                )
             if event.support_kind == "music":
                 from setlist_bot.infrastructure.workflow_delivery import deliver_music
 

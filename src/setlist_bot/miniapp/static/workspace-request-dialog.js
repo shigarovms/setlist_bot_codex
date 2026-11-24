@@ -48,7 +48,10 @@ export function requestDialog({ title, labels: t, operation, request, refresh, s
       }
       if (!dialog.open || result.status === "pending") return;
       attempt = null;
-      if (result.status === "failed") message.textContent = result.message;
+      if (result.status === "failed") {
+        message.textContent = result.message;
+        current.failure?.(result);
+      }
       else {
         message.textContent = "";
         await current.complete(result);
@@ -65,10 +68,10 @@ export function requestDialog({ title, labels: t, operation, request, refresh, s
 
   return {
     body, message, dialog,
-    send(trigger, payload, api = request, complete = finish) {
+    send(trigger, payload, api = request, complete = finish, failure = null) {
       if (attempt || busy) return;
       trigger.disabled = true;
-      attempt = { trigger, api, complete, payload: { ...payload, request_id: crypto.randomUUID() } };
+      attempt = { trigger, api, complete, failure, payload: { ...payload, request_id: crypto.randomUUID() } };
       void deliver();
     },
   };

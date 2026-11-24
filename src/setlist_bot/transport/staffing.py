@@ -473,7 +473,20 @@ async def invitation_view(
                     action(c, "swap", invitation_id=str(row.id), version=row.version),
                 ),
             )
-    return Response(text, buttons)
+    response = Response(text, buttons)
+    if (
+        own
+        and not admin_notice
+        and c.miniapp_public_base_url
+        and row.status in OPEN | {"confirmed"}
+    ):
+        key = "miniapp_gig"
+        response.buttons.insert(0, (c.t("staff_open_in_app"), key))
+        response.web_apps[key] = (
+            c.miniapp_public_base_url.rstrip("/")
+            + f"/miniapp/?workspace=1&view=my-gigs&invitation={row.id}"
+        )
+    return response
 
 
 async def busy_input(c: Controller, value: str) -> Response:

@@ -10,12 +10,14 @@ from unidecode import unidecode
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
+from setlist_bot.application.workspace_gigs import WorkspaceGigs
 from setlist_bot.domain.concerts import date_label
 from setlist_bot.domain.entities import (
     ChatBinding,
     Concert,
     ExportFile,
     ExportSnapshot,
+    Group,
     Song,
     User,
     now,
@@ -34,9 +36,27 @@ class PdfRenderer(Protocol):
 
 
 class Exports:
-    def __init__(self, store: Store, user: User, chat_id: int, *, bot_username: str = "") -> None:
+    def __init__(
+        self,
+        store: Store,
+        user: User,
+        chat_id: int,
+        *,
+        bot_username: str = "",
+        invitation_id: UUID | None = None,
+    ) -> None:
         self.store, self.user, self.chat_id = store, user, chat_id
         self.bot_username = bot_username
+        self.invitation_id = invitation_id
+
+    async def event(self, group_id: UUID, concert_id: UUID) -> tuple[Group, Concert]:
+        if self.invitation_id is not None:
+            scope = await WorkspaceGigs(self.store, self.user).confirmed(self.invitation_id)
+            require(scope.group.id == group_id and scope.event.id == concert_id, "forbidden")
+            return scope.group, scope.event
+        group = await Groups(self.store, self.user).access(group_id)
+        await Setlists(self.store, self.user).load(group_id, concert_id)
+        return group, await self.store.get(Concert, concert_id)
 
     async def _lighting_snapshot(self, group_id: UUID, snapshot: dict[str, Any]) -> dict[str, Any]:
         result = flat_content(snapshot)
@@ -77,9 +97,8 @@ class Exports:
         reuse: bool = False,
     ) -> ExportSnapshot:
         require(approved, "export_approved_only")
-        group = await Groups(self.store, self.user).access(group_id)
-        await Setlists(self.store, self.user).load(group_id, concert_id)
-        concert = await self.store.get(Concert, concert_id)
+        require(self.invitation_id is None or private, "forbidden")
+        group, concert = await self.event(group_id, concert_id)
         require(any(block["items"] for block in snapshot["blocks"]), "export_empty")
         export = ExportSnapshot(
             group_id=group_id,
@@ -106,6 +125,7 @@ class Exports:
                 "lighting_snapshot": await self._lighting_snapshot(group_id, snapshot),
                 "back": back,
                 "language": group.language,
+                **({"invitation_id": str(self.invitation_id)} if self.invitation_id else {}),
             },
         )
         if reuse:
@@ -188,9 +208,12 @@ class Exports:
         require(export.owner_id is None or export.owner_id == self.user.id, "not_found")
         require(export.expires_at > now(), "export_expired")
         require(export.payload.get("approved") is True, "export_approved_only")
-        group = await Groups(self.store, self.user).access(export.group_id)
-        await Setlists(self.store, self.user).load(export.group_id, export.concert_id)
-        concert = await self.store.get(Concert, export.concert_id)
+        require(
+            export.payload.get("invitation_id")
+            == (str(self.invitation_id) if self.invitation_id else None),
+            "not_found",
+        )
+        group, concert = await self.event(export.group_id, export.concert_id)
         require(
             export.group_epoch == group.lifecycle_version
             and export.concert_epoch == concert.lifecycle_version,

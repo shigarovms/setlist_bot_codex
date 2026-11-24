@@ -15,7 +15,9 @@ from setlist_bot.transport.staffing import invitation_view
 from setlist_bot.transport.telegram import send_response
 
 
-async def deliver_staffing(bot: Bot, uow: PostgresUnitOfWork, event: Outbox) -> bool:
+async def deliver_staffing(
+    bot: Bot, uow: PostgresUnitOfWork, event: Outbox, *, miniapp_public_base_url: str = ""
+) -> bool:
     row = None
     try:
         rows = await uow.store.find(GigInvitation, id=UUID(event.payload["invite_id"]))
@@ -32,7 +34,13 @@ async def deliver_staffing(bot: Bot, uow: PostgresUnitOfWork, event: Outbox) -> 
         concert = await uow.store.get(Concert, row.concert_id)
         service = Staffing(uow.store, person)
         kind = event.payload["kind"]
-        c = Controller(uow.store, person, person.telegram_id, private=True)
+        c = Controller(
+            uow.store,
+            person,
+            person.telegram_id,
+            private=True,
+            miniapp_public_base_url=miniapp_public_base_url,
+        )
         if event.payload.get("admin"):
             await service.groups.access(row.group_id, admin=True)
             require(not concert.deleted_at, "input_expired")

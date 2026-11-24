@@ -31,6 +31,10 @@ class Store(Protocol):
 
     async def roster_invitations(self, group_id: UUID, concert_id: UUID) -> list[GigInvitation]: ...
 
+    async def personal_invitations(
+        self, user_id: UUID, invitation_id: UUID | None = None
+    ) -> list[GigInvitation]: ...
+
     async def concerts_for_user(
         self,
         user_id: UUID,

@@ -383,6 +383,18 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
             assert roster.status == 200, await roster.text()
             slots = (await roster.json())["slots"]
             assert slots[0]["invitations"][0]["status"] == "confirmed"
+            invite_id = slots[0]["invitations"][0]["id"]
+            performer = {**headers, "Authorization": "tma " + signed(actor=2)}
+            personal_card = await client.get(
+                "/miniapp/api/gig_card", params={"invitation": invite_id}, headers=performer
+            )
+            assert personal_card.status == 200, await personal_card.text()
+            assert (await personal_card.json())["invitation"]["status"] == "confirmed"
+            personal_list = await client.get(
+                "/miniapp/api/my_gigs", params={"section": "confirmed"}, headers=performer
+            )
+            assert personal_list.status == 200, await personal_list.text()
+            assert (await personal_list.json())["invitations"][0]["id"] == invite_id
             team = await client.get("/miniapp/api/team", params=band, headers=headers)
             assert team.status == 200 and (await team.json())["admin"]
             template_card = await client.get(

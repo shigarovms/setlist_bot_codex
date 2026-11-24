@@ -423,6 +423,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser_manage_performance(browser, engine, world.group.id, origin)
                 await browser_staff_directory(browser, engine, world.group.id, origin)
                 await browser_roster(browser, engine, world, origin)
+                await browser_guest_gig(browser, engine, world, origin)
                 await browser_team(browser, engine, world.group.id, origin)
                 return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
@@ -1000,11 +1001,11 @@ async def browser_roster(browser, engine, world, origin):
     await browser.click_named("#workspace-content button", "Редактировать состав")
     await browser.js(r"""
         document.getElementById('staff-lineup-quick').click();
-        document.getElementById('staff-lineup-paste').value = 'Гитара: 2\nВокал: 1';
+        document.getElementById('staff-lineup-paste').value = 'Гитара: 3\nВокал: 1';
     """)
     await browser.click_named("dialog[open] button", "Предпросмотр")
     await browser.wait(
-        "document.querySelector('dialog[open]')?.innerText.includes('Telegram ID 2')"
+        "document.querySelector('dialog[open]')?.innerText.includes('Telegram ID 3')"
     )
     await browser.click_named("dialog[open] button", "Сохранить")
     await process_catalog_request(engine)
@@ -1023,3 +1024,44 @@ async def browser_roster(browser, engine, world, origin):
     await browser.wait(
         "document.querySelector('#workspace-content h2')?.textContent === 'Второй концерт'"
     )
+
+
+async def browser_guest_gig(browser, engine, world, origin):
+    async with PostgresUnitOfWork(engine) as uow:
+        lists = Setlists(uow.store, world.admin)
+        await lists.edit_songs(world.group.id, world.concert2.id, 0, ["Комета"])
+        await lists.approve(world.group.id, world.concert2.id, 1)
+    script = await browser.call(
+        "Page.addScriptToEvaluateOnNewDocument",
+        {
+            "source": "window.Telegram.WebApp.initData = " + json.dumps(signed(actor=3)),
+        },
+    )
+    try:
+        await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1"})
+        await browser.wait(
+            "document.getElementById('workspace-status')?.textContent "
+            "=== 'У вас пока нет коллективов.'"
+        )
+        await browser.click_named("#workspace-content a", "Мои выступления")
+        await browser.click_named(".workspace-list a", "Коллектив А · Второй концерт")
+        await browser.click_named("#workspace-content button", "Подтвердить участие")
+        await browser.click_named("dialog[open] button", "Подтвердить")
+        await process_catalog_request(engine)
+        await browser.click_named("#workspace-content a", "Открыть сет-лист")
+        await browser.wait(
+            "document.querySelector('.shared-setlist')?.innerText.includes('Комета')"
+        )
+        await browser.click_named("#workspace-content button", "Экспорт PDF")
+        await browser.click_named("dialog[open] button", "Подготовить файл")
+        await process_catalog_request(engine)
+        await browser.wait("!!document.querySelector('dialog[open] a[download]:not([hidden])')")
+        await browser.click_named("dialog[open] button", "Закрыть")
+        await browser.click_named("#workspace-content a", "К приглашению")
+        await browser.click_named("#workspace-content a", "Мои выступления")
+        await browser.click_named("#workspace-content a", "Подтверждённые")
+        await browser.wait(
+            "document.querySelector('.workspace-list')?.innerText.includes('Участие подтверждено')"
+        )
+    finally:
+        await browser.call("Page.removeScriptToEvaluateOnNewDocument", script)
