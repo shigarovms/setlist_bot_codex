@@ -217,6 +217,12 @@ async def api(request: web.Request) -> web.Response:
                         UUID(payload["band"]), past=past == "1", page=page
                     )
                 )
+            if operation == "performance" and request.method == "GET":
+                return web.json_response(
+                    await Workspace(uow.store, user).performance(
+                        UUID(payload["band"]), UUID(payload["performance"])
+                    )
+                )
             if operation == "open_draft" and request.method == "POST":
                 editor = await service.create(UUID(payload["band"]), UUID(payload["performance"]))
                 return web.json_response({"session": str(editor.id)})

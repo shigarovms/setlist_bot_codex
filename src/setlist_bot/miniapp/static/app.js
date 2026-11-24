@@ -1,6 +1,6 @@
 import { clone, clock, total, numbered, wire, move, asText } from "./model.js";
 import { DraftPersistence } from "./persistence.js";
-import { bandUrl, showWorkspace, workspaceParams, workspaceText } from "./workspace.js";
+import { bandUrl, performanceUrl, showWorkspace, workspaceParams, workspaceText } from "./workspace.js";
 const telegram = window.Telegram?.WebApp;
 const tg = telegram?.initData ? telegram : null,
   $ = (id) => document.getElementById(id);
@@ -190,6 +190,11 @@ const t = (key) => words[lang][key] ?? key;
 let session = new URLSearchParams(location.hash.slice(1)).get("session");
 const workspaceBand = workspaceParams.get("band");
 const workspaceDraft = session && workspaceBand && workspaceParams.get("view") === "draft";
+const parentPerformance = workspaceParams.get("performance");
+function draftParentUrl() {
+  const past = workspaceParams.get("past"), page = workspaceParams.get("page");
+  return parentPerformance ? performanceUrl(workspaceBand, parentPerformance, past, page) : bandUrl(workspaceBand, past, page);
+}
 function status(text, error = false) {
   $("status").textContent = text;
   $("status").classList.toggle("error", error);
@@ -1165,7 +1170,7 @@ $("back-bot").addEventListener("click", async () => {
     return;
   }
   if (workspaceDraft) {
-    location.assign(bandUrl(workspaceBand, workspaceParams.get("past"), workspaceParams.get("page")));
+    location.assign(draftParentUrl());
     return;
   }
   if (tg?.openTelegramLink) tg.openTelegramLink(state.bot_url);
@@ -1207,7 +1212,9 @@ function labels() {
     "average-submit": "apply",
   }))
     $(id).textContent = t(key);
-  if (workspaceDraft) $("back-bot").textContent = workspaceText(lang, "performances");
+  if (workspaceDraft) $("back-bot").textContent = parentPerformance
+    ? (lang === "ru" ? "К выступлению" : "Back to performance")
+    : workspaceText(lang, "performances");
   $("undo").setAttribute("aria-label", t("undoLabel"));
   $("search").placeholder = t("search");
   document.documentElement.lang = lang;
@@ -1224,7 +1231,7 @@ async function boot() {
     tg?.BackButton?.show?.();
     tg?.BackButton?.onClick?.(() => {
       if (saver) $("back-bot").click();
-      else location.assign(bandUrl(workspaceBand));
+      else location.assign(draftParentUrl());
     });
   }
   try {

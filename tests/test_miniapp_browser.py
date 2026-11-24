@@ -206,6 +206,8 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             world.group.id, {"title": "Меланхолия", "duration_seconds": 246}
         )
         lists = Setlists(uow.store, world.admin)
+        if launch_mode == "workspace":
+            await lists.edit_songs(world.group.id, world.concert.id, 0, ["Комета"])
         past = await lists.create(world.group.id, date(2025, 12, 1), "Прошлое выступление")
         _, version, _ = await lists.read(world.group.id, past.id)
         await lists.edit_songs(world.group.id, past.id, version, ["Комета"])
@@ -288,12 +290,18 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.wait(
                     "document.querySelectorAll('.workspace-list button').length === 2"
                 )
-                await browser.tap(".workspace-list button")
+                await browser.click_named(".workspace-list a", "Новый год")
+                await browser.wait(
+                    "document.querySelector('.shared-setlist')?.innerText.includes('Комета')"
+                )
+                await browser.click_named("#workspace-content button", "Открыть личный черновик")
                 await browser.wait("document.querySelectorAll('.catalog-entry').length === 2")
                 assert "Новый год" in await browser.js(
                     "document.getElementById('event').textContent"
                 )
                 await browser.js("document.getElementById('back-bot').click()")
+                await browser.wait("!!document.querySelector('.shared-setlist')")
+                await browser.click_named("a", "К выступлениям")
                 await browser.wait(
                     "document.querySelectorAll('.workspace-list button').length === 2"
                 )

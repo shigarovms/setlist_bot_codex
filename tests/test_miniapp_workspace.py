@@ -2,10 +2,18 @@ from datetime import date
 
 from aiohttp.test_utils import TestClient, TestServer
 from test_miniapp import settings, signed
+from test_repertoire_workspace_actions import get
 
 from setlist_bot.application import workspace
 from setlist_bot.application.catalog import Catalog
-from setlist_bot.domain.entities import Confirmation, DeploymentIdentity, Membership, PersonalDraft
+from setlist_bot.application.setlists import Setlists
+from setlist_bot.domain.entities import (
+    Concert,
+    Confirmation,
+    DeploymentIdentity,
+    Membership,
+    PersonalDraft,
+)
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.miniapp.app import create_app
 
@@ -96,3 +104,44 @@ async def test_repertoire_without_event_access_and_with_isolated_song_ids(engine
         assert (await active.json())["songs"] == []
         archive = await client.get(endpoint, params=params | {"archived": "1"}, headers=headers)
         assert (await archive.json())["songs"] == songs
+
+
+async def test_performance_exposes_only_visible_shared_setlist_and_frozen_approval(engine, world):
+    from conftest import invite_fixture_member
+
+    group_id, performance_id = world.group.id, world.concert.id
+    async with PostgresUnitOfWork(engine) as uow:
+        uow.store.add(DeploymentIdentity(bot_id=1110437563, environment="sandbox"))
+        await invite_fixture_member(uow.store, world.concert, world.member)
+        concert = await uow.store.get(Concert, performance_id)
+        concert.city, concert.extra_info = "Москва", "Сбор в 18:00\nВход со двора"
+        concert.performance_duration_seconds = 600
+        shared = Setlists(uow.store, world.admin)
+        await shared.edit_songs(group_id, performance_id, 0, ["Комета", "1 мин", "Комета"])
+        await shared.edit_songs(group_id, performance_id, 0, ["Комета"], replace=True, private=True)
+    query = {"band": str(group_id), "performance": str(performance_id)}
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        forbidden = {**query, "performance": str(world.concert2.id)}
+        await get(client, 2, "performance", 403, **forbidden)
+        await get(client, 3, "performance", 403, **query)
+        cross_band = {**query, "performance": str(world.other_concert.id)}
+        await get(client, 1, "performance", 403, **cross_band)
+        visible = await get(client, 2, "performance", **query)
+        assert visible["performance"]["planned_seconds"] == 600
+        assert visible["performance"]["info"] == "Сбор в 18:00\nВход со двора"
+        assert not visible["setlist"]["approved"] and visible["setlist"]["seconds"] == 496
+        assert [entry["kind"] for entry in visible["setlist"]["entries"]] == [
+            "song",
+            "pause",
+            "song",
+        ]
+        async with PostgresUnitOfWork(engine) as uow:
+            drafts = await uow.store.find(PersonalDraft)
+            assert len(drafts) == 1 and drafts[0].owner_id == world.admin.id
+            await Setlists(uow.store, world.admin).approve(group_id, performance_id, 1)
+            await Catalog(uow.store, world.admin).save(
+                group_id, {"title": "Новое название", "duration_seconds": 240}, world.song.id, 1
+            )
+        approved = (await get(client, 2, "performance", **query))["setlist"]
+        assert approved["approved"] and approved["seconds"] == 496
+        assert approved["entries"][0]["title"] == "Комета"

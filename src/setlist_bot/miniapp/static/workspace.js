@@ -1,4 +1,4 @@
-import { clock } from "./model.js";
+import { clock, numbered } from "./model.js";
 import { repertoireImport } from "./repertoire-import.js";
 import { repertoireMusic } from "./repertoire-music.js";
 
@@ -25,6 +25,8 @@ const copy = {
     pending: "Запрос обрабатывается.", check: "Проверить результат",
     importSongs: "Импорт таблицы", adminOnly: "Импорт доступен администратору коллектива.",
     music: "Поиск песен в интернете",
+    performance: "Выступление", shared: "Общий сет-лист", approvedVersion: "Утверждён", workingVersion: "В работе",
+    version: "Версия", total: "Итого", planned: "План", noEntries: "В общем сет-листе пока нет песен.", pause: "Пауза",
   },
   en: {
     bands: "My bands", upcoming: "Upcoming", past: "Past",
@@ -48,6 +50,8 @@ const copy = {
     pending: "The request is being processed.", check: "Check result",
     importSongs: "Import a table", adminOnly: "Only band admins can import songs.",
     music: "Find songs online",
+    performance: "Performance", shared: "Shared setlist", approvedVersion: "Approved", workingVersion: "Working",
+    version: "Version", total: "Total", planned: "Planned", noEntries: "The shared setlist is empty.", pause: "Pause",
   },
 };
 
@@ -59,6 +63,10 @@ export function bandUrl(band, past = "0", page = 0) {
   if (past === "1") params.set("past", past);
   if (page) params.set("page", page);
   return `./?${params}`;
+}
+
+export function performanceUrl(band, performance, past, page) {
+  return `${bandUrl(band, past, page)}&view=performance&performance=${encodeURIComponent(performance)}`;
 }
 
 function repertoireUrl(band, { archived = "0", page = 0, query = "", song = "", proposals = false, importing = false, music = false } = {}) {
@@ -92,6 +100,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   const band = workspaceParams.get("band");
   const past = workspaceParams.get("past") === "1" ? "1" : "0";
   const page = Number(workspaceParams.get("page")) || 0;
+  const performance = band && workspaceParams.get("view") === "performance" && workspaceParams.get("performance");
   const repertoire = band && workspaceParams.get("view") === "repertoire";
   const song = workspaceParams.get("song") || "";
   const proposals = repertoire && workspaceParams.get("proposals") === "1";
@@ -150,21 +159,28 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   if (band) {
     backButton?.show?.();
     backButton?.onClick?.(() => {
-      location.assign(repertoire ? (song || proposals || importing || music ? repertoireList() : bandUrl(band)) : bandUrl());
+      if (performance) location.assign(bandUrl(band, past, page));
+      else if (repertoire) location.assign(song || proposals || importing || music ? repertoireList() : bandUrl(band));
+      else location.assign(bandUrl());
     });
   }
   async function load() {
     content.replaceChildren();
     status.textContent = t("loading");
     try {
-      const data = music ? await api("music_search", { band }) : proposals ? await api("repertoire_proposals", { band, page }) : repertoire
-        ? await api("repertoire", { band, archived, page, query, song })
-        : band ? await api("performances", { band, past, page }) : await api("bands");
+      let data;
+      if (performance) data = await api("performance", { band, performance });
+      else if (music) data = await api("music_search", { band });
+      else if (proposals) data = await api("repertoire_proposals", { band, page });
+      else if (repertoire) data = await api("repertoire", { band, archived, page, query, song });
+      else if (band) data = await api("performances", { band, past, page });
+      else data = await api("bands");
       language = data.language === "en" ? "en" : "ru";
       document.documentElement.lang = language;
       title.textContent = band ? data.band : t("bands");
       status.textContent = "";
-      if (music) showMusic(data);
+      if (performance) showPerformance(data);
+      else if (music) showMusic(data);
       else if (proposals) showProposals(data);
       else if (importing) showImport(data);
       else if (repertoire) showRepertoire(data);
@@ -233,11 +249,12 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     content.append(nav);
     if (!data.performances.length) status.textContent = t("noPerformances");
     const list = element("ul", "", { class: "workspace-list" });
-    const date = new Intl.DateTimeFormat(language, { dateStyle: "medium", timeZone: "UTC" });
     for (const row of data.performances) {
       const item = element("li", "");
-      const dateLabel = date.format(new Date(row.date));
-      item.append(element("h2", row.title || dateLabel));
+      const dateLabel = dateText(row.date);
+      const name = element("h2", "");
+      name.append(element("a", row.title || dateLabel, { href: performanceUrl(band, row.id, past, page) }));
+      item.append(name);
       item.append(element("p", [row.title ? dateLabel : "", row.city].filter(Boolean).join(" · ")));
       if (data.can_edit_draft) {
         const button = element("button", t("draft"), { type: "button" });
@@ -250,6 +267,42 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     if (!data.can_edit_draft && data.performances.length)
       content.append(element("p", t("restricted")));
     showPages(data.has_next, (index) => bandUrl(band, past, index));
+  }
+  function dateText(value) {
+    return new Intl.DateTimeFormat(language, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(value));
+  }
+  function showPerformance(data) {
+    const info = data.performance, list = data.setlist;
+    const nav = element("nav", "", { class: "workspace-nav" });
+    nav.append(element("a", t("performances"), { href: bandUrl(band, past, page) }));
+    content.append(nav, element("h2", info.title || t("performance")),
+      element("p", [dateText(info.date), info.city, info.type].filter(Boolean).join(" · ")));
+    if (info.info) content.append(element("p", info.info, { class: "performance-info" }));
+    content.append(element("h3", t("shared")),
+      element("p", `${t(list.approved ? "approvedVersion" : "workingVersion")} · ${t("version")} ${list.version}`));
+    const timing = [`${t("total")} ${clock(list.seconds)}`];
+    if (info.planned_seconds) timing.push(`${t("planned")} ${clock(info.planned_seconds)}`);
+    content.append(element("p", timing.join(" · "), { class: "performance-timing" }));
+    if (list.entries.length) {
+      const rows = element("ol", "", { class: "workspace-list shared-setlist", "aria-label": t("shared") });
+      const numbers = numbered(list.entries);
+      for (const [index, row] of list.entries.entries()) {
+        const item = element("li", "", { class: row.kind === "pause" ? "shared-pause" : "" });
+        const name = row.kind === "pause" ? row.label ?? t("pause") : row.title;
+        const details = [row.bpm ? `${row.bpm} BPM` : null, row.lights, row.comment].filter(Boolean).join(" · ");
+        const title = element("span", name);
+        if (details) title.append(element("small", details));
+        item.append(element("span", numbers[index], { "aria-hidden": "true" }), title,
+          element("span", clock(row.duration_seconds), { class: "workspace-duration" }));
+        rows.append(item);
+      }
+      content.append(rows);
+    } else content.append(element("p", t("noEntries")));
+    if (data.can_edit_draft) {
+      const action = element("button", t("draft"), { type: "button", class: "primary" });
+      action.addEventListener("click", () => openDraft(info.id, action));
+      content.append(action);
+    }
   }
   function showRepertoire(data) {
     const nav = element("nav", "", { class: "workspace-nav" });
@@ -405,7 +458,8 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     status.textContent = t("loading");
     try {
       const { session } = await api("open_draft", { band, performance }, "POST");
-      location.assign(`${bandUrl(band, past, page)}&view=draft#session=${encodeURIComponent(session)}`);
+      const parent = performance ? `&performance=${encodeURIComponent(performance)}` : "";
+      location.assign(`${bandUrl(band, past, page)}&view=draft${parent}#session=${encodeURIComponent(session)}`);
     } catch (error) {
       status.textContent = error.message;
       button.disabled = false;

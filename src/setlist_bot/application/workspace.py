@@ -6,11 +6,30 @@ from uuid import UUID
 from setlist_bot.application.catalog import SONG_FIELDS, Catalog, song_data
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
+from setlist_bot.application.setlists import Setlists
 from setlist_bot.domain.concerts import today
-from setlist_bot.domain.entities import CatalogProposal, Group, Membership, Song, SongAlias, User
-from setlist_bot.domain.rules import AppError, clock
+from setlist_bot.domain.entities import (
+    CatalogProposal,
+    Concert,
+    Group,
+    Membership,
+    Song,
+    SongAlias,
+    User,
+)
+from setlist_bot.domain.rules import AppError, clock, flat_content, is_pause, totals
 
 PAGE_SIZE = 20
+
+
+async def can_open_draft(groups: Groups, group_id: UUID) -> bool:
+    try:
+        await groups.can_suggest(group_id)
+    except AppError as exc:
+        if exc.code != "admin_suggestions_only":
+            raise
+        return False
+    return True
 
 
 class Workspace:
@@ -32,13 +51,7 @@ class Workspace:
     async def performances(self, group_id: UUID, *, past: bool, page: int) -> dict[str, Any]:
         groups = Groups(self.store, self.user)
         group = await groups.access(group_id)
-        try:
-            await groups.can_suggest(group_id)
-            can_edit = True
-        except AppError as exc:
-            if exc.code != "admin_suggestions_only":
-                raise
-            can_edit = False
+        can_edit = await can_open_draft(groups, group_id)
         rows = await self.store.concerts_for_user(
             self.user.id,
             today(),
@@ -61,6 +74,51 @@ class Workspace:
                 }
                 for row, _ in rows[:PAGE_SIZE]
             ],
+        }
+
+    async def performance(self, group_id: UUID, performance_id: UUID) -> dict[str, Any]:
+        groups = Groups(self.store, self.user)
+        group = await groups.access(group_id)
+        snapshot, version, approved = await Setlists(self.store, self.user).read(
+            group_id, performance_id
+        )
+        concert = await self.store.get(Concert, performance_id)
+        items = flat_content(snapshot)["blocks"][0]["items"]
+        return {
+            "language": self.user.language,
+            "band": group.name,
+            "performance": {
+                "id": str(concert.id),
+                "date": concert.date.isoformat(),
+                "title": concert.title,
+                "city": concert.city,
+                "type": concert.performance_type,
+                "info": concert.extra_info,
+                "planned_seconds": concert.performance_duration_seconds,
+            },
+            "can_edit_draft": await can_open_draft(groups, group_id),
+            "setlist": {
+                "approved": approved,
+                "version": version,
+                "seconds": totals(snapshot)[2],
+                "entries": [
+                    {
+                        "kind": "pause",
+                        "duration_seconds": item["duration_seconds"],
+                        "label": item.get("pause_label"),
+                    }
+                    if is_pause(item)
+                    else {
+                        "kind": "song",
+                        "duration_seconds": item["duration_seconds"],
+                        "title": item["title"],
+                        "bpm": item.get("bpm"),
+                        "lights": item.get("lights"),
+                        "comment": item.get("comment"),
+                    }
+                    for item in items
+                ],
+            },
         }
 
     async def repertoire(

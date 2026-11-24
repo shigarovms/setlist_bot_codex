@@ -108,6 +108,16 @@ main {
 .import-fields select, .import-fields label { display: block; max-width: 100%; }
 .music-track { display: flex; gap: 8px; align-items: center; min-height: 44px; }
 .music-track .workspace-duration { flex-shrink: 0; }
+.performance-info { white-space: pre-wrap; overflow-wrap: anywhere; }
+.performance-timing { font-weight: 700; font-variant-numeric: tabular-nums; }
+.shared-setlist li {
+  display: grid;
+  grid-template-columns: 2ch minmax(0, 1fr) auto;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.shared-setlist small { display: block; color: var(--hint); white-space: pre-wrap; }
+.shared-setlist .shared-pause { background: transparent; border-style: dashed; }
 header h1 {
   font-size: 23px;
   line-height: 1.2;
