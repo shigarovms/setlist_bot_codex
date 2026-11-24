@@ -115,7 +115,7 @@ if [[ "$public_enabled" == true ]]; then
     -c 'GRANT SELECT(scope) ON calendar_subscriptions TO setlist_calendar_reader; GRANT SELECT(role) ON memberships TO setlist_calendar_reader; GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch,expires_at) ON gig_invitations TO setlist_calendar_reader;'
   # RU/EN: Existing Mini App deployments need the pause setting and alias read grant.
   "${compose[@]}" exec -T db psql -X -U setlist -d setlist -v ON_ERROR_STOP=1 \
-    -c 'GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp; GRANT SELECT ON song_aliases,professional_roles,catalog_proposals,music_searches,export_snapshots,export_files,staff_roles,staff_contacts TO setlist_miniapp; GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch,expires_at) ON gig_invitations TO setlist_miniapp;'
+    -c 'GRANT UPDATE(default_pause_seconds) ON groups TO setlist_miniapp; GRANT SELECT ON song_aliases,professional_roles,catalog_proposals,music_searches,export_snapshots,export_files,staff_roles,staff_contacts,lineup_templates TO setlist_miniapp; GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch,expires_at) ON gig_invitations TO setlist_miniapp;'
   "${compose[@]}" up -d --no-build --no-deps calendar miniapp
   "${compose[@]}" exec -T miniapp .venv/bin/python - <<'PY'
 import time

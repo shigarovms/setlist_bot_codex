@@ -19,6 +19,7 @@ from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.application.workspace_performances import WorkspacePerformances
 from setlist_bot.application.workspace_setlists import WorkspaceSetlists
+from setlist_bot.application.workspace_staffing import WorkspaceStaffing
 from setlist_bot.application.workspace_team import WorkspaceTeam, text_field
 from setlist_bot.domain.entities import Confirmation, User, now
 from setlist_bot.domain.miniapp_auth import verify_init_data
@@ -109,6 +110,8 @@ async def asset(request: web.Request) -> web.Response:
         "workspace-export.js": "text/javascript",
         "workspace-performances.js": "text/javascript",
         "workspace-team.js": "text/javascript",
+        "workspace-staffing.js": "text/javascript",
+        "workspace-request-dialog.js": "text/javascript",
         "model.js": "text/javascript",
         "persistence.js": "text/javascript",
         "style.css": "text/css",
@@ -280,6 +283,30 @@ async def api(request: web.Request) -> web.Response:
                     await WorkspaceTeam(uow.store, user).recipient(
                         UUID(payload["band"]), text_field(payload, "reference", 64)
                     )
+                )
+            if operation == "staff_directory" and request.method == "GET":
+                section = payload.get("section")
+                selected_record = UUID(payload["record"]) if payload.get("record") else None
+                page, query = int(payload.get("page", "0")), payload.get("query", "").strip()
+                if (
+                    section not in ("contacts", "lineups")
+                    or not 0 <= page <= 10000
+                    or len(query) > 200
+                ):
+                    raise ValueError("Invalid directory options")
+                return web.json_response(
+                    await WorkspaceStaffing(uow.store, user).directory(
+                        UUID(payload["band"]),
+                        section,
+                        selected_record,
+                        query if selected_record is None else "",
+                        page,
+                        PAGE_SIZE,
+                    )
+                )
+            if operation == "staff_lineup_preview" and request.method == "POST":
+                return web.json_response(
+                    await WorkspaceStaffing(uow.store, user).preview(UUID(payload["band"]), payload)
                 )
             if operation == "performances" and request.method == "GET":
                 past, page = payload.get("past", "0"), int(payload.get("page", "0"))

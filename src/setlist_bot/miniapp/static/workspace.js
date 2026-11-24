@@ -4,6 +4,7 @@ import { repertoireMusic } from "./repertoire-music.js";
 import { mountSharedSetlist } from "./shared-setlist.js";
 import { performanceAction, performanceLabel } from "./workspace-performances.js";
 import { teamLabel, teamView } from "./workspace-team.js";
+import { showStaffDirectory, staffingLabel } from "./workspace-staffing.js";
 
 const copy = {
   ru: {
@@ -109,6 +110,9 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   const team = band && workspaceParams.get("view") === "team";
   const teamContact = team && workspaceParams.get("contact");
   const inbox = !band && workspaceParams.get("view") === "team-inbox";
+  const view = workspaceParams.get("view");
+  const staffing = band && (view === "staff-contacts" ? "contacts" : view === "staff-lineups" ? "lineups" : "");
+  const staffRecord = staffing && workspaceParams.get("record");
   const song = workspaceParams.get("song") || "";
   const proposals = repertoire && workspaceParams.get("proposals") === "1";
   const importing = repertoire && workspaceParams.get("import") === "1";
@@ -118,6 +122,12 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   const repertoireList = () => repertoireUrl(band, { archived, page, query });
   const teamUrl = (index = 0) => `${bandUrl(band, past, index)}&view=team`;
   const inboxUrl = () => `${bandUrl()}&view=team-inbox`;
+  function staffingUrl(section, index = 0, search = "", record = null) {
+    const target = new URLSearchParams({ view: `staff-${section}` });
+    if (search) target.set("query", search);
+    if (record) target.set("record", record);
+    return `${bandUrl(band, past, index)}&${target}`;
+  }
   let language = navigator.language.startsWith("ru") ? "ru" : "en";
   let login;
   let catalogSession;
@@ -171,6 +181,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     backButton?.onClick?.(() => {
       if (performance || trash) location.assign(bandUrl(band, past, trash ? 0 : page));
       else if (team) location.assign(teamContact ? teamUrl(page) : bandUrl(band, past));
+      else if (staffing) location.assign(staffRecord ? staffingUrl(staffing, page, query) : teamUrl());
       else if (repertoire) location.assign(song || proposals || importing || music ? repertoireList() : bandUrl(band));
       else location.assign(bandUrl());
     });
@@ -183,6 +194,9 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       if (performance) data = await api("performance", { band, performance });
       else if (trash) data = await api("performance_trash", { band, page });
       else if (team) data = await api("team", { band, page });
+      else if (staffing) data = await api("staff_directory", {
+        section: staffing, band, page, query, ...(staffRecord ? { record: staffRecord } : {}),
+      });
       else if (inbox) data = await api("team_inbox");
       else if (music) data = await api("music_search", { band });
       else if (proposals) data = await api("repertoire_proposals", { band, page });
@@ -196,6 +210,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       if (performance) showPerformance(data);
       else if (trash) showPerformanceTrash(data);
       else if (team || inbox) await showTeam(data);
+      else if (staffing) showStaffing(data);
       else if (music) showMusic(data);
       else if (proposals) showProposals(data);
       else if (importing) showImport(data);
@@ -317,6 +332,9 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     }));
     if (team && !teamContact)
       nav.append(element("a", teamLabel(language, "inbox"), { href: inboxUrl() }));
+    if (team && !teamContact && data.admin)
+      for (const section of ["contacts", "lineups"])
+        nav.append(element("a", staffingLabel(language, section), { href: staffingUrl(section) }));
     content.append(nav);
     const view = teamView({
       root: content, language, dateText, refresh: load,
@@ -350,6 +368,36 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       view.renderTeam(data);
       showPages(data.has_next, teamUrl);
     }
+  }
+  function showStaffing(data) {
+    const label = key => staffingLabel(language, key);
+    const nav = element("nav", "", { class: "workspace-nav" });
+    const listUrl = staffingUrl(staffing, page, query);
+    nav.append(element("a", label(staffRecord ? staffing : "team"), {
+      href: staffRecord ? listUrl : teamUrl(),
+    }));
+    if (!staffRecord) {
+      const other = staffing === "contacts" ? "lineups" : "contacts";
+      nav.append(element("a", label(other), { href: staffingUrl(other) }));
+    }
+    content.append(nav);
+    if (!staffRecord) {
+      const form = element("form", "", { method: "get", action: "./", class: "workspace-search" });
+      for (const [name, value] of Object.entries({ workspace: "1", band, past, view: `staff-${staffing}` }))
+        form.append(element("input", "", { type: "hidden", name, value }));
+      form.append(element("label", label("search"), { for: "staff-query" }),
+        element("input", "", { type: "search", name: "query", value: query, maxlength: "200", id: "staff-query" }),
+        element("button", label("search"), { type: "submit" }));
+      content.append(form);
+    }
+    showStaffDirectory({
+      root: content, language, data, section: staffing, listUrl, query,
+      recordUrl: id => staffingUrl(staffing, page, query, id),
+      request: catalogApi, preview: body => api("staff_lineup_preview", { ...body, band }, "POST"),
+      recipient: reference => api("team_recipient", { band, reference }, "POST"),
+      refresh: load, status: message => { status.textContent = message; },
+    });
+    if (!staffRecord) showPages(data.has_next, index => staffingUrl(staffing, index, query));
   }
   function managePerformance(action, info) {
     return performanceAction({

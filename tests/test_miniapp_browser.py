@@ -421,6 +421,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 )
                 await browser_music_search(browser, engine, world.group.id)
                 await browser_manage_performance(browser, engine, world.group.id, origin)
+                await browser_staff_directory(browser, engine, world.group.id, origin)
                 await browser_team(browser, engine, world.group.id, origin)
                 return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
@@ -931,4 +932,56 @@ async def browser_team(browser, engine, group_id, origin):
     await browser.wait("document.querySelector('.workspace-list')?.innerText.includes('Световик')")
     assert await browser.js(
         "!document.querySelector('#workspace-content').innerText.includes('Пригласить в команду')"
+    )
+
+
+async def browser_staff_directory(browser, engine, group_id, origin):
+    await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&band={group_id}"})
+    await browser.click_named("#workspace-content a", "Постоянная команда")
+    await browser.click_named("#workspace-content a", "Знакомые исполнители")
+    await browser.click_named("#workspace-content button", "Добавить исполнителя")
+    await browser.js("""
+        document.getElementById('staff-contact-role').value = 'Гитара';
+        document.getElementById('staff-contact-account').value = '3';
+    """)
+    await browser.click_named("dialog[open] button", "Предпросмотр")
+    await browser.wait(
+        "document.querySelector('dialog[open]')?.innerText.includes('Telegram ID 3')"
+    )
+    await browser.click_named("dialog[open] button", "Сохранить")
+    await process_catalog_request(engine)
+    await browser.click_named(
+        "#workspace-content button", "Подбор на выступления · Можно приглашать"
+    )
+    await browser.js("document.getElementById('staff-contact-preference').value = 'preferred'")
+    await browser.click_named("dialog[open] button", "Сохранить")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('#workspace-content')?.innerText.includes('Предлагать первым')"
+    )
+    await browser.click_named("#workspace-content a", "Знакомые исполнители")
+    await browser.click_named("#workspace-content a", "Сохранённые составы")
+    await browser.click_named("#workspace-content button", "Создать состав")
+    await browser.js(r"""
+        document.getElementById('staff-lineup-name').value = 'Акустика';
+        document.getElementById('staff-lineup-quick').click();
+        document.getElementById('staff-lineup-paste').value = 'Гитара: 3\nВокал';
+    """)
+    await browser.click_named("dialog[open] button", "Предпросмотр")
+    await browser.wait(
+        "document.querySelector('dialog[open]')?.innerText.includes('Telegram ID 3')"
+    )
+    await browser.click_named("dialog[open] button", "Сохранить")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('#workspace-content h2')?.textContent === 'Акустика'"
+    )
+    await browser.click_named("#workspace-content button", "Редактировать состав")
+    await browser.js("document.querySelector('[data-move=down]:enabled').click()")
+    await browser.click_named("dialog[open] button", "Предпросмотр")
+    await browser.wait("document.querySelector('dialog[open] li strong')?.textContent === 'Вокал'")
+    await browser.click_named("dialog[open] button", "Сохранить")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('#workspace-content li strong')?.textContent === 'Вокал'"
     )

@@ -18,6 +18,7 @@ from sqlalchemy.exc import DBAPIError
 
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.setlists import Setlists
+from setlist_bot.application.staffing import Staffing
 from setlist_bot.application.team import Team
 from setlist_bot.domain.entities import (
     Concert,
@@ -246,6 +247,11 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
     async with PostgresUnitOfWork(engine) as uow:
         uow.store.add(DeploymentIdentity(bot_id=1110437563, environment="sandbox"))
         await Team(uow.store, world.admin).invite(world.group.id, world.stranger.id, ["Световик"])
+        staffing = Staffing(uow.store, world.admin)
+        guitar = await staffing.role(world.group.id, "Гитара")
+        lineup = await staffing.template(
+            world.group.id, "Дуэт", [{"role_id": str(guitar.id), "user_id": str(world.stranger.id)}]
+        )
     spec = importlib.util.spec_from_file_location(
         "miniapp_setup", Path(__file__).parents[1] / "scripts/setup-sandbox-miniapp.py"
     )
@@ -371,6 +377,13 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
             band = {"band": str(world.group.id)}
             team = await client.get("/miniapp/api/team", params=band, headers=headers)
             assert team.status == 200 and (await team.json())["admin"]
+            template_card = await client.get(
+                "/miniapp/api/staff_directory",
+                params={**band, "section": "lineups", "record": str(lineup.id)},
+                headers=headers,
+            )
+            assert template_card.status == 200, await template_card.text()
+            assert (await template_card.json())["lineup"]["rows"][0]["suggested"] == "3"
             guest_headers = {**headers, "Authorization": "tma " + signed(actor=3)}
             inbox = await client.get("/miniapp/api/team_inbox", headers=guest_headers)
             assert inbox.status == 200
@@ -419,7 +432,7 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 "SELECT token_ciphertext FROM calendar_subscriptions",
                 "UPDATE setlists SET approved=true",
                 "UPDATE concerts SET deleted_at=now()",
-                "SELECT slots FROM lineup_templates",
+                "UPDATE lineup_templates SET slots='[]'",
                 "UPDATE songs SET title='bad'",
                 "INSERT INTO song_aliases(id,group_id,song_id,title) "
                 "SELECT id,group_id,id,'bad' FROM songs",

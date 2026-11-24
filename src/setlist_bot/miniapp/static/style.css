@@ -121,6 +121,12 @@ main {
 .shared-tools { width: min(720px, calc(100% - 24px)); }
 .shared-tools label { display: block; margin-top: 8px; }
 .shared-tools button { margin: 2px; }
+.staff-lineup-row {
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.staff-lineup-row input { width: 100%; }
 .shared-edit-row input { max-width: 100%; }
 .shared-edit-row .toolbar { margin-top: 6px; }
 header h1 {

@@ -28,6 +28,7 @@ READ_TABLES = (
     "memberships",
     "staff_roles",
     "staff_contacts",
+    "lineup_templates",
     "concerts",
     "setlists",
     "blocks",

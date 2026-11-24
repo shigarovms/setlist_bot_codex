@@ -1,3 +1,5 @@
+import { requestDialog } from "./workspace-request-dialog.js";
+
 const copy = {
   ru: {
     title: "Постоянная команда", inbox: "Приглашения в команду", back: "К коллективу",
@@ -63,68 +65,9 @@ function button(text, handler, primary = false) {
 export function teamView({ root, language, requests, refresh, status, dateText, contactUrl, exit }) {
   const t = copy[language];
 
-  function modal(title) {
-    const dialog = el("dialog", "", { class: "shared-tools", "aria-label": title });
-    const body = el("div");
-    const message = el("p", "", { role: "status" });
-    const actions = el("div", "", { class: "toolbar" });
-    const retry = button(t.check, () => void deliver());
-    retry.hidden = true;
-    actions.append(retry, button(t.close, () => dialog.close()));
-    dialog.append(el("h2", title), body, message, actions);
-    document.body.append(dialog);
-    dialog.addEventListener("close", () => dialog.remove(), { once: true });
-    let attempt, busy = false;
-    dialog.showModal();
-
-    async function finish() {
-      dialog.close();
-      await refresh();
-      status(t.done);
-    }
-
-    async function deliver() {
-      if (!attempt || busy) return;
-      busy = true;
-      const current = attempt;
-      retry.hidden = true;
-      message.textContent = t.busy;
-      try {
-        let result = current.receipt ? await current.api("catalog_status", { request: current.receipt })
-          : await current.api("team_action", current.payload, "POST");
-        current.receipt = result.request;
-        for (let i = 0; result.status === "pending" && i < 8; i++) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          if (!dialog.open) return;
-          result = await current.api("catalog_status", { request: current.receipt });
-        }
-        if (!dialog.open || result.status === "pending") return;
-        attempt = null;
-        if (result.status === "failed") message.textContent = result.message;
-        else {
-          message.textContent = "";
-          await current.complete(result);
-        }
-      } catch (error) {
-        if (!current.receipt && error.data && !["busy", "unavailable"].includes(error.data.error)) attempt = null;
-        message.textContent = error.message;
-      } finally {
-        busy = false;
-        retry.hidden = !attempt;
-        if (!attempt) current.trigger.disabled = false;
-      }
-    }
-
-    return {
-      body, message, dialog,
-      send(trigger, payload, api = requests.group, complete = finish) {
-        if (attempt || busy) return;
-        trigger.disabled = true;
-        attempt = { trigger, api, complete, payload: { ...payload, request_id: crypto.randomUUID() } };
-        void deliver();
-      },
-    };
-  }
+  const modal = title => requestDialog({
+    title, labels: t, operation: "team_action", request: requests.group, refresh, status,
+  });
 
   function confirm({ key, label, detail, payload, api, done }) {
     const panel = modal(t[key]);

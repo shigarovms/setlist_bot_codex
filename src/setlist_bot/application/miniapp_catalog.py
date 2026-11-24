@@ -21,6 +21,7 @@ from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.application.workspace_performances import WorkspacePerformances
 from setlist_bot.application.workspace_setlists import SETLIST_SESSION, WorkspaceSetlists
+from setlist_bot.application.workspace_staffing import WorkspaceStaffing
 from setlist_bot.application.workspace_team import TEAM_SESSION, WorkspaceTeam
 from setlist_bot.domain.entities import (
     CatalogProposal,
@@ -45,6 +46,7 @@ CATALOG_OPERATIONS = {
     "export_action": "miniapp_export",
     "performance_action": "miniapp_performance",
     "team_action": "miniapp_team",
+    "staff_action": "miniapp_staff",
     "duration_save": "miniapp_duration",
 }
 
@@ -226,6 +228,9 @@ class MiniCatalog:
             expires = min(expires, now() + timedelta(minutes=15))
         elif team_command is not None:
             details = {"team": team_command}
+        elif operation == "staff_action":
+            require(concert is None, "input")
+            details = {"staff": WorkspaceStaffing.command(payload)}
         else:
             details = await self._catalog_details(group_id, payload)
         self.store.add(
@@ -411,6 +416,13 @@ class MiniCatalog:
             )
             row.command = json.dumps({**data, "status": "saved", "result": result_team})
             return result_team
+        if data["kind"] == "miniapp_staff":
+            require(concert is None and not target.shared, "miniapp_expired")
+            result_staff = await WorkspaceStaffing(self.store, self.user).apply(
+                group_id, data["staff"]
+            )
+            row.command = json.dumps({**data, "status": "saved", "result": result_staff})
+            return result_staff
         song_id = UUID(data["song_id"]) if data["song_id"] else None
         if song_id:
             require(not (await self.catalog.song(group_id, song_id)).archived, "not_found")
