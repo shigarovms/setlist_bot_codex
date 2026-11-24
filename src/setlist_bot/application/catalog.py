@@ -8,10 +8,27 @@ from setlist_bot.application.groups import Groups
 from setlist_bot.application.message_refresh import queue_card_refreshes
 from setlist_bot.application.ports import Store
 from setlist_bot.domain.entities import CatalogProposal, Membership, Song, SongAlias, User
-from setlist_bot.domain.rules import SongListError, normalize, require, search_key, validate_song
+from setlist_bot.domain.rules import (
+    SongListError,
+    clock,
+    normalize,
+    require,
+    search_key,
+    validate_song,
+)
 
 SONG_FIELDS = ("title", "duration_seconds", "bpm", "lights", "comment")
 SUPPLEMENT_FIELDS = ("bpm", "lights", "comment")
+
+
+def song_data(song: Song, aliases: list[SongAlias]) -> dict[str, Any]:
+    return {
+        "id": str(song.id),
+        "version": song.version,
+        **{key: getattr(song, key) for key in SONG_FIELDS},
+        "duration": clock(song.duration_seconds),
+        "aliases": sorted(alias.title for alias in aliases if alias.song_id == song.id),
+    }
 
 
 def missing_song_fields(song: Song, incoming: dict[str, Any]) -> dict[str, Any]:
@@ -220,8 +237,8 @@ class Catalog:
                 await self._save(group_id, data, song, aliases=aliases)
         proposal.status = "approved" if approve else "rejected"
 
-    async def search(self, group_id: UUID, query: str) -> list[Song]:
-        songs = await self.list_songs(group_id)
+    async def search(self, group_id: UUID, query: str, *, archived: bool = False) -> list[Song]:
+        songs = await self.list_songs(group_id, archived=archived)
         aliases = await self.store.find(SongAlias, group_id=group_id)
         return self._matches(songs, aliases, query)
 

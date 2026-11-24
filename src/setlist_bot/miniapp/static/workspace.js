@@ -9,6 +9,10 @@ const copy = {
     login: "Войти через Telegram", logout: "Выйти", openBot: "Открыть бота",
     loginFailed: "Не удалось войти. Попробуйте ещё раз.",
     startBot: "Откройте бота и нажмите «Старт», затем повторите вход.",
+    repertoire: "Репертуар", active: "Активные песни", archive: "Архив песен",
+    search: "Найти песню", noSongs: "В этом разделе пока нет песен.", noMatches: "Песни не найдены.",
+    toSongs: "К списку песен", duration: "Длительность", lights: "Свет", comment: "Комментарий",
+    aliases: "Альтернативные названия", archived: "В архиве",
   },
   en: {
     bands: "My bands", upcoming: "Upcoming", past: "Past",
@@ -20,6 +24,10 @@ const copy = {
     login: "Sign in with Telegram", logout: "Sign out", openBot: "Open the bot",
     loginFailed: "Could not sign in. Try again.",
     startBot: "Open the bot and press Start, then sign in again.",
+    repertoire: "Repertoire", active: "Active songs", archive: "Archived songs",
+    search: "Find a song", noSongs: "There are no songs here yet.", noMatches: "No matching songs.",
+    toSongs: "Back to song list", duration: "Duration", lights: "Lights", comment: "Notes",
+    aliases: "Alternate titles", archived: "Archived",
   },
 };
 
@@ -30,6 +38,15 @@ export function bandUrl(band, past = "0", page = 0) {
   if (band) params.set("band", band);
   if (past === "1") params.set("past", past);
   if (page) params.set("page", page);
+  return `./?${params}`;
+}
+
+function repertoireUrl(band, { archived = "0", page = 0, query = "", song = "" } = {}) {
+  const params = new URLSearchParams({ workspace: "1", band, view: "repertoire" });
+  if (archived === "1") params.set("archived", archived);
+  if (page) params.set("page", page);
+  if (query) params.set("query", query);
+  if (song) params.set("song", song);
   return `./?${params}`;
 }
 
@@ -52,6 +69,11 @@ export async function showWorkspace({ api, authenticated, backButton }) {
   const band = workspaceParams.get("band");
   const past = workspaceParams.get("past") === "1" ? "1" : "0";
   const page = Number(workspaceParams.get("page")) || 0;
+  const repertoire = band && workspaceParams.get("view") === "repertoire";
+  const song = workspaceParams.get("song") || "";
+  const archived = workspaceParams.get("archived") === "1" ? "1" : "0";
+  const query = workspaceParams.get("query") || "";
+  const repertoireList = () => repertoireUrl(band, { archived, page, query });
   let language = navigator.language.startsWith("ru") ? "ru" : "en";
   let login;
   const t = (key) => workspaceText(language, key);
@@ -100,20 +122,23 @@ export async function showWorkspace({ api, authenticated, backButton }) {
   }
   if (band) {
     backButton?.show?.();
-    backButton?.onClick?.(() => location.assign(bandUrl()));
+    backButton?.onClick?.(() => {
+      location.assign(repertoire ? (song ? repertoireList() : bandUrl(band)) : bandUrl());
+    });
   }
   async function load() {
     content.replaceChildren();
     status.textContent = t("loading");
     try {
-      const data = band
-        ? await api("performances", { band, past, page })
-        : await api("bands");
+      const data = repertoire
+        ? await api("repertoire", { band, archived, page, query, song })
+        : band ? await api("performances", { band, past, page }) : await api("bands");
       language = data.language === "en" ? "en" : "ru";
       document.documentElement.lang = language;
       title.textContent = band ? data.band : t("bands");
       status.textContent = "";
-      if (band) showPerformances(data);
+      if (repertoire) showRepertoire(data);
+      else if (band) showPerformances(data);
       else if (data.bands.length === 0) status.textContent = t("noBands");
       else {
         const list = element("ul", "", { class: "workspace-list" });
@@ -140,6 +165,7 @@ export async function showWorkspace({ api, authenticated, backButton }) {
   function showPerformances(data) {
     const nav = element("nav", "", { class: "workspace-nav" });
     nav.append(element("a", t("bands"), { href: bandUrl() }));
+    nav.append(element("a", t("repertoire"), { href: repertoireUrl(band) }));
     for (const [tab, key] of [["0", "upcoming"], ["1", "past"]]) {
       nav.append(element("a", t(key), {
         href: bandUrl(band, tab), ...(past === tab ? { "aria-current": "page" } : {}),
@@ -164,9 +190,58 @@ export async function showWorkspace({ api, authenticated, backButton }) {
     content.append(list);
     if (!data.can_edit_draft && data.performances.length)
       content.append(element("p", t("restricted")));
+    showPages(data.has_next, (index) => bandUrl(band, past, index));
+  }
+  function showRepertoire(data) {
+    const nav = element("nav", "", { class: "workspace-nav" });
+    nav.append(element("a", t("performances"), { href: bandUrl(band) }));
+    content.append(nav);
+    if (data.song) {
+      nav.append(element("a", t("toSongs"), { href: repertoireList() }));
+      content.append(element("h2", data.song.title));
+      if (data.song.archived) content.append(element("p", t("archived")));
+      const details = element("dl", "", { class: "song-details" });
+      for (const [label, value] of [
+        [t("duration"), data.song.duration], ["BPM", data.song.bpm],
+        [t("lights"), data.song.lights], [t("comment"), data.song.comment],
+        [t("aliases"), data.song.aliases.join(" · ")],
+      ]) {
+        if (value) details.append(element("dt", label), element("dd", value));
+      }
+      content.append(details);
+      return;
+    }
+    for (const [tab, key] of [["0", "active"], ["1", "archive"]]) {
+      nav.append(element("a", t(key), {
+        href: repertoireUrl(band, { archived: tab, query }),
+        ...(archived === tab ? { "aria-current": "page" } : {}),
+      }));
+    }
+    const form = element("form", "", { action: "./", method: "get", class: "workspace-search" });
+    for (const [name, value] of Object.entries({ workspace: "1", band, view: "repertoire", archived }))
+      form.append(element("input", "", { type: "hidden", name, value }));
+    form.append(
+      element("label", t("search"), { for: "repertoire-query" }),
+      element("input", "", { name: "query", type: "search", value: query, maxlength: "200", id: "repertoire-query" }),
+      element("button", t("search"), { type: "submit" }),
+    );
+    content.append(form);
+    if (!data.songs.length) status.textContent = t(query ? "noMatches" : "noSongs");
+    const list = element("ul", "", { class: "workspace-list" });
+    for (const row of data.songs) {
+      const item = element("li", "");
+      const link = element("a", row.title, { href: repertoireUrl(band, { archived, page, query, song: row.id }) });
+      link.append(element("span", row.duration, { class: "workspace-duration" }));
+      item.append(link);
+      list.append(item);
+    }
+    content.append(list);
+    showPages(data.has_next, (index) => repertoireUrl(band, { archived, page: index, query }));
+  }
+  function showPages(hasNext, href) {
     const pages = element("nav", "", { class: "workspace-nav" });
-    if (page > 0) pages.append(element("a", t("previous"), { href: bandUrl(band, past, page - 1) }));
-    if (data.has_next) pages.append(element("a", t("next"), { href: bandUrl(band, past, page + 1) }));
+    if (page > 0) pages.append(element("a", t("previous"), { href: href(page - 1) }));
+    if (hasNext) pages.append(element("a", t("next"), { href: href(page + 1) }));
     if (pages.childElementCount) content.append(pages);
   }
   let opening = false;

@@ -9,7 +9,7 @@ import json
 from typing import Any
 from uuid import UUID, uuid5
 
-from setlist_bot.application.catalog import SONG_FIELDS, Catalog
+from setlist_bot.application.catalog import SONG_FIELDS, Catalog, song_data
 from setlist_bot.application.concert_details import ConcertDetails
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.domain.entities import (
@@ -21,19 +21,9 @@ from setlist_bot.domain.entities import (
     SongAlias,
 )
 from setlist_bot.domain.performance_input import performance_seconds
-from setlist_bot.domain.rules import clock, duration, require, validate_song
+from setlist_bot.domain.rules import duration, require, validate_song
 
 CATALOG_REQUESTS = ("miniapp_catalog", "miniapp_catalog_archive", "miniapp_duration")
-
-
-def song_data(song: Song, aliases: list[SongAlias]) -> dict[str, Any]:
-    return {
-        "id": str(song.id),
-        "version": song.version,
-        **{key: getattr(song, key) for key in SONG_FIELDS},
-        "duration": clock(song.duration_seconds),
-        "aliases": sorted(alias.title for alias in aliases if alias.song_id == song.id),
-    }
 
 
 class MiniCatalog:

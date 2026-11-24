@@ -244,6 +244,24 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     "document.querySelectorAll('.workspace-list button').length === 2"
                 )
                 assert await browser.js("document.getElementById('editor').hidden")
+                await browser.js("document.querySelector('a[href*=repertoire]').click()")
+                await browser.wait("document.querySelectorAll('.workspace-list a').length === 2")
+                await browser.js("""
+                    document.getElementById('repertoire-query').value = 'Kometa';
+                    document.querySelector('.workspace-search').requestSubmit();
+                """)
+                await browser.wait("document.querySelectorAll('.workspace-list a').length === 1")
+                await browser.js("document.querySelector('.workspace-list a').click()")
+                await browser.wait(
+                    "document.querySelector('.song-details')?.innerText.includes('110')"
+                )
+                await browser.js(
+                    "Array.from(document.links)"
+                    ".find(a => a.textContent === 'К списку песен').click()"
+                )
+                await browser.wait(
+                    "document.getElementById('repertoire-query')?.value === 'Kometa'"
+                )
                 return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
             assert await browser.js(

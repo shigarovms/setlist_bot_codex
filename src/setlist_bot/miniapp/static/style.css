@@ -76,6 +76,24 @@ main {
   font-weight: 700;
   text-decoration-thickness: 2px;
 }
+.workspace-search {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+.workspace-search label { flex-basis: 100%; }
+.workspace-search input[type="search"] { flex: 1; min-width: 0; }
+.workspace-duration {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--hint);
+  font-variant-numeric: tabular-nums;
+}
+.song-details { overflow-wrap: anywhere; }
+.song-details dt { font-weight: 700; }
+.song-details dd { margin: 0 0 10px; white-space: pre-wrap; }
 header h1 {
   font-size: 23px;
   line-height: 1.2;

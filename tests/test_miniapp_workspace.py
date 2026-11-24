@@ -4,6 +4,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from test_miniapp import settings, signed
 
 from setlist_bot.application import workspace
+from setlist_bot.application.catalog import Catalog
 from setlist_bot.domain.entities import Confirmation, DeploymentIdentity, Membership, PersonalDraft
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.miniapp.app import create_app
@@ -66,3 +67,32 @@ async def test_workspace_reuses_membership_and_performance_permissions(engine, w
             )[0]
             membership.status = "left"
         assert (await client.get(state_url, headers=member)).status == 403
+
+
+async def test_repertoire_without_event_access_and_with_isolated_song_ids(engine, world):
+    async with PostgresUnitOfWork(engine) as uow:
+        uow.store.add(DeploymentIdentity(bot_id=1110437563, environment="sandbox"))
+        await Catalog(uow.store, world.admin).alias(world.group.id, world.song.id, "Вечеринки")
+    headers = {"Authorization": "tma " + signed(actor=2)}
+    endpoint = "/miniapp/api/repertoire"
+    params = {"band": str(world.group.id)}
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        response = await client.get(
+            endpoint, params=params | {"query": "Vecherinki"}, headers=headers
+        )
+        assert response.status == 200
+        songs = (await response.json())["songs"]
+        assert songs == [{"id": str(world.song.id), "title": "Комета", "duration": "03:38"}]
+        card = await client.get(endpoint, params=params | {"song": songs[0]["id"]}, headers=headers)
+        song = (await card.json())["song"]
+        assert song["aliases"] == ["Вечеринки"] and song["bpm"] == 110 and not song["archived"]
+        cross_band = params | {"song": str(world.other_song.id)}
+        assert (await client.get(endpoint, params=cross_band, headers=headers)).status == 403
+        async with PostgresUnitOfWork(engine) as uow:
+            assert not await uow.store.find(PersonalDraft)
+            catalog = Catalog(uow.store, world.admin)
+            await catalog.archive(world.group.id, world.song.id, song["version"], True)
+        active = await client.get(endpoint, params=params, headers=headers)
+        assert (await active.json())["songs"] == []
+        archive = await client.get(endpoint, params=params | {"archived": "1"}, headers=headers)
+        assert (await archive.json())["songs"] == songs

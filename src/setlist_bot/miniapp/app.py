@@ -212,6 +212,20 @@ async def api(request: web.Request) -> web.Response:
             if operation == "open_draft" and request.method == "POST":
                 editor = await service.create(UUID(payload["band"]), UUID(payload["performance"]))
                 return web.json_response({"session": str(editor.id)})
+            if operation == "repertoire" and request.method == "GET":
+                archived, page = payload.get("archived", "0"), int(payload.get("page", "0"))
+                query = payload.get("query", "").strip()
+                if archived not in ("0", "1") or not 0 <= page <= 10000 or len(query) > 200:
+                    raise ValueError("Invalid catalog options")
+                return web.json_response(
+                    await Workspace(uow.store, user).repertoire(
+                        UUID(payload["band"]),
+                        archived=archived == "1",
+                        page=page,
+                        query=query,
+                        song_id=UUID(payload["song"]) if payload.get("song") else None,
+                    )
+                )
             if operation == "launch" and request.method == "GET":
                 # RU: Цель берётся только из проверенного Telegram start_param.
                 # EN: Never authorize a target supplied through initDataUnsafe or URL alone.

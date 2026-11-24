@@ -3,11 +3,12 @@
 from typing import Any
 from uuid import UUID
 
+from setlist_bot.application.catalog import Catalog, song_data
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.domain.concerts import today
-from setlist_bot.domain.entities import Group, Membership, User
-from setlist_bot.domain.rules import AppError
+from setlist_bot.domain.entities import Group, Membership, SongAlias, User
+from setlist_bot.domain.rules import AppError, clock
 
 PAGE_SIZE = 20
 
@@ -59,5 +60,30 @@ class Workspace:
                     "city": row.city,
                 }
                 for row, _ in rows[:PAGE_SIZE]
+            ],
+        }
+
+    async def repertoire(
+        self, group_id: UUID, *, archived: bool, page: int, query: str, song_id: UUID | None
+    ) -> dict[str, Any]:
+        group = await Groups(self.store, self.user).access(group_id)
+        catalog = Catalog(self.store, self.user)
+        context = {"language": self.user.language, "band": group.name}
+        if song_id is not None:
+            song = await catalog.song(group_id, song_id)
+            aliases = await self.store.find(SongAlias, group_id=group_id, song_id=song.id)
+            return {**context, "song": {**song_data(song, aliases), "archived": song.archived}}
+        songs = (
+            await catalog.search(group_id, query, archived=archived)
+            if query
+            else await catalog.list_songs(group_id, archived=archived)
+        )
+        start = page * PAGE_SIZE
+        return {
+            **context,
+            "has_next": start + PAGE_SIZE < len(songs),
+            "songs": [
+                {"id": str(song.id), "title": song.title, "duration": clock(song.duration_seconds)}
+                for song in songs[start : start + PAGE_SIZE]
             ],
         }
