@@ -264,7 +264,11 @@ class MiniCatalog:
         else:
             require(
                 operation not in gig_operations
-                and target.shared == (operation in workspace_operations),
+                and (
+                    target.shared == (operation in workspace_operations)
+                    or operation == "shared_action"
+                    and concert is not None
+                ),
                 "input",
             )
         personal = target.membership_id is not None
@@ -318,7 +322,11 @@ class MiniCatalog:
             require(concert is None, "input")
             details = {"music": WorkspaceMusic.command(payload)}
         elif operation == "shared_action":
-            details = {"shared": WorkspaceSetlists.command(payload)}
+            shared = WorkspaceSetlists.command(payload)
+            require(target.shared or shared["action"] == "edit", "input")
+            if shared["action"] in ("edit", "apply", "decline_proposal", "decide"):
+                await self.drafts.groups.access(group_id, admin=True)
+            details = {"shared": shared}
         elif operation == "export_action":
             details = {"export": WorkspaceExports.command(payload), "bot_username": bot_username}
         elif operation == "performance_action":
@@ -620,7 +628,10 @@ class MiniCatalog:
             row.command = json.dumps({**data, "status": "saved", "result": music_result})
             return music_result
         if data["kind"] == "miniapp_shared":
-            require(target.shared and concert is not None, "miniapp_expired")
+            require(
+                concert is not None and (target.shared or data["shared"]["action"] == "edit"),
+                "miniapp_expired",
+            )
             assert concert is not None
             shared_result = await WorkspaceSetlists(self.store, self.user).apply(
                 group_id, concert.id, data["shared"]

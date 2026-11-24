@@ -53,12 +53,14 @@ def person(telegram_id: Any, display_name: str = "", username: str = "") -> str:
         return h(display_name or telegram_id)
     if identifier <= 0:
         return h(display_name or telegram_id)
-    label = display_name or ("@" + username if username else str(identifier))
-    profile = (
-        f'<a href="tg://user?id={identifier}" title="Открыть профиль Telegram">{h(label)} ↗</a>'
+    has_username = bool(username and USERNAME.fullmatch(username))
+    profile = link(
+        f"tg://user?id={identifier}",
+        display_name or (f"@{username}" if has_username else str(identifier)),
     )
-    if username and USERNAME.fullmatch(username):
-        profile += f' <small><a href="https://t.me/{h(username)}" target="_blank" rel="noopener noreferrer">@{h(username)}</a></small>'
+    if display_name and has_username:
+        handle = f'<a href="https://t.me/{h(username)}" target="_blank" rel="noopener noreferrer">@{h(username)}</a>'
+        return f"{profile} ({handle})"
     return profile
 
 

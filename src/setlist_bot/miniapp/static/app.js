@@ -8,6 +8,13 @@ const tg = telegram?.initData ? telegram : null,
 const words = withBotLabels("app", {
   ru: {
     heading: "Ваш черновик",
+    loadShared: "Взять общий сет-лист за основу", saveShared: "Сохранить сет-лист как общий",
+    loadSharedConfirm: "Заменить содержимое личного черновика текущим общим сет-листом?",
+    saveSharedConfirm: "Заменить общий сет-лист выступления этим вариантом?",
+    clearSharedConfirm: "Очистить общий сет-лист выступления?",
+    sharedSaved: "Общий сет-лист сохранён.",
+    sharedWorking: "Сохраняем общий сет-лист…", sharedCheck: "Проверить сохранение общего сет-листа",
+    sharedConflict: "Общий сет-лист изменился. Ваш вариант сохранился в черновике. Возьмите актуальный список за основу, чтобы продолжить.",
     planned: "Плановая длительность",
     plannedHint: "45 — минуты, 1:15 — час и 15 минут, - — очистить",
     plannedSaved: "Плановая длительность сохранена.",
@@ -86,6 +93,13 @@ const words = withBotLabels("app", {
   },
   en: {
     heading: "Private draft",
+    loadShared: "Start from the shared setlist", saveShared: "Save as shared setlist",
+    loadSharedConfirm: "Replace your private draft with the current shared setlist?",
+    saveSharedConfirm: "Replace the shared setlist for this performance with this version?",
+    clearSharedConfirm: "Clear the shared setlist for this performance?",
+    sharedSaved: "Shared setlist saved.",
+    sharedWorking: "Saving the shared setlist…", sharedCheck: "Check shared setlist save",
+    sharedConflict: "The shared setlist changed. Your version is saved as a draft. Start from the current shared setlist to continue.",
     planned: "Planned duration",
     plannedHint: "45 means minutes, 1:15 means 1 hour and 15 minutes, - clears the duration",
     plannedSaved: "Planned duration saved.",
@@ -176,6 +190,7 @@ let lang = "ru",
 const t = (key) => words[lang][key] ?? key;
 let session = new URLSearchParams(location.hash.slice(1)).get("session");
 const workspaceBand = workspaceParams.get("band");
+let sharedBase = null, sharedAttempt = null;
 const workspaceDraft = session && workspaceBand && workspaceParams.get("view") === "draft";
 const parentPerformance = workspaceParams.get("performance");
 function draftParentUrl() {
@@ -412,6 +427,12 @@ function render() {
   renderSaveStatus();
   $("publish").disabled =
     !!preview || !current.length || busy || !!saver?.blocked;
+  $("load-shared").hidden = !state.can_set_group_default || !!preview;
+  $("load-shared").disabled = busy || !!sharedAttempt || !!saver?.blocked;
+  $("save-shared").hidden = !!preview || ((!sharedBase || sharedBase.approved) && !sharedAttempt);
+  $("shared-editor-actions").hidden = $("load-shared").hidden && $("save-shared").hidden;
+  $("save-shared").disabled = busy || !!saver?.blocked;
+  $("save-shared").textContent = t(sharedAttempt ? "sharedCheck" : "saveShared");
   dirty()
     ? tg?.enableClosingConfirmation?.()
     : tg?.disableClosingConfirmation?.();
@@ -1126,6 +1147,71 @@ $("publish").addEventListener("click", async () => {
     render();
   }
 });
+$("load-shared").addEventListener("click", async () => {
+  if (busy || sharedAttempt || preview || !confirm(t("loadSharedConfirm"))) return;
+  busy = true;
+  render();
+  try {
+    const next = await api("draft_shared");
+    sharedBase = next;
+    busy = false;
+    change(withKeys(next.entries), next.default_pause_seconds);
+  } catch (error) {
+    status(error.message, true);
+  } finally {
+    busy = false;
+    render();
+  }
+});
+$("save-shared").addEventListener("click", async () => {
+  if (busy || preview || !saver || saver.blocked) return;
+  if (!sharedAttempt && (!sharedBase || sharedBase.approved
+    || !confirm(t(current.length ? "saveSharedConfirm" : "clearSharedConfirm")))) return;
+  busy = true;
+  saver.pause();
+  render();
+  try {
+    if (!sharedAttempt) {
+      await saver.flush();
+      sharedAttempt = { body: {
+        action: "edit", version: sharedBase.version, token: sharedBase.token,
+        entries: wire(current), default_pause_seconds: defaultPause, request_id: crypto.randomUUID(),
+      } };
+    }
+    status(t("sharedWorking"));
+    const readReceipt = () => api("catalog_status", { request: sharedAttempt.receipt });
+    let result = sharedAttempt.receipt ? await readReceipt()
+      : await api("shared_action", sharedAttempt.body, "POST");
+    sharedAttempt.receipt = result.request;
+    for (let index = 0; result.status === "pending" && index < 10; index++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      result = await readReceipt();
+    }
+    if (result.status === "pending") {
+      status(t("sharedCheck"));
+      return;
+    }
+    sharedAttempt = null;
+    if (result.status === "failed") {
+      if (["approved", "conflict"].includes(result.error)) sharedBase = null;
+      status(result.error === "conflict" ? t("sharedConflict") : result.message, true);
+      return;
+    }
+    sharedBase = result.shared;
+    status(t("sharedSaved"));
+  } catch (error) {
+    if (error.data?.latest) saveError(error);
+    else {
+      if (!sharedAttempt?.receipt && error.data && !["busy", "unavailable"].includes(error.data.error))
+        sharedAttempt = null;
+      status(error.message, true);
+    }
+  } finally {
+    busy = false;
+    saver.resume();
+    render();
+  }
+});
 $("load-latest").addEventListener("click", () => {
   if (!latest) return;
   if (dirty() && !confirm(t("replace"))) return;
@@ -1193,6 +1279,7 @@ function labels() {
     "planned-submit": "songSave",
     undo: "undo",
     "use-history": "use",
+    "load-shared": "loadShared",
     "load-latest": "loadLatest",
     "copy-own": "copy",
     "conflict-close": "continue",
@@ -1240,6 +1327,10 @@ async function boot() {
     current = withKeys(state.entries);
     defaultPause = state.default_pause_seconds;
     persistence();
+    if (state.can_set_group_default) {
+      try { sharedBase = await api("draft_shared"); }
+      catch (error) { status(error.message, true); render(); return; }
+    }
     render();
     status(t("ready"));
   } catch (error) {

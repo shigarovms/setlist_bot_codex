@@ -613,6 +613,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   function managePerformance(action, info) {
     return performanceAction({
       action, performance: info, language, dateText, request: catalogApi,
+      readOptions: () => api("performance_options", { band }),
       onDone: result => {
         const tab = result.past ? "1" : "0";
         if (action === "delete") location.assign(managedPage === null ? bandUrl(band, past) : performanceParent());

@@ -20,6 +20,7 @@ from setlist_bot.domain.entities import (
     User,
 )
 from setlist_bot.domain.rules import AppError, require
+from setlist_bot.domain.telegram_identity import fallback_profile, person_caption
 
 TEAM_SESSION = "miniapp_membership"
 PERSONAL_ACTIONS = {"respond", "leave", "leave_preview"}
@@ -31,7 +32,7 @@ def person_name(person: User, member: Membership | None = None) -> str:
         person.profile.get("name")
         or (member.musical_role if member else "")
         or person.display_name
-        or str(person.telegram_id)
+        or (f"@{person.username}" if person.username else "—")
     )
 
 
@@ -126,6 +127,10 @@ class WorkspaceTeam:
                 {
                     "id": str(row.id),
                     "name": person_name(people[row.user_id], row),
+                    "profile_url": fallback_profile(people[row.user_id]),
+                    "profile_id": str(people[row.user_id].telegram_id)
+                    if fallback_profile(people[row.user_id])
+                    else None,
                     "status": row.status,
                     "right": "owner" if row.user_id == group.owner_id else row.role,
                     "roles": sorted(
@@ -176,9 +181,9 @@ class WorkspaceTeam:
         person = await known_user(self.store, reference)
         return {
             "id": str(person.id),
-            "name": person_name(person),
+            "name": person_caption(person),
             "username": person.username,
-            "telegram_id": str(person.telegram_id),
+            "profile_url": fallback_profile(person),
         }
 
     @staticmethod

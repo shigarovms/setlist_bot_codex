@@ -380,6 +380,8 @@ table(
     col("author_id", Uuid, ForeignKey("users.id")),
     col("snapshot", JSONB),
     col("applied", Boolean),
+    col("declined", Boolean, server_default="false"),
+    CheckConstraint("NOT (applied AND declined)", name="single_decision"),
     ForeignKeyConstraint(["group_id", "concert_id"], ["concerts.group_id", "concerts.id"]),
 )
 table(

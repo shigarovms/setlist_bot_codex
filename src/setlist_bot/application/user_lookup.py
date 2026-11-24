@@ -20,7 +20,7 @@ async def known_user(store: Store, reference: str) -> User:
     username = normalized_username(value)
     rows = await store.find(User, username=username)
     # Telegram handles can be reassigned. Prefer the latest verified observation,
-    # never the first matching row; the confirmation always shows a numeric ID.
+    # never the first matching row; mutations recheck the resolved account.
     dated = [u for u in rows if u.username_seen_at is not None]
     require(bool(dated), "admin_user_unknown")
     dated.sort(key=lambda u: u.username_seen_at or datetime.min.replace(tzinfo=UTC), reverse=True)

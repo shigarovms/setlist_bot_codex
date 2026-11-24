@@ -412,6 +412,10 @@ async def api(request: web.Request) -> web.Response:
                         UUID(payload["band"]), past=past == "1", page=page
                     )
                 )
+            if operation == "performance_options" and request.method == "GET":
+                return web.json_response(
+                    await WorkspacePerformances(uow.store, user).options(UUID(payload["band"]))
+                )
             if operation == "performance" and request.method == "GET":
                 return web.json_response(
                     await Workspace(uow.store, user).performance(
@@ -524,6 +528,11 @@ async def api(request: web.Request) -> web.Response:
                 result["bot_url"] = (
                     f"https://t.me/{settings.bot_username}?start=performance_{result['concert_id']}"
                 )
+            elif request.method == "GET" and operation == "draft_shared":
+                _, _, concert = await service.load(identifier)
+                shared_lists = WorkspaceSetlists(uow.store, user)
+                await shared_lists.groups.access(concert.group_id, admin=True)
+                result = await shared_lists.editor_state(concert.group_id, concert.id)
             elif request.method == "GET" and operation == "song":
                 result = await MiniCatalog(service).read(identifier, UUID(payload["song_id"]))
             elif request.method == "POST" and operation in CATALOG_OPERATIONS:

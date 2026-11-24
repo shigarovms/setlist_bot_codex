@@ -151,7 +151,7 @@ async def test_action_notices_include_actor_and_approved_snapshot(engine, world)
         await service.approve(world.group.id, concert.id, 1)
         events = await uow.store.find(Outbox)
         assert len(events) == 3
-        assert all(e.chat_id == -900 and "Telegram ID: 1" in e.text for e in events)
+        assert all(e.chat_id == -900 and e.buttons == [["1", "tg://user?id=1"]] for e in events)
         approved = next(e.text for e in events if "Утверждён" in e.text)
         assert approved.count("Комета") == 2 and "пауза  05:00" in approved
         with pytest.raises(AppError):

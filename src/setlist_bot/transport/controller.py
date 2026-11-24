@@ -1721,9 +1721,10 @@ class Controller:
             return await self._show(context, prefer_approved=True)
         if command == "apply_submission":
             require(not self.private, "group_only")
+            await self.groups.access(group_id, admin=True)
             submitted = await self.store.get(Submission, UUID(args))
             require(submitted.group_id == group_id, "not_found")
-            require(not submitted.applied, "already_done")
+            require(not (submitted.applied or submitted.declined), "already_done")
             context.concert_id = submitted.concert_id
             _, context.observed_version, approved = await self.setlists.read(
                 group_id, submitted.concert_id
@@ -1757,6 +1758,16 @@ class Controller:
             require(submission.group_id == group_id, "not_found")
             context.concert_id = submission.concert_id
             await self._show(context)
+            can_apply = (
+                not self.private
+                and not (submission.applied or submission.declined)
+                and any(
+                    member.role == "admin"
+                    for member in await self.store.find(
+                        Membership, group_id=group_id, user_id=self.user.id, status="active"
+                    )
+                )
+            )
             response = Response(
                 render_setlist(
                     submission.snapshot,
@@ -1764,11 +1775,7 @@ class Controller:
                     self.language,
                     0,
                 ),
-                (
-                    [(self.t("submission_apply"), f"apply {submission.id}")]
-                    if not self.private
-                    else []
-                ),
+                ([(self.t("submission_apply"), f"apply {submission.id}")] if can_apply else []),
                 monospace=True,
             )
             return await self._style_setlist(

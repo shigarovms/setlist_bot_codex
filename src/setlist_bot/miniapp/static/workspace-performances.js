@@ -3,12 +3,14 @@ const copy = withBotLabels("workspace-performances", {
   ru: {
     trash: "Корзина выступлений", empty: "Корзина пуста.",
     until: "Можно восстановить до", preview: "Предпросмотр", save: "Сохранить",
+    reviewCreate: "Сверить и создать", backButton: "Назад", loadingOptions: "Загружаем варианты…",
+    other: "Другое", otherCity: "Другой город", ownType: "Укажите тип", ownCity: "Укажите город",
     back: "Изменить", cancel: "Закрыть", check: "Проверить результат", waiting: "Запрос обрабатывается…",
     date: "Дата", title: "Название", city: "Город", performance_type: "Тип", info: "Информация",
     duration: "Длительность", durationHint: "Минуты или часы:минуты:секунды",
     quick: "Ввести одной строкой", quickLabel: "Дата и данные выступления",
     quickHint: "Например: 15.12.2026  Санкт-Петербург  Фест  45 мин",
-    choose: "Выберите сохранённый состав", lineup: "Состав",
+    lineup: "Состав",
     noLineup: "Без сохранённого состава",
     dateChanged: "При изменении даты участникам нужно будет подтвердить участие заново.",
     deletePrompt: "Выступление, его сет-листы и черновики будут скрыты. Действующие приглашения отменятся. Восстановление доступно 30 дней.",
@@ -16,12 +18,14 @@ const copy = withBotLabels("workspace-performances", {
   en: {
     trash: "Performance trash", empty: "The trash is empty.",
     until: "Can be restored until", preview: "Preview", save: "Save",
+    reviewCreate: "Review and create", backButton: "Back", loadingOptions: "Loading options…",
+    other: "Other", otherCity: "Another city", ownType: "Enter a type", ownCity: "Enter a city",
     back: "Edit", cancel: "Close", check: "Check result", waiting: "Processing your request…",
     date: "Date", title: "Title", city: "City", performance_type: "Type", info: "Information",
     duration: "Duration", durationHint: "Minutes or hours:minutes:seconds",
     quick: "Enter on one line", quickLabel: "Date and performance details",
     quickHint: "For example: 15.12.2026  London  Festival  45 min",
-    choose: "Choose a saved lineup", lineup: "Lineup",
+    lineup: "Lineup",
     noLineup: "Without a saved lineup",
     dateChanged: "After changing the date, performers will need to confirm their participation again.",
     deletePrompt: "The performance, its setlists and drafts will be hidden. Active invitations will be cancelled. You can restore the performance for 30 days.",
@@ -43,7 +47,7 @@ function duration(seconds) {
     .map(value => String(value).padStart(2, "0")).join(":");
 }
 
-export function performanceAction({ language, action, request, performance, onDone, dateText }) {
+export function performanceAction({ language, action, request, readOptions, performance, onDone, dateText }) {
   const t = copy[language];
   const label = action === "restore" ? fillButtonLabel(t.restore, { name: performance.label }) : t[action];
   const button = el("button", label, { type: "button", ...(action === "create" ? { class: "primary" } : {}) });
@@ -64,17 +68,13 @@ export function performanceAction({ language, action, request, performance, onDo
     dialog.addEventListener("close", () => dialog.remove(), { once: true });
     let attempt, busy = false;
     const target = performance ? { performance: performance.id, epoch: performance.epoch, version: performance.version } : {};
-    const form = el("form");
+    const form = el("form", "", { class: "performance-form" });
     const fields = el("fieldset", "", { class: "import-fields" });
     form.append(fields);
     check.addEventListener("click", process);
     dialog.showModal();
 
-    function preview(result, retry) {
-      if (result.choose_lineup) {
-        chooseLineup(result.lineups, retry);
-        return;
-      }
+    function preview(result) {
       const details = el("dl", "", { class: "song-details" });
       for (const [field, value] of Object.entries(result.fields)) {
         if (!value) continue;
@@ -88,34 +88,52 @@ export function performanceAction({ language, action, request, performance, onDo
       if (action === "delete") body.append(el("p", t.deletePrompt));
       const confirm = el("button", t[action === "update" ? "save" : "confirm"], { type: "button", class: "primary" });
       confirm.addEventListener("click", () => begin({ action: "confirm", preview: result.request }));
-      const actions = el("div", "", { class: "toolbar" });
+      const actions = el("div", "", { class: "performance-actions" });
       actions.append(confirm);
       if (action === "create" || action === "update") {
         const back = el("button", t.back, { type: "button" });
-        back.addEventListener("click", () => body.replaceChildren(form));
+        back.addEventListener("click", () => {
+          body.replaceChildren(form);
+          close.hidden = action === "create";
+        });
         actions.append(back);
       }
       body.append(actions);
       confirm.focus();
     }
 
-    function chooseLineup(lineups, retry) {
-      const select = el("select", "", { id: "workspace-performance-lineup" });
-      for (const { id, name } of [{ id: "", name: t.choose }, ...lineups, { id: "none", name: t.noLineup }])
-        select.append(el("option", name, { value: id }));
-      const next = el("button", t.preview, { type: "button", class: "primary", disabled: "" });
-      select.addEventListener("change", () => { next.disabled = !select.value; });
-      next.addEventListener("click", () => begin({ ...retry, lineup: select.value }));
-      const back = el("button", t.back, { type: "button" });
-      back.addEventListener("click", () => body.replaceChildren(form));
-      body.replaceChildren(el("label", t.choose, { for: select.id }), select, next, back);
-      select.focus();
+    function withCustom(parent, name, options, ownLabel, otherLabel) {
+      const id = `workspace-performance-${name}`;
+      const select = el("select", "", { id });
+      select.append(el("option", "—", { value: "" }));
+      for (const [index, option] of options.entries())
+        select.append(el("option", option.label, { value: index }));
+      select.append(el("option", otherLabel, { value: "other" }));
+      const custom = el("input", "", { name, id: `${id}-custom`, maxlength: 200 });
+      const extra = el("div", "", { class: "import-fields", hidden: "" });
+      extra.append(el("label", ownLabel, { for: custom.id }), custom);
+      select.addEventListener("change", () => {
+        extra.hidden = select.value !== "other";
+        custom.required = !extra.hidden;
+        if (custom.required) custom.focus();
+      });
+      parent.append(el("label", t[name], { for: id }), select, extra);
+      return () => select.value === "other" ? custom.value : options[select.value]?.value ?? "";
     }
 
-    function showForm() {
+    function showForm(options) {
       const inputFields = el("div", "", { class: "import-fields" });
       const initial = { ...performance, duration: duration(performance?.planned_seconds), performance_type: performance?.type };
+      const choices = {};
       for (const [name, max] of [["date", 10], ["title", 200], ["city", 200], ["performance_type", 200], ["duration", 80], ["info", 2000]]) {
+        if (options && (name === "city" || name === "performance_type")) {
+          const city = name === "city";
+          const values = city ? options.cities.map(value => ({ value, label: value }))
+            : Object.entries(options.types).map(([key, value]) => ({ value, label: t[key] }));
+          choices[name] = withCustom(inputFields, name, values,
+            city ? t.ownCity : t.ownType, city ? t.otherCity : t.other);
+          continue;
+        }
         const id = `workspace-performance-${name}`;
         const attributes = { id, name, maxlength: max };
         const control = name === "info" ? el("textarea", "", { ...attributes, rows: 4 })
@@ -139,7 +157,8 @@ export function performanceAction({ language, action, request, performance, onDo
           el("small", t.quickHint, { id: "workspace-quick-hint" }));
         toggle.addEventListener("change", () => {
           inputFields.hidden = toggle.checked;
-          inputFields.querySelector("input[type=date]").required = !toggle.checked;
+          for (const input of inputFields.querySelectorAll("input, select, textarea"))
+            input.disabled = toggle.checked;
           quickFields.hidden = !toggle.checked;
           quick.required = toggle.checked;
           if (toggle.checked) quick.focus();
@@ -148,10 +167,32 @@ export function performanceAction({ language, action, request, performance, onDo
         toggleLabel.append(toggle, document.createTextNode(t.quick));
         fields.prepend(toggleLabel, quickFields);
       }
-      fields.append(el("button", t.preview, { type: "submit", class: "primary" }));
+      let lineup;
+      if (options?.lineups.length) {
+        lineup = el("select", "", { id: "workspace-performance-lineup" });
+        lineup.append(el("option", t.noLineup, { value: "" }));
+        for (const row of options.lineups) lineup.append(el("option", row.name, { value: row.id }));
+        fields.append(el("label", t.lineup, { for: lineup.id }), lineup);
+      }
+      const actions = el("div", "", { class: "performance-actions" });
+      actions.append(el("button", action === "create" ? t.reviewCreate : t.preview, { type: "submit", class: "primary" }));
+      if (action === "create") {
+        const back = el("button", t.backButton, { type: "button" });
+        back.addEventListener("click", () => dialog.close());
+        actions.append(back);
+        close.hidden = true;
+      }
+      fields.append(actions);
       form.addEventListener("submit", event => {
         event.preventDefault();
         const values = quick?.required ? { quick: quick.value } : Object.fromEntries(new FormData(form));
+        if (action === "create") {
+          if (!quick.required) {
+            values.city = choices.city();
+            values.performance_type = choices.performance_type();
+          }
+          values.lineup = lineup?.value || (quick.required ? "named" : "none");
+        }
         begin({ action, ...target, ...values });
       });
       body.replaceChildren(form);
@@ -159,6 +200,7 @@ export function performanceAction({ language, action, request, performance, onDo
     }
 
     function enableBody(enabled) {
+      close.hidden = enabled && action === "create" && body.contains(form);
       fields.disabled = !enabled;
       for (const control of body.querySelectorAll("button, select")) {
         if (!enabled) {
@@ -202,7 +244,7 @@ export function performanceAction({ language, action, request, performance, onDo
           await onDone(result);
         } else {
           enableBody(true);
-          preview(result, payload);
+          preview(result);
         }
       } catch (error) {
         if (!attempt?.receipt && error.data && !["busy", "unavailable"].includes(error.data.error)) attempt = null;
@@ -214,7 +256,14 @@ export function performanceAction({ language, action, request, performance, onDo
       }
     }
 
-    if (action === "create" || action === "update") showForm();
+    if (action === "create") {
+      message.textContent = t.loadingOptions;
+      readOptions().then(options => {
+        if (!dialog.open) return;
+        message.textContent = "";
+        showForm(options);
+      }).catch(error => { message.textContent = error.message; });
+    } else if (action === "update") showForm();
     else begin({ action, ...target });
   }
 }

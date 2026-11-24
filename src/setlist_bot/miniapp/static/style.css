@@ -118,6 +118,9 @@ main {
 .import-fields textarea { width: 100%; }
 .import-fields fieldset { max-width: 100%; }
 .import-fields select, .import-fields label { display: block; max-width: 100%; }
+.performance-actions, .performance-actions button { width: 100%; }
+.performance-actions { display: grid; gap: 6px; }
+.performance-form .import-fields, .performance-form select { width: 100%; }
 .music-track { display: flex; gap: 8px; align-items: center; min-height: 44px; }
 .music-track .workspace-duration { flex-shrink: 0; }
 .performance-info { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -139,8 +142,16 @@ main {
   border-radius: 8px;
 }
 .staff-lineup-row input { width: 100%; }
-.shared-edit-row input { max-width: 100%; }
-.shared-edit-row .toolbar { margin-top: 6px; }
+a.profile-link, #workspace-home a.profile-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 12px;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  color: var(--text);
+  background: var(--panel);
+}
 header h1 {
   font-size: 23px;
   line-height: 1.2;
@@ -182,8 +193,21 @@ p {
   font-weight: 400;
 }
 button,
-input {
+input,
+select {
   font: inherit;
+}
+select {
+  min-block-size: 44px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--panel);
+  color: var(--text);
+  line-height: 1.25;
+  text-overflow: ellipsis;
 }
 button {
   appearance: none;
@@ -207,6 +231,7 @@ button:disabled {
 }
 button:focus-visible,
 a:focus-visible,
+select:focus-visible,
 input:focus-visible {
   outline: 3px solid var(--button);
   outline-offset: 2px;

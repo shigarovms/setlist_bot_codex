@@ -3,7 +3,7 @@
 TEXTS = {
     "ru": {
         "admin_user_unknown": "Пользователь не найден. Попросите его открыть бота и отправить /start, затем подтвердите его участие в коллективе.",
-        "admin_user_ambiguous": "Ник неоднозначен. Используйте Telegram ID выбранного человека.",
+        "admin_user_ambiguous": "Ник неоднозначен. Попросите исполнителя открыть бота и отправить /start.",
         "welcome": "1. Загрузите репертуар. /new_band — зарегистрируйте коллектив, бот найдет песни в интернете, вы подтвердите добавление. Участникам — /register.\n\n2. Запланируйте выступление одной строкой через /concerts. Подключите расписание к Apple или Google — /calendar.\n\n3. Соберите сет-лист с нуля или на основе прошлого: песни, паузы, расчёт времени и PDF для печати после утверждения.\n\n📅 /concerts — все выступления\n❓ /help · Поддержка — /support",
         "connect_band": "🎸 Подключить коллектив",
         "added_welcome": "🎵 Помогу вашему коллективу собирать сет-листы, считать время выступления и готовить PDF для печати.\n\nНачнём с регистрации коллектива: отправьте /new_band или нажмите кнопку ниже.\nНачать регистрацию может любой участник. Если вы не владелец чата, он подтвердит подключение и назначит вас администратором коллектива.\n\nКак всё устроено — /start · Помощь — /help",
@@ -47,7 +47,7 @@ TEXTS = {
     },
     "en": {
         "admin_user_unknown": "User not found. Ask them to send /start to the bot, then approve their group membership.",
-        "admin_user_ambiguous": "Ambiguous username. Use the person's Telegram ID.",
+        "admin_user_ambiguous": "Ambiguous username. Ask the performer to open the bot and send /start.",
         "welcome": "1. Load your repertoire. Register your band with /new_band. The bot finds songs online; you confirm what to add. Members join with /register.\n\n2. Plan a performance in one line through /concerts. Connect your schedule to Apple or Google with /calendar.\n\n3. Build a setlist from scratch or adapt a previous one: songs, pauses, calculated duration and a printable PDF after approval.\n\n📅 /concerts — all performances\n❓ /help · Support — /support",
         "connect_band": "🎸 Connect your band",
         "added_welcome": "🎵 I help bands build setlists, calculate playing time and prepare printable PDFs.\n\nRegister your band with /new_band or press the button below.\nAny chat member can start. If you are not the chat owner, the owner will confirm registration and appoint you as a band administrator.\n\nGetting started — /start · Help — /help",

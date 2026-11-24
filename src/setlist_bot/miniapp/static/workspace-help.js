@@ -5,7 +5,7 @@ const words = withBotLabels("workspace-help", {
   ru: {
     title: "Справка и поддержка", commands: "Команды Telegram",
     prompt: "Опишите, что вы хотели сделать и что произошло.",
-    routing: "В поддержку уйдут текст обращения, ваше имя и Telegram ID. Ответ придёт в личный чат с ботом.",
+    routing: "В поддержку уйдут текст обращения и ваш профиль Telegram. Ответ придёт в личный чат с ботом.",
     message: "Текст обращения", send: "Отправить обращение", empty: "Введите текст обращения.",
     check: "Проверить результат", close: "Закрыть",
     busy: "Сохраняем обращение…", done: "Обращение принято. Ответ придёт в личный чат с ботом.",
@@ -13,7 +13,7 @@ const words = withBotLabels("workspace-help", {
   en: {
     title: "Help and support", commands: "Telegram commands",
     prompt: "Describe what you were trying to do and what happened.",
-    routing: "Support receives your message, name and Telegram ID. The bot will reply in your private chat.",
+    routing: "Support receives your message and Telegram profile. The bot will reply in your private chat.",
     message: "Your message", send: "Send request", empty: "Enter a message.",
     check: "Check result", close: "Close", busy: "Submitting your request…",
     done: "Request accepted. The bot will reply in your private chat.",

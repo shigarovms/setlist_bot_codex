@@ -11,7 +11,7 @@ from test_telegram import FakeTelegram
 from test_workspace_shared_setlist import setup_workspace
 
 from setlist_bot.application.staffing import Staffing
-from setlist_bot.domain.entities import GigInvitation, GigSlot, Outbox
+from setlist_bot.domain.entities import GigInvitation, GigSlot, Outbox, User
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.main import deliver_one_outbox
 from setlist_bot.miniapp.app import create_app
@@ -48,6 +48,34 @@ async def prepare_two(client, engine, session, query):
     return await get(client, 1, "performance_roster", **query)
 
 
+async def test_roster_captions_only_link_numeric_fallback_when_no_name_or_handle(engine, world):
+    await setup_workspace(engine, world)
+    async with PostgresUnitOfWork(engine) as uow:
+        member = await uow.store.get(User, world.member.id)
+        member.profile = {"name": "Сценическое имя"}
+        member.username = "stage_name"
+        guest = await uow.store.get(User, world.stranger.id)
+        guest.display_name = "Имя гостя"
+        guest.username = "guest"
+    query = scope(world)
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        preview = await post(
+            client,
+            1,
+            "staff_lineup_preview",
+            {
+                "band": query["band"],
+                "name": "Состав",
+                "quick": "Вокал: 2\nГитара: 3\nСвет: 1",
+            },
+        )
+        assert [(row["name"], row["profile_url"]) for row in preview["rows"]] == [
+            ("Сценическое имя (@stage_name)", None),
+            ("@guest", None),
+            ("1", "tg://user?id=1"),
+        ]
+
+
 async def test_review_rechecks_availability_requires_confirmation_and_sends_atomically(
     engine, world
 ):
@@ -79,6 +107,7 @@ async def test_review_rechecks_availability_requires_confirmation_and_sends_atom
         assert preview["review"][0] == {
             "role": "Гитара",
             "person": "2",
+            "profile_url": "tg://user?id=2",
             "self": False,
             "status": "busy",
         }

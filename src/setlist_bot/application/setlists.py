@@ -17,6 +17,7 @@ from uuid import UUID
 from setlist_bot.application.activity import record_activity
 from setlist_bot.application.catalog import Catalog
 from setlist_bot.application.groups import Groups
+from setlist_bot.application.message_refresh import queue_card_refreshes
 from setlist_bot.application.ports import Store
 from setlist_bot.application.support import Support
 from setlist_bot.domain.display import entry_labels
@@ -26,6 +27,7 @@ from setlist_bot.domain.entities import (
     Group,
     Item,
     Membership,
+    Outbox,
     PersonalDraft,
     Revision,
     Setlist,
@@ -511,11 +513,17 @@ class Setlists:
         await self.groups.can_suggest(group_id)
         setlist = await self.load(group_id, concert_id)
         draft = await self._draft(setlist)
+        snapshot = await self._snapshot(group_id, draft.content)
+        member = (await self.store.find(Membership, group_id=group_id, user_id=self.user.id))[0]
         submission = Submission(
             group_id=group_id,
             concert_id=concert_id,
             author_id=self.user.id,
-            snapshot=await self._snapshot(group_id, draft.content),
+            snapshot={
+                **snapshot,
+                "shared_version": setlist.version,
+                "review_required": member.role != "admin",
+            },
         )
         self.store.add(submission)
         from setlist_bot.application.ux import milestone
@@ -526,15 +534,12 @@ class Setlists:
     async def apply(
         self, group_id: UUID, concert_id: UUID, submission_id: UUID, expected: int
     ) -> None:
-        await self.groups.can_suggest(group_id)
+        group = await self.groups.access(group_id, admin=True)
         setlist = await self.load(group_id, concert_id)
         require(not setlist.approved, "approved")
         require(setlist.version == expected, "conflict")
-        submission = await self.store.get(Submission, submission_id)
-        require(
-            submission.group_id == group_id and submission.concert_id == concert_id, "not_found"
-        )
-        require(not submission.applied, "already_done")
+        submission = await self.pending_proposal(group_id, concert_id, submission_id)
+        require(submission.snapshot.get("shared_version") in (None, expected), "conflict")
         for block in submission.snapshot["blocks"]:
             for item in block["items"]:
                 if is_pause(item):
@@ -549,3 +554,50 @@ class Setlists:
             setlist, "proposal_applied", submission.snapshot, proposer_id=submission.author_id
         )
         submission.applied = True
+        await self.proposal_notice(group, submission)
+        await queue_card_refreshes(self.store, group_id, concert_id)
+
+    async def pending_proposal(
+        self, group_id: UUID, concert_id: UUID, submission_id: UUID
+    ) -> Submission:
+        submission = await self.store.get(Submission, submission_id)
+        require(
+            submission.group_id == group_id and submission.concert_id == concert_id, "not_found"
+        )
+        require(not (submission.applied or submission.declined), "already_done")
+        return submission
+
+    async def decline(self, group_id: UUID, concert_id: UUID, submission_id: UUID) -> None:
+        group = await self.groups.access(group_id, admin=True)
+        await self.load(group_id, concert_id)
+        submission = await self.pending_proposal(group_id, concert_id, submission_id)
+        submission.declined = True
+        await self.proposal_notice(group, submission)
+
+    async def proposal_notice(self, group: Group, proposal: Submission) -> None:
+        if proposal.author_id == self.user.id:
+            return
+        from setlist_bot.domain.concerts import concert_label
+
+        author = await self.store.get(User, proposal.author_id)
+        concert = await self.store.get(Concert, proposal.concert_id)
+        if author.language == "en":
+            result = (
+                "Your setlist proposal was applied."
+                if proposal.applied
+                else "Your setlist proposal was declined."
+            )
+        else:
+            result = (
+                "Ваш вариант сет-листа применён."
+                if proposal.applied
+                else "Ваш вариант сет-листа отклонён."
+            )
+        self.store.add(
+            Outbox(
+                chat_id=author.telegram_id,
+                group_id=group.id,
+                concert_id=concert.id,
+                text=f"{group.name} · {concert_label(concert, author.language)}\n\n{result}",
+            )
+        )

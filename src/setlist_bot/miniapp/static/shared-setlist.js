@@ -1,16 +1,10 @@
 import { withBotLabels } from "./bot-labels.js";
-import { asText, clock, move, numbered, total, wire } from "./model.js";
+import { clock, numbered } from "./model.js";
 import { mountPdfExport, pdfTitle } from "./workspace-export.js";
 
 const copy = withBotLabels("shared-setlist", {
   ru: {
-    edit: "Редактировать общий сет-лист", save: "Сохранить общий список", close: "Закрыть",
-    note: "Сохранённые изменения увидит весь коллектив.", discard: "Закрыть без сохранения общего списка?",
-    clear: "Сохранить общий список пустым?", empty: "Список пуст.", total: "Итого",
-    gap: "Средняя пауза, сек.", pause: "Пауза", seconds: "Длительность паузы, сек.", caption: "Подпись паузы",
-    repertoire: "Найти песню", unavailable: "Песня недоступна. Уберите её, чтобы сохранить список.",
-    remove: "Удалить", add: "Добавить", limit: "В списке может быть не больше 200 позиций.",
-    invalid: "Проверьте длительности пауз и среднюю паузу.",
+    close: "Закрыть", pause: "Пауза",
     noVariants: "Сохранённых вариантов пока нет.", submitted: "Предложение", version: "Версия",
     history: "История", revisionActions: { created: "Создан", approved: "Утверждён", reopened: "Возвращён в работу", restored: "Восстановлен", proposal_applied: "Применён вариант" }, edited: "Изменён",
     applied: "Применено", stale: "Общий список изменился после публикации.", preview: "Показать вариант",
@@ -19,19 +13,15 @@ const copy = withBotLabels("shared-setlist", {
     askReopen: "Запросить возврат в работу",
     requested: "Запрос поставлен в очередь на отправку администратору в Telegram.", duplicate: "Такой запрос уже ожидает решения.",
     requests: "Входящие запросы", noRequests: "Нет запросов на рассмотрении.",
+    setlistProposal: "Предложение сет-листа", declined: "Отклонено",
+    proposalApplied: "Предложение применено.", proposalDeclined: "Предложение отклонено.",
+    approvedProposal: "Чтобы применить вариант, сначала верните общий сет-лист в работу.",
     accepted: "Запрос принят.", rejected: "Запрос отклонён.",
     done: "Общий сет-лист обновлён.", working: "Запрос обрабатывается…", check: "Проверить результат",
-    newState: "Открыть актуальную версию", copyOrder: "Скопировать мой порядок", copied: "Порядок скопирован.",
     previous: "Назад", next: "Дальше",
   },
   en: {
-    edit: "Edit shared setlist", save: "Save shared setlist", close: "Close",
-    note: "Saved changes are visible to the whole band.", discard: "Close without saving changes to the shared setlist?",
-    clear: "Save the shared setlist as empty?", empty: "The setlist is empty.", total: "Total",
-    gap: "Average pause, sec.", pause: "Pause", seconds: "Pause duration, sec.", caption: "Pause label",
-    repertoire: "Find a song", unavailable: "This song is unavailable. Remove it to save the setlist.",
-    remove: "Remove", add: "Add", limit: "A setlist can contain up to 200 entries.",
-    invalid: "Check the values for pauses and average pause.",
+    close: "Close", pause: "Pause",
     noVariants: "There are no saved versions or proposals.", submitted: "Proposal", version: "Version",
     history: "History", revisionActions: { created: "Created", approved: "Approved", reopened: "Reopened", restored: "Restored", proposal_applied: "Proposal applied" }, edited: "Edited",
     applied: "Applied", stale: "The shared list has changed since publication.", preview: "View version",
@@ -40,9 +30,11 @@ const copy = withBotLabels("shared-setlist", {
     askReopen: "Request reopening",
     requested: "The request is queued for delivery to an admin in Telegram.", duplicate: "This request is already awaiting a decision.",
     requests: "Incoming requests", noRequests: "There are no requests awaiting a decision.",
+    setlistProposal: "Setlist proposal", declined: "Declined",
+    proposalApplied: "Proposal applied.", proposalDeclined: "Proposal declined.",
+    approvedProposal: "Reopen the shared setlist before applying this proposal.",
     accepted: "Request accepted.", rejected: "Request declined.",
     done: "Shared setlist updated.", working: "Processing your request…", check: "Check result",
-    newState: "Open the latest version", copyOrder: "Copy my order", copied: "Order copied.",
     previous: "Previous", next: "Next",
   },
 });
@@ -71,12 +63,11 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
   const content = el("div", "");
   const check = button(t.check, () => process(), { hidden: "" });
   const dialogCheck = button(t.check, () => process(), { hidden: "" });
-  let attempt = null, working = false, dirty = () => false;
+  let attempt = null, working = false;
   const close = button(t.close, closeDialog);
   dialog.append(heading, message, content, toolbar, dialogCheck, close);
   root.append(actions, check, dialog);
 
-  if (data.can_edit_draft && !shared.approved) actions.append(button(t.edit, () => openEditor()));
   if (shared.approved) actions.append(button(pdfTitle(language), () => openExport(shared.version)));
   actions.append(button(t.variants, () => openVariants()));
   actions.append(button(t.history, () => openVariants(0, true)));
@@ -90,24 +81,17 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
   }
 
   function closeDialog() {
-    if (attempt || working || (dirty() && !confirm(t.discard))) return;
-    dirty = () => false;
+    if (attempt || working) return;
     dialog.close();
   }
   dialog.addEventListener("cancel", event => { event.preventDefault(); closeDialog(); });
-  const warnBeforeLeaving = event => { if (dialog.open && dirty()) event.preventDefault(); };
-  dialog.addEventListener("close", () => window.removeEventListener("beforeunload", warnBeforeLeaving));
 
   function open(title) {
-    dirty = () => false;
     heading.textContent = title;
     message.textContent = "";
     content.replaceChildren();
     toolbar.replaceChildren();
-    if (!dialog.open) {
-      dialog.showModal();
-      window.addEventListener("beforeunload", warnBeforeLeaving);
-    }
+    if (!dialog.open) dialog.showModal();
   }
 
   async function openVariants(page = 0, history = false) {
@@ -129,7 +113,8 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
           const label = t.revisionActions[row.action] ?? t.edited;
           item.append(el("p", `${label} · ${time}`));
         }
-        if (row.applied || row.stale) item.append(el("p", row.applied ? t.applied : t.stale));
+        if (row.applied || row.declined || row.stale)
+          item.append(el("p", row.applied ? t.applied : row.declined ? t.declined : t.stale));
         list.append(item);
       }
       content.append(list);
@@ -145,7 +130,7 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
     try {
       const result = await read("shared_requests");
       if (!dialog.open) return;
-      message.textContent = result.requests.length ? "" : t.noRequests;
+      message.textContent = result.requests.length || result.proposals.length ? "" : t.noRequests;
       const list = el("ul", "", { class: "workspace-list" });
       for (const row of result.requests) {
         const item = el("li", "");
@@ -157,17 +142,24 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
           }), button(t.reject, () => submit("decide", shared, { request: row.id, accept: false })));
         list.append(item);
       }
+      for (const row of result.proposals) {
+        const item = el("li", "");
+        item.append(el("p", `${t.setlistProposal} · ${row.author} · ${clock(row.seconds)}`),
+          button(t.preview, () => openVariant({ ...row, kind: "submission" }, 0, false, true)));
+        list.append(item);
+      }
       content.append(list);
     } catch (error) { message.textContent = error.message; }
   }
 
-  async function openVariant(row, page, history) {
-    open(row.kind === "submission" ? `${t.submitted} · ${row.author}` : `${t.version} ${row.number}`);
+  async function openVariant(row, page, history, inbox = false) {
+    open(row.kind === "submission" ? `${t[inbox ? "setlistProposal" : "submitted"]} · ${row.author}` : `${t.version} ${row.number}`);
     message.textContent = t.working;
     try {
       const result = await read("shared_variant", { kind: row.kind, variant: row.id });
       if (!dialog.open) return;
-      message.textContent = row.applied ? t.applied : row.stale ? t.stale : "";
+      message.textContent = row.applied ? t.applied : row.declined ? t.declined
+        : row.stale ? t.stale : inbox && shared.approved ? t.approvedProposal : "";
       const list = el("ol", "", { class: "workspace-list shared-setlist" });
       const numbers = numbered(result.entries);
       for (const [index, entry] of result.entries.entries()) {
@@ -177,14 +169,16 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
         list.append(item);
       }
       content.append(list);
-      toolbar.append(button(t.previous, () => openVariants(page, history)));
+      toolbar.append(button(t.previous, () => inbox ? openRequests() : openVariants(page, history)));
       if (row.action === "approved" && result.entries.length)
         toolbar.append(button(pdfTitle(language), () => openExport(row.number, row.id)));
-      if (data.can_edit_draft && !shared.approved && !row.applied && !row.stale && row.number !== shared.version) {
+      const mayApply = row.kind === "submission" ? data.admin : data.can_edit_draft;
+      if (mayApply && !shared.approved && !row.applied && !row.declined && !row.stale && row.number !== shared.version) {
         toolbar.append(button(row.kind === "submission" ? t.apply : t.restore, () => {
           if (confirm(t.replace)) void submit(row.kind === "submission" ? "apply" : "restore", shared, { variant: row.id });
         }, { class: "primary" }));
       }
+      if (inbox) toolbar.append(button(t.reject, () => submit("decline_proposal", shared, { variant: row.id })));
     } catch (error) { message.textContent = error.message; }
   }
 
@@ -198,105 +192,6 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
       message.textContent = "";
       mountPdfExport({ root: content, dialog, message, options, language, version, revision, request });
     } catch (error) { message.textContent = error.message; }
-  }
-
-  async function openEditor() {
-    if (attempt) return;
-    open(t.edit);
-    message.textContent = t.working;
-    try {
-      const state = await read("shared_editor");
-      if (!dialog.open) return;
-      message.textContent = "";
-      paintEditor(state);
-    } catch (error) { message.textContent = error.message; }
-  }
-
-  function paintEditor(state) {
-    let entries = state.entries;
-    const catalog = new Set(state.catalog.map(song => song.id));
-    const initial = JSON.stringify([wire(entries), state.default_pause_seconds]);
-    const duration = el("strong", "", { "aria-live": "polite" });
-    const gap = el("input", "", { id: "shared-gap", type: "number", min: 0, max: 86400, value: state.default_pause_seconds, required: "" });
-    const list = el("ol", "", { class: "workspace-list" });
-    const search = el("input", "", { id: "shared-song-search", type: "search" });
-    const matches = el("div", "", { class: "toolbar" });
-    const more = el("div", "", { class: "workspace-nav" });
-    let songPage = 0;
-    dirty = () => JSON.stringify([wire(entries), gap.valueAsNumber]) !== initial;
-    content.append(el("p", t.note), duration,
-      el("label", t.gap, { for: gap.id }), gap,
-      button(t.addPause, () => addEntry({ kind: "pause", duration_seconds: 60 })),
-      el("label", t.repertoire, { for: search.id }), search, matches, more, list);
-    toolbar.append(button(t.save, () => {
-      if (!gap.checkValidity() || !entries.every(row => row.kind === "song" || Number.isInteger(row.duration_seconds)
-          && row.duration_seconds > 0 && row.duration_seconds <= 86400)) {
-        message.textContent = t.invalid;
-        return;
-      }
-      if (!entries.length && !confirm(t.clear)) return;
-      void submit("edit", state, { entries: wire(entries), default_pause_seconds: gap.valueAsNumber });
-    }, { class: "primary" }));
-    toolbar.append(button(t.copyOrder, async () => {
-      try { await navigator.clipboard.writeText(asText(entries)); message.textContent = t.copied; }
-      catch { message.textContent = asText(entries); }
-    }));
-    toolbar.append(button(t.newState, () => {
-      if (!dirty() || confirm(t.discard)) void openEditor();
-    }));
-
-    function timer() {
-      const valid = entries.every(row => Number.isInteger(row.duration_seconds) && row.duration_seconds > 0);
-      duration.textContent = `${t.total} ${valid ? clock(total(entries, gap.valueAsNumber || 0)) : "—"}`;
-    }
-    function addEntry(entry) {
-      if (entries.length >= 200) { message.textContent = t.limit; return; }
-      entries = [...entries, entry];
-      draw();
-    }
-    function songs() {
-      const query = search.value.toLocaleLowerCase().replaceAll("ё", "е").trim();
-      const rows = state.catalog.filter(song => song.title.toLocaleLowerCase().replaceAll("ё", "е").includes(query));
-      matches.replaceChildren(...rows.slice(songPage * 12, songPage * 12 + 12).map(song =>
-        button(`${t.add} · ${song.title}`, () => addEntry({ ...song, song_id: song.id, kind: "song", pause_before: null }))));
-      more.replaceChildren();
-      if (songPage) more.append(button(t.previous, () => { songPage--; songs(); }));
-      if (rows.length > (songPage + 1) * 12) more.append(button(t.next, () => { songPage++; songs(); }));
-    }
-    function draw(focusIndex = null, moveDirection = null) {
-      const numbers = numbered(entries);
-      list.replaceChildren();
-      if (!entries.length) list.append(el("li", t.empty));
-      for (const [index, entry] of entries.entries()) {
-        const item = el("li", "", { class: "shared-edit-row" });
-        if (entry.kind === "pause") {
-          const caption = el("input", "", { value: entry.pause_label ?? "", maxlength: 1000, placeholder: t.pause, "aria-label": t.caption });
-          caption.addEventListener("input", () => { entry.pause_label = caption.value; });
-          const seconds = el("input", "", { type: "number", value: entry.duration_seconds, min: 1, max: 86400, required: "", "aria-label": t.seconds });
-          seconds.addEventListener("input", () => { entry.duration_seconds = seconds.valueAsNumber; timer(); });
-          item.append(caption, seconds);
-        } else {
-          item.append(el("p", `${numbers[index]}. ${entry.title} · ${clock(entry.duration_seconds)}`));
-          if (!catalog.has(entry.song_id)) item.append(el("p", t.unavailable));
-        }
-        const buttons = el("div", "", { class: "toolbar" });
-        for (const [label, step] of [[t.up, -1], [t.down, 1]]) {
-          const control = button(label, () => { entries = move(entries, index, index + step); draw(index + step, step); });
-          control.disabled = index + step < 0 || index + step >= entries.length;
-          buttons.append(control);
-          if (focusIndex === index && moveDirection === step) {
-            queueMicrotask(() => (control.disabled ? buttons.querySelector("button:not(:disabled)") : control)?.focus());
-          }
-        }
-        buttons.append(button(t.remove, () => { entries = entries.filter((_, i) => i !== index); draw(); }));
-        item.append(buttons);
-        list.append(item);
-      }
-      timer();
-    }
-    gap.addEventListener("input", timer);
-    search.addEventListener("input", () => { songPage = 0; songs(); });
-    songs(); draw();
   }
 
   async function submit(action, base, values = {}) {
@@ -323,10 +218,11 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
       if (result.status === "pending") return;
       attempt = null;
       if (result.status === "failed") { tell(result.message); return; }
-      dirty = () => false;
-      dialog.close();
+        dialog.close();
       await refresh();
-      status(result.requested ? (result.duplicate ? t.duplicate : t.requested)
+      status(result.proposal_decision === "applied" ? t.proposalApplied
+        : result.proposal_decision === "declined" ? t.proposalDeclined
+        : result.requested ? (result.duplicate ? t.duplicate : t.requested)
         : result.decision === true ? t.accepted : result.decision === false ? t.rejected : t.done);
     } catch (error) {
       if (!attempt?.receipt && error.data && !["busy", "unavailable"].includes(error.data.error)) attempt = null;

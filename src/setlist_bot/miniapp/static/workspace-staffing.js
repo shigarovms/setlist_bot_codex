@@ -7,7 +7,8 @@ const words = withBotLabels("workspace-staffing", {
     editLineup: "Редактировать состав",
     emptyContacts: "Знакомых исполнителей пока нет.", emptyLineups: "Сохранённых составов пока нет.",
     noMatches: "Совпадений нет.", search: "Поиск", name: "Название состава", role: "Роль",
-    reference: "Telegram ID или @username", optional: "Исполнитель (по желанию)",
+    reference: "@username", optional: "Исполнитель (по желанию)",
+    clearPerson: "Убрать исполнителя",
     roles: "Роли", noPerson: "Свободная роль", suggested: "Автоподбор", chosen: "Запасной исполнитель",
     preference: "Подбор на выступления", experience: "Выступлений", alreadyPermanent: "Исполнитель уже в постоянной команде.",
     city: "Город", substitutions: "Подмены", travel: "Выезды", about: "О себе", yes: "Да", no: "Нет",
@@ -21,7 +22,8 @@ const words = withBotLabels("workspace-staffing", {
     editLineup: "Edit lineup",
     emptyContacts: "No known performers yet.", emptyLineups: "No saved lineups yet.",
     noMatches: "No matches.", search: "Search", name: "Lineup name", role: "Role",
-    reference: "Telegram ID or @username", optional: "Performer (optional)",
+    reference: "@username", optional: "Performer (optional)",
+    clearPerson: "Clear performer",
     roles: "Roles", noPerson: "Open role", suggested: "Suggested performer", chosen: "Fallback performer",
     preference: "Performance suggestions", experience: "Performances", alreadyPermanent: "This performer is already on the permanent team.",
     city: "City", substitutions: "Substitutions", travel: "Travel", about: "About", yes: "Yes", no: "No",
@@ -39,6 +41,12 @@ function el(tag, label = "", attrs = {}) {
   node.textContent = label;
   for (const [name, value] of Object.entries(attrs)) node.setAttribute(name, value);
   return node;
+}
+
+export function performerCaption(row) {
+  return row.profile_url
+    ? el("a", row.profile_id ?? row.name, { class: "profile-link", href: row.profile_url })
+    : el("span", row.name);
 }
 
 function button(label, handler, primary = false, attrs = {}) {
@@ -80,10 +88,20 @@ function lineupRows(rows, t, previewMode = false) {
     const item = el("li");
     item.append(el("strong", row.role));
     if (previewMode) {
-      item.append(el("p", row.name ? `${row.name} · Telegram ID ${row.telegram_id}` : t.noPerson));
+      const person = el("p", row.name ? "" : t.noPerson);
+      if (row.name) person.append(performerCaption(row));
+      item.append(person);
     } else {
-      item.append(el("p", row.suggested ? `${t.suggested} · ${row.suggested}` : t.noPerson));
-      if (row.name && row.name !== row.suggested) item.append(el("p", `${t.chosen} · ${row.name}`));
+      const suggested = el("p", row.suggested ? `${t.suggested} · ` : t.noPerson);
+      if (row.suggested) suggested.append(performerCaption({
+        name: row.suggested, profile_url: row.suggested_profile_url,
+      }));
+      item.append(suggested);
+      if (row.name && row.name !== row.suggested) {
+        const chosen = el("p", `${t.chosen} · `);
+        chosen.append(performerCaption(row));
+        item.append(chosen);
+      }
     }
     list.append(item);
   }
@@ -106,10 +124,11 @@ export function mountLineupForm({ panel, language, preview, onSave, initial, all
   const submit = el("button", t.preview, { type: "submit", class: "primary" });
   const add = button(t.add, () => addRow().focus());
   let serial = 0;
+  const references = new WeakMap();
   function sync() {
     const items = [...rows.children];
     items.forEach((row, index) => {
-      if (single) return;
+      if (single || !showName) return;
       row.querySelector("[data-move=up]").disabled = index === 0;
       row.querySelector("[data-move=down]").disabled = index === items.length - 1;
     });
@@ -120,17 +139,31 @@ export function mountLineupForm({ panel, language, preview, onSave, initial, all
     const index = serial++;
     const item = el("fieldset", "", { class: "staff-lineup-row import-fields" });
     const role = field(item, t.role, `staff-lineup-role-${index}`, { maxlength: "100", required: "", "data-role": "" });
+    const caption = saved.name ? performerCaption(saved) : null;
+    if (caption) item.append(caption);
     const person = field(item, t.optional, `staff-lineup-person-${index}`, {
       maxlength: "64", placeholder: t.reference, "data-reference": "",
     });
     role.value = saved.role || "";
-    person.value = saved.reference || "";
+    references.set(person, saved.reference || "");
     const controls = el("div", "", { class: "toolbar" });
-    controls.append(
+    const clear = button(t.clearPerson, () => {
+      person.value = "";
+      unbind();
+      person.focus();
+    });
+    function unbind() {
+      references.delete(person);
+      caption?.remove();
+      clear.remove();
+    }
+    person.addEventListener("input", unbind);
+    if (saved.reference) controls.append(clear);
+    if (showName) controls.append(
       button("↑", () => { rows.insertBefore(item, item.previousElementSibling); sync(); }, false, { "data-move": "up", "aria-label": t.up }),
       button("↓", () => { item.nextElementSibling.after(item); sync(); }, false, { "data-move": "down", "aria-label": t.down }),
-      button(t.remove, () => { item.remove(); sync(); }),
     );
+    controls.append(button(t.remove, () => { item.remove(); sync(); }));
     if (!single) item.append(controls);
     rows.append(item);
     sync();
@@ -156,7 +189,7 @@ export function mountLineupForm({ panel, language, preview, onSave, initial, all
     name: name.value, ...(toggle.checked ? { quick: quick.value } : {
       rows: Array.from(rows.children, row => ({
         role: row.querySelector("[data-role]").value,
-        reference: row.querySelector("[data-reference]").value,
+        reference: references.get(row.querySelector("[data-reference]")) ?? row.querySelector("[data-reference]").value,
       })),
     }),
   }), plan => {
@@ -183,8 +216,9 @@ export function showStaffDirectory({ root, language, data, section, recordUrl, l
       return { role: selectedRole, reference: account, person: await recipient(account) };
     }, chosen => {
       const person = chosen.person;
-      panel.body.replaceChildren(el("h3", person.name), el("p", chosen.role),
-        el("p", [person.username && `@${person.username}`, `Telegram ID ${person.telegram_id}`].filter(Boolean).join(" · ")),
+      const heading = el("h3");
+      heading.append(performerCaption(person));
+      panel.body.replaceChildren(heading, el("p", chosen.role),
         button(t.save, event => panel.send(event.currentTarget, {
           action: "contact_add", role: chosen.role, reference: chosen.reference, person: person.id,
         }, request, async result => {

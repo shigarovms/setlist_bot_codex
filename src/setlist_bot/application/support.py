@@ -13,6 +13,7 @@ from setlist_bot.domain.entities import (
     now,
 )
 from setlist_bot.domain.rules import require
+from setlist_bot.domain.telegram_identity import fallback_profile, person_caption
 
 WORKSPACE_SUPPORT_KIND = "miniapp_support"
 
@@ -51,7 +52,14 @@ class Support:
     async def notify(self, text: str) -> None:
         rows = await self.store.find(SupportSettings, key="main")
         if rows:
-            self.store.add(Outbox(chat_id=rows[0].chat_id, text=text, support_kind="event"))
+            self.store.add(
+                Outbox(
+                    chat_id=rows[0].chat_id,
+                    text=text,
+                    support_kind="event",
+                    buttons=self.profile_buttons,
+                )
+            )
 
     async def submit(self, text: str, *, source: str = "telegram") -> bool:
         rows = await self.store.find(SupportSettings, key="main")
@@ -62,6 +70,7 @@ class Support:
             source=source,
             actor=f"telegram:{self.user.telegram_id}",
             chat_id=rows[0].chat_id,
+            buttons=self.profile_buttons,
             text=(
                 f"Обращение в поддержку / Support request\n{self.actor}\n\n{text}"
                 "\n\nОтветьте на это сообщение через Reply."
@@ -76,7 +85,12 @@ class Support:
 
     @property
     def actor(self) -> str:
-        return f"{self.user.display_name or 'Пользователь'} (Telegram ID: {self.user.telegram_id})"
+        return person_caption(self.user, registered=True, fallback="Пользователь без имени")
+
+    @property
+    def profile_buttons(self) -> list[list[str]]:
+        url = fallback_profile(self.user)
+        return [[str(self.user.telegram_id), url]] if url else []
 
     async def reply(self, chat_id: int, message_id: int, text: str) -> bool:
         settings = await self.store.find(SupportSettings, key="main", chat_id=chat_id)

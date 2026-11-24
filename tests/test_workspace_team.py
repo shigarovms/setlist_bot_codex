@@ -36,7 +36,7 @@ async def test_invitation_inbox_uses_same_membership_and_restricts_personal_sess
             "id": str(world.stranger.id),
             "name": "3",
             "username": "",
-            "telegram_id": "3",
+            "profile_url": "tg://user?id=3",
         }
         admin = await post(client, 1, "open_repertoire", band)
         invited = await act(

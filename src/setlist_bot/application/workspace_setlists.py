@@ -64,18 +64,13 @@ class WorkspaceSetlists:
 
     async def editor(self, group_id: UUID, concert_id: UUID) -> dict[str, Any]:
         await self.groups.can_suggest(group_id)
-        snapshot, version, approved = await self.lists.read(group_id, concert_id)
-        require(not approved, "approved")
-        group = await self.store.get(Group, group_id)
-        concert = await self.store.get(Concert, concert_id)
+        state = await self.editor_state(group_id, concert_id)
+        require(not state["approved"], "approved")
         catalog = await self.store.find(Song, group_id=group_id, archived=False)
         require(len(catalog) <= 5000, "miniapp_catalog_limit")
         catalog.sort(key=lambda song: (normalize(song.title), song.id))
         return {
-            "version": version,
-            "token": revision_token(group, concert, snapshot),
-            "default_pause_seconds": snapshot["default_pause_seconds"],
-            "entries": entries(snapshot),
+            **state,
             "catalog": [
                 {
                     "id": str(song.id),
@@ -85,6 +80,18 @@ class WorkspaceSetlists:
                 }
                 for song in catalog
             ],
+        }
+
+    async def editor_state(self, group_id: UUID, concert_id: UUID) -> dict[str, Any]:
+        snapshot, version, approved = await self.lists.read(group_id, concert_id)
+        group = await self.store.get(Group, group_id)
+        concert = await self.store.get(Concert, concert_id)
+        return {
+            "version": version,
+            "token": revision_token(group, concert, snapshot),
+            "approved": approved,
+            "default_pause_seconds": snapshot["default_pause_seconds"],
+            "entries": entries(snapshot),
         }
 
     async def variants(
@@ -122,6 +129,7 @@ class WorkspaceSetlists:
                     "author": names[row.author_id],
                     "seconds": totals(row.snapshot)[2],
                     "applied": row.applied if isinstance(row, Submission) else False,
+                    "declined": row.declined if isinstance(row, Submission) else False,
                     "stale": isinstance(row, Submission)
                     and row.snapshot.get("shared_version") not in (None, setlist.version),
                     "number": row.number if isinstance(row, Revision) else None,
@@ -180,18 +188,43 @@ class WorkspaceSetlists:
                         "requester": await self.groups.name(group_id, UUID(item["requester_id"])),
                     }
                 )
-        return {"requests": requests}
+        proposals = await self.store.find(
+            Submission, group_id=group_id, concert_id=concert_id, applied=False, declined=False
+        )
+        admins = {
+            row.user_id
+            for row in await self.store.find(
+                Membership, group_id=group_id, status="active", role="admin"
+            )
+        }
+        return {
+            "requests": requests,
+            "proposals": [
+                {
+                    "id": str(row.id),
+                    "author": await self.groups.name(group_id, row.author_id),
+                    "seconds": totals(row.snapshot)[2],
+                    "stale": row.snapshot.get("shared_version") not in (None, version),
+                }
+                for row in sorted(proposals, key=lambda row: row.id)
+                if row.snapshot.get("review_required", row.author_id not in admins)
+            ],
+        }
 
     @staticmethod
     def command(payload: dict[str, Any]) -> dict[str, Any]:
         action, version, token = (payload.get(key) for key in ("action", "version", "token"))
-        require(action in ("edit", "apply", "restore", "approve", "reopen", "decide"), "input")
+        require(
+            action
+            in ("edit", "apply", "decline_proposal", "restore", "approve", "reopen", "decide"),
+            "input",
+        )
         require(
             type(version) is int and version >= 0 and isinstance(token, str) and len(token) == 64,
             "input",
         )
         data = {"action": action, "version": version, "token": token}
-        if action in ("apply", "restore"):
+        if action in ("apply", "decline_proposal", "restore"):
             data["variant"] = str(UUID(payload["variant"]))
         if action == "decide":
             require(type(payload.get("accept")) is bool, "input")
@@ -209,6 +242,9 @@ class WorkspaceSetlists:
         return data
 
     async def apply(self, group_id: UUID, concert_id: UUID, data: dict[str, Any]) -> dict[str, Any]:
+        action = data["action"]
+        if action in ("edit", "apply", "decline_proposal", "decide"):
+            await self.groups.access(group_id, admin=True)
         snapshot, version, approved = await self.lists.read(group_id, concert_id)
         group = await self.store.get(Group, group_id)
         concert = await self.store.get(Concert, concert_id)
@@ -217,9 +253,7 @@ class WorkspaceSetlists:
             and revision_token(group, concert, snapshot) == data["token"],
             "conflict",
         )
-        action = data["action"]
         if action == "decide":
-            await self.groups.access(group_id, admin=True)
             identifier = UUID(data["request"])
             row = await self.store.get(Confirmation, identifier)
             item = SetlistMenus.data(row)
@@ -265,13 +299,18 @@ class WorkspaceSetlists:
             await operation(group_id, concert_id, version)
         elif action == "edit":
             await self._edit(group_id, concert_id, version, data)
+            await queue_card_refreshes(self.store, group_id, concert_id)
+            shared = await self.editor_state(group_id, concert_id)
+            return {
+                "requested": False,
+                "shared": {"version": shared["version"], "token": shared["token"]},
+            }
         elif action == "apply":
-            proposal = await self.store.get(Submission, UUID(data["variant"]))
-            require(
-                proposal.group_id == group_id and proposal.concert_id == concert_id, "not_found"
-            )
-            require(proposal.snapshot.get("shared_version") in (None, version), "conflict")
-            await self.lists.apply(group_id, concert_id, proposal.id, version)
+            await self.lists.apply(group_id, concert_id, UUID(data["variant"]), version)
+            return {"requested": False, "proposal_decision": "applied"}
+        elif action == "decline_proposal":
+            await self.lists.decline(group_id, concert_id, UUID(data["variant"]))
+            return {"requested": False, "proposal_decision": "declined"}
         else:
             identifier = UUID(data["variant"])
             await self.variant(group_id, concert_id, "revision", identifier)

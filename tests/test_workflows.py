@@ -142,7 +142,11 @@ async def test_personal_drafts_are_persistent_private_and_separate(engine, world
         await uow.store.flush()
         await member.edit(world.group.id, world.concert.id, 1, "remove", ["1", "1"], private=True)
         assert len(submission.snapshot["blocks"][0]["items"]) == 1
-        await member.apply(world.group.id, world.concert.id, submission.id, 0)
+        with pytest.raises(AppError, match="admin_only"):
+            await member.apply(world.group.id, world.concert.id, submission.id, 0)
+        await Setlists(uow.store, world.admin).apply(
+            world.group.id, world.concert.id, submission.id, 0
+        )
         common, _, _ = await member.read(world.group.id, world.concert.id)
         assert len(common["blocks"][0]["items"]) == 1
 

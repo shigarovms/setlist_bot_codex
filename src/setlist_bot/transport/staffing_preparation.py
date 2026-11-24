@@ -18,12 +18,14 @@ from setlist_bot.domain.entities import (
     GigInvitation,
     GigSlot,
     LineupTemplate,
+    Membership,
     StaffRole,
     User,
     now,
 )
 from setlist_bot.domain.rules import require
 from setlist_bot.domain.staff_input import role_person
+from setlist_bot.domain.telegram_identity import fallback_profile, person_caption
 from setlist_bot.transport.controller import Controller, Response
 from setlist_bot.transport.response_context import staffing_context
 from setlist_bot.transport.staffing import action, prompt
@@ -126,7 +128,9 @@ async def load(c: Controller, args: dict[str, Any]) -> tuple[Confirmation, dict[
     return row, data, event
 
 
-async def labels(c: Controller, values: list[dict[str, Any]]) -> list[str]:
+async def lineup_people(
+    c: Controller, group_id: UUID, values: list[dict[str, Any]]
+) -> list[tuple[str, User | None, str]]:
     roles = {
         r.id: r
         for r in await c.store.get_many(
@@ -139,23 +143,46 @@ async def labels(c: Controller, values: list[dict[str, Any]]) -> list[str]:
             User, {UUID(v["user_id"]) for v in values if v.get("user_id")}
         )
     }
-    from setlist_bot.transport.staffing_lineups import person_name
+    registered = {
+        row.user_id for row in await c.store.find(Membership, group_id=group_id, status="active")
+    }
 
-    return [
-        (roles[UUID(v["role_id"])].name if v.get("role_id") else v["role_name"])
-        + (" — " + person_name(people[UUID(v["user_id"])]) if v.get("user_id") else "")
-        for v in values
-    ]
+    def label(value: dict[str, Any]) -> tuple[str, User | None, str]:
+        role = roles[UUID(value["role_id"])].name if value.get("role_id") else value["role_name"]
+        person = people[UUID(value["user_id"])] if value.get("user_id") else None
+        return (
+            role,
+            person,
+            person_caption(person, registered=person.id in registered, fallback="—")
+            if person
+            else "",
+        )
+
+    return [label(value) for value in values]
+
+
+async def lineup_summary(
+    c: Controller, group_id: UUID, values: list[dict[str, Any]]
+) -> tuple[str, list[tuple[str, str]]]:
+    lines, profiles = [], {}
+    for role, person, caption in await lineup_people(c, group_id, values):
+        link = fallback_profile(person) if person else None
+        lines.append(role + (" — " + caption if person and not link else ""))
+        if person and link:
+            profiles[str(person.telegram_id)] = link
+    return "\n".join(lines), list(profiles.items())
 
 
 async def review(c: Controller, row: Confirmation, data: dict[str, Any]) -> Response:
-    text = c.t("staff_creation_check") + "\n\n" + "\n".join(await labels(c, data["values"]))
+    summary, profiles = await lineup_summary(c, UUID(data["group_id"]), data["values"])
+    text = c.t("staff_creation_check") + "\n\n" + summary
     return Response(
         text,
         [
             (c.t("staff_check_send"), button(c, row, data, "invite")),
             (c.t("staff_edit_preparation"), button(c, row, data, "edit")),
             (c.t("staff_to_lineups"), button(c, row, data, "choose")),
+            *profiles,
         ],
     )
 
@@ -164,15 +191,18 @@ async def edit_view(
     c: Controller, row: Confirmation, data: dict[str, Any], page: int = 0
 ) -> Response:
     require(page >= 0, "input")
-    lines = await labels(c, data["values"])
-    buttons = [
-        (
-            f"{i + 1}. {label}: " + c.t("staff_invite_or_remove"),
-            button(c, row, data, "slot", index=i),
-        )
-        for i, label in enumerate(lines)
-        if page * 8 <= i < (page + 1) * 8
-    ]
+    lines = await lineup_people(c, UUID(data["group_id"]), data["values"])
+    buttons = []
+    for i, (role, person, _) in enumerate(lines):
+        if page * 8 <= i < (page + 1) * 8:
+            buttons.append(
+                (
+                    f"{i + 1}. {role}: " + c.t("staff_invite_or_remove"),
+                    button(c, row, data, "slot", index=i),
+                )
+            )
+            if person and (url := fallback_profile(person)):
+                buttons.append((str(person.telegram_id), url))
     for delta, symbol in ((-1, "◀"), (1, "▶")):
         if page + delta >= 0 and (delta < 0 or (page + 1) * 8 < len(lines)):
             buttons.append((symbol, button(c, row, data, "page", page=page + delta)))
@@ -183,9 +213,10 @@ async def edit_view(
             (c.t("menu_back"), button(c, row, data, "leave")),
         ]
     )
-    text = "\n".join(f"{i + 1}. {line}" for i, line in enumerate(lines)) or c.t(
-        "staff_empty_lineup"
-    )
+    text = "\n\n".join(
+        f"{i + 1}. {role}" + (f"\n{caption}" if person and not fallback_profile(person) else "")
+        for i, (role, person, caption) in enumerate(lines)
+    ) or c.t("staff_empty_lineup")
     return Response(text, buttons)
 
 
@@ -397,6 +428,11 @@ async def preparation_action(c: Controller, op: str, args: dict[str, Any]) -> Re
         )
         for contact in contacts[page * 15 : (page + 1) * 15]
     ]
+    buttons.extend(
+        (str(person.telegram_id), url)
+        for contact in contacts[page * 15 : (page + 1) * 15]
+        if (person := people[contact.user_id]) and (url := fallback_profile(person))
+    )
     for delta, symbol in ((-1, "◀"), (1, "▶")):
         if page + delta >= 0 and (delta < 0 or (page + 1) * 15 < len(contacts)):
             buttons.append((symbol, button(c, row, data, "slot", index=index, page=page + delta)))
@@ -407,4 +443,5 @@ async def preparation_action(c: Controller, op: str, args: dict[str, Any]) -> Re
             (c.t("menu_back"), button(c, row, data, "page", page=index // 8)),
         ]
     )
-    return Response((await labels(c, [item]))[0], buttons)
+    summary, profiles = await lineup_summary(c, UUID(data["group_id"]), [item])
+    return Response(summary, buttons + profiles)

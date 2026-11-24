@@ -21,15 +21,14 @@ from setlist_bot.domain.entities import (
 )
 from setlist_bot.domain.rules import normalize, require
 from setlist_bot.domain.staff_input import role_person
+from setlist_bot.domain.telegram_identity import fallback_profile, person_caption
 from setlist_bot.transport.controller import Controller, Response
 from setlist_bot.transport.response_context import staffing_context
 from setlist_bot.transport.staffing import action, prompt
 
 
 def person_name(person: User) -> str:
-    return (
-        "@" + person.username if person.username else person.display_name or str(person.telegram_id)
-    )
+    return person_caption(person, fallback="—")
 
 
 async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Response:
@@ -53,7 +52,7 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
     ]
     people = {p.id: p for p in await c.store.get_many(User, {r.user_id for r in invites})}
     roles = {r.id: r for r in await c.store.get_many(StaffRole, {s.role_id for s in slots})}
-    names = {member.user_id: member.musical_role for member in members if member.musical_role}
+    group_names = {member.user_id: member.musical_role for member in members}
     # RU: Один проход по приглашениям вместо полного перебора для каждой роли.
     # EN: Group once, then inspect only the invitations belonging to each slot.
     by_slot: dict[UUID, list[GigInvitation]] = {}
@@ -78,8 +77,17 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
         person = people[active[0].user_id] if active else None
         confirmed = bool(active and active[0].status == "confirmed")
         line = f"{number}. {roles[slot.role_id].name}"
+        if not slot.required:
+            line += " · " + c.t("staff_not_needed")
         if confirmed and person:
-            line += " — " + names.get(person.id, person.display_name or str(person.telegram_id))
+            nickname = group_names.get(person.id, "")
+            caption = (
+                nickname
+                if nickname and nickname != str(person.telegram_id)
+                else person_caption(person, fallback="")
+            )
+            if caption:
+                line += " — " + caption
             line = "✅ " + line
         if confirmed and active[0].id in sources:
             line += " · " + c.t("staff_swap_pending")
@@ -92,7 +100,7 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
                     if candidate.status == "accepted"
                     else "staff_swap_invited"
                 )
-                lines.append("  ↳ " + c.t(key, name=person_name(candidate_person)))
+                lines.append("  ↳ " + c.t(key, name=person_caption(candidate_person, fallback="—")))
                 if (
                     admin
                     and candidate.status == "accepted"
@@ -100,7 +108,9 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
                 ):
                     buttons.append(
                         (
-                            c.t("staff_approve_swap") + " · " + person_name(candidate_person),
+                            c.t("staff_approve_swap")
+                            + " · "
+                            + person_caption(candidate_person, fallback="—"),
                             action(
                                 c,
                                 "swap",
@@ -111,9 +121,9 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
                     )
         if admin and page * 8 <= number - 1 < (page + 1) * 8:
             label = (
-                c.t("staff_change_person", name=person_name(person)[:48])
+                c.t("staff_change_person", name=person_caption(person, fallback="—")[:48])
                 if confirmed and person
-                else c.t("staff_wait_person", name=person_name(person)[:48])
+                else c.t("staff_wait_person", name=person_caption(person, fallback="—")[:48])
                 if person
                 else c.t("staff_invite_or_remove")
             )
@@ -121,6 +131,9 @@ async def event_lineup(c: Controller, identifier: UUID, page: int = 0) -> Respon
                 f"{'✅ ' if confirmed else ''}{number}. {roles[slot.role_id].name[:64]}: {label}"
             )
             buttons.append((label, action(c, "slot", slot_id=str(slot.id), version=slot.version)))
+        if person and (admin or confirmed) and page * 8 <= number - 1 < (page + 1) * 8:
+            if url := fallback_profile(person):
+                buttons.append((str(person.telegram_id), url))
     if page:
         buttons.append(("◀", f"sf_lineup {event.id.hex} {page - 1}"))
     if (page + 1) * 8 < len(slots):
@@ -191,6 +204,8 @@ async def template_view(
                     ),
                 )
             )
+            if default_person and (url := fallback_profile(people[default_person])):
+                buttons.append((str(people[default_person].telegram_id), url))
     for delta, symbol in ((-1, "◀"), (1, "▶")):
         if page + delta >= 0 and (delta < 0 or (page + 1) * 8 < len(row.slots)):
             buttons.append(
@@ -273,9 +288,11 @@ async def lineup_input(c: Controller, data: dict[str, Any], value: str) -> Respo
             "input_expired",
         )
         await service.contact(group_id, slot.role_id, person.id)
+        profile = fallback_profile(person)
         return Response(
             c.t("staff_choose_invite", name=person_name(person)[:48]),
             [
+                *([(str(person.telegram_id), profile)] if profile else []),
                 (
                     c.t("staff_invite_person"),
                     action(
@@ -607,15 +624,24 @@ async def lineup_action(c: Controller, op: str, data: dict[str, Any]) -> Respons
                         else f"https://t.me/{c.bot_username}?start=gig_{invite.id.hex}",
                     )
                 )
+        if slot.required:
+            buttons.append(
+                (
+                    c.t("staff_invite_other") if active else c.t("staff_candidates"),
+                    action(
+                        c,
+                        "slot_other",
+                        slot_id=str(slot.id),
+                        version=slot.version,
+                        event_version=event.lineup_version,
+                    ),
+                )
+            )
         buttons.append(
             (
-                c.t("staff_invite_other") if active else c.t("staff_candidates"),
+                c.t("staff_not_needed" if slot.required else "staff_needed"),
                 action(
-                    c,
-                    "slot_other",
-                    slot_id=str(slot.id),
-                    version=slot.version,
-                    event_version=event.lineup_version,
+                    c, "needed", slot_id=str(slot.id), version=slot.version, value=not slot.required
                 ),
             )
         )

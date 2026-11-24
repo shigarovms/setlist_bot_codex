@@ -1,16 +1,18 @@
 """Create, edit and recover performances through the same services as the bot."""
 
 import json
+from collections import Counter
 from datetime import date
 from typing import Any
 from uuid import UUID
 
-from setlist_bot.application.concert_details import ConcertDetails
+from setlist_bot.application.concert_details import PRESET_TYPES, ConcertDetails
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.application.staffing import Staffing
 from setlist_bot.application.trash import RETENTION, Trash
+from setlist_bot.domain.cities import city_name
 from setlist_bot.domain.concerts import concert_label, today
 from setlist_bot.domain.entities import Concert, Confirmation, LineupTemplate, User, now
 from setlist_bot.domain.performance_input import (
@@ -18,7 +20,7 @@ from setlist_bot.domain.performance_input import (
     performance_seconds,
     recognize_performance,
 )
-from setlist_bot.domain.rules import require
+from setlist_bot.domain.rules import normalize, require
 
 FIELDS = {"title": 200, "city": 200, "performance_type": 200, "info": 2000}
 DETAIL_FIELDS = {
@@ -102,6 +104,33 @@ class WorkspacePerformances:
             key=lambda row: (row.created_at, row.id),
         )
 
+    async def options(self, group_id: UUID) -> dict[str, Any]:
+        await self.groups.access(group_id, admin=True)
+        cutoff = today()
+        past = sorted(
+            (
+                row
+                for row in await self.store.find(Concert, group_id=group_id)
+                if row.deleted_at is None and row.date < cutoff and row.city.strip()
+            ),
+            key=lambda row: (row.date, row.id),
+            reverse=True,
+        )
+        counts: Counter[str] = Counter()
+        labels: dict[str, str] = {}
+        for row in past:
+            city = city_name(row.city) or row.city.strip()
+            key = normalize(city)
+            counts[key] += 1
+            labels.setdefault(key, city)
+        return {
+            "types": PRESET_TYPES,
+            "cities": [labels[key] for key, _ in counts.most_common(3)],
+            "lineups": [
+                {"id": str(row.id), "name": row.name} for row in await self.lineups(group_id)
+            ],
+        }
+
     async def trash_page(self, group_id: UUID, page: int, limit: int) -> dict[str, Any]:
         group = await self.groups.access(group_id, admin=True)
         cutoff = now()
@@ -152,7 +181,7 @@ class WorkspacePerformances:
             preferred = command["lineup"]
             require(
                 isinstance(preferred, str)
-                and preferred in {"auto", "none", *(str(row.id) for row in lineups)},
+                and preferred in {"auto", "named", "none", *(str(row.id) for row in lineups)},
                 "input_expired",
             )
             named = None
@@ -168,6 +197,8 @@ class WorkspacePerformances:
                         "choose_lineup": True,
                         "lineups": [{"id": str(row.id), "name": row.name} for row in lineups],
                     }, {}
+            elif preferred == "named":
+                lineup = named
             else:
                 lineup = next((row for row in lineups if str(row.id) == preferred), None)
             change = {"action": action, "fields": fields}

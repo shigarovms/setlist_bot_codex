@@ -8,9 +8,10 @@ from setlist_bot.application.ports import Store
 from setlist_bot.application.staffing import Staffing
 from setlist_bot.application.user_lookup import checked_target, known_user
 from setlist_bot.application.workspace_team import person_name, text_field
-from setlist_bot.domain.entities import LineupTemplate, StaffContact, StaffRole, User
+from setlist_bot.domain.entities import LineupTemplate, Membership, StaffContact, StaffRole, User
 from setlist_bot.domain.rules import normalize, require
 from setlist_bot.domain.staff_input import role_person
+from setlist_bot.domain.telegram_identity import fallback_profile, person_caption
 
 PREFERENCES = ("preferred", "normal", "hidden")
 
@@ -147,8 +148,11 @@ class WorkspaceStaffing:
                 {
                     "role": names[slot["role_id"]],
                     "reference": str(person.telegram_id) if person else "",
-                    "name": person_name(person) if person else "",
-                    "suggested": person_name(chosen) if chosen else "",
+                    "name": person_caption(person) if person else "",
+                    "username": person.username if person else "",
+                    "profile_url": fallback_profile(person) if person else None,
+                    "suggested": person_caption(chosen) if chosen else "",
+                    "suggested_profile_url": fallback_profile(chosen) if chosen else None,
                 }
             )
         return {"id": str(row.id), "version": row.version, "name": row.name, "rows": slots}
@@ -156,17 +160,22 @@ class WorkspaceStaffing:
     async def preview(self, group_id: UUID, body: dict[str, Any]) -> dict[str, Any]:
         await self.groups.access(group_id, admin=True)
         name = text_field(body, "name", 100)
-        rows = []
+        registered = {
+            row.user_id
+            for row in await self.store.find(Membership, group_id=group_id, status="active")
+        }
+        rows: list[dict[str, Any]] = []
         for row in lineup_input(body, preview=True):
+            entry: dict[str, Any] = dict(row)
             if row["reference"]:
                 person = await known_user(self.store, row["reference"])
-                row.update(
+                entry.update(
                     person=str(person.id),
-                    name=person_name(person),
+                    name=person_caption(person, registered=person.id in registered),
                     username=person.username,
-                    telegram_id=str(person.telegram_id),
+                    profile_url=fallback_profile(person),
                 )
-            rows.append(row)
+            rows.append(entry)
         return {"name": name, "rows": rows}
 
     @staticmethod

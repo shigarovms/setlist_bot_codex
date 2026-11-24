@@ -329,6 +329,23 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
             response = await client.get("/miniapp/api/state", params=query, headers=headers)
             assert response.status == 200
             assert (await response.json())["version"] == initial["version"]
+            shared = await client.get("/miniapp/api/draft_shared", params=query, headers=headers)
+            assert shared.status == 200, await shared.text()
+            base = await shared.json()
+            shared_save = await client.post(
+                "/miniapp/api/shared_action",
+                json={
+                    **query,
+                    "action": "edit",
+                    "version": base["version"],
+                    "token": base["token"],
+                    "entries": [song(world)],
+                    "default_pause_seconds": 5,
+                    "request_id": str(uuid4()),
+                },
+                headers=headers,
+            )
+            assert shared_save.status == 200 and (await shared_save.json())["status"] == "pending"
             payload = {
                 **query,
                 "version": initial["version"],
@@ -542,6 +559,7 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 "SELECT token_hash FROM calendar_subscriptions",
                 "SELECT * FROM busy_periods",
                 "UPDATE setlists SET approved=true",
+                "UPDATE submissions SET declined=true",
                 "UPDATE concerts SET deleted_at=now()",
                 "UPDATE lineup_templates SET slots='[]'",
                 "UPDATE gig_slots SET required=false",

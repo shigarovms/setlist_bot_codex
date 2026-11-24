@@ -10,7 +10,7 @@ from test_telegram import FakeTelegram
 
 from setlist_bot.application.catalog import Catalog
 from setlist_bot.application.setlists import Setlists
-from setlist_bot.domain.entities import DeploymentIdentity, Outbox, PersonalDraft
+from setlist_bot.domain.entities import DeploymentIdentity, Membership, Outbox, PersonalDraft
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.main import deliver_one_outbox
 from setlist_bot.miniapp.app import create_app
@@ -55,12 +55,14 @@ async def test_shared_edit_conflicts_and_refreshes_without_creating_drafts(engin
         await get(client, 3, "shared_editor", 403, **query)
         hidden = {**query, "performance": str(world.concert2.id)}
         await post(client, 2, "open_shared", hidden, 403)
-        session = await post(client, 2, "open_shared", query)
-        initial = await get(client, 2, "shared_editor", **query)
+        session = await post(client, 1, "open_draft", query)
+        initial = await get(client, 1, "draft_shared", **session)
+        participant = await post(client, 2, "open_draft", query)
+        await get(client, 2, "draft_shared", 403, **participant)
         song = {"kind": "song", "song_id": str(world.song.id), "version": 1, "pause_before": None}
         items = [song, {"kind": "pause", "duration_seconds": 35, "pause_label": "Перерыв"}, song]
         saved = await action(
-            client, engine, 2, session, "edit", initial, entries=items, default_pause_seconds=9
+            client, engine, 1, session, "edit", initial, entries=items, default_pause_seconds=9
         )
         assert saved["status"] == "saved" and not saved["requested"]
         latest = (await get(client, 1, "performance", **query))["setlist"]
@@ -68,7 +70,7 @@ async def test_shared_edit_conflicts_and_refreshes_without_creating_drafts(engin
         stale = await action(
             client,
             engine,
-            2,
+            1,
             session,
             "edit",
             initial,
@@ -87,7 +89,7 @@ async def test_shared_edit_conflicts_and_refreshes_without_creating_drafts(engin
         stale = await action(
             client,
             engine,
-            2,
+            1,
             session,
             "edit",
             latest,
@@ -100,6 +102,7 @@ async def test_shared_edit_conflicts_and_refreshes_without_creating_drafts(engin
 
 async def test_variants_apply_and_requests_for_approval_and_reopening(engine, world):
     await setup_workspace(engine, world)
+    telegram = sender(engine)
     group_id, concert_id = world.group.id, world.concert.id
     async with PostgresUnitOfWork(engine) as uow:
         lists = Setlists(uow.store, world.member)
@@ -117,7 +120,26 @@ async def test_variants_apply_and_requests_for_approval_and_reopening(engine, wo
         )
         assert [entry["title"] for entry in preview["entries"]] == ["Комета", "Комета"]
         before = (await get(client, 1, "performance", **query))["setlist"]
-        await action(client, engine, 2, member, "apply", before, variant=variant)
+        inbox = await get(client, 1, "shared_requests", **query)
+        assert [row["id"] for row in inbox["proposals"]] == [variant]
+        await post(
+            client,
+            2,
+            "shared_action",
+            {
+                **member,
+                "action": "apply",
+                "version": before["version"],
+                "token": before["token"],
+                "request_id": str(uuid4()),
+                "variant": variant,
+            },
+            403,
+        )
+        await telegram(f"apply_submission {variant}", actor=2, chat=-100)
+        assert (await get(client, 1, "performance", **query))["setlist"] == before
+        await telegram(f"apply_submission {variant}", chat=-100)
+        assert not (await get(client, 1, "shared_requests", **query))["proposals"]
         applied = (await get(client, 1, "performance", **query))["setlist"]
         assert applied["seconds"] == 441 and not applied["approved"]
         wanted = await action(client, engine, 2, member, "approve", applied)
@@ -131,7 +153,7 @@ async def test_variants_apply_and_requests_for_approval_and_reopening(engine, wo
             ]
             assert len(notices) == 1
             callback = notices[0].buttons[0][1]
-        await sender(engine)(callback, private=True, chat=1)
+        await telegram(callback, private=True, chat=1)
         approved = (await get(client, 2, "performance", **query))["setlist"]
         assert approved["approved"]
         await get(client, 2, "shared_editor", 403, **query)
@@ -183,3 +205,57 @@ async def test_variants_apply_and_requests_for_approval_and_reopening(engine, wo
                 group_id, concert_id, private=True
             )
             assert version == 1
+
+
+async def test_declining_proposal_closes_telegram_action_and_survives_retry(engine, world):
+    await setup_workspace(engine, world)
+    group, concert = world.group.id, world.concert.id
+    async with PostgresUnitOfWork(engine) as uow:
+        await Setlists(uow.store, world.member).edit_songs(
+            group, concert, 0, ["Комета"], private=True
+        )
+        await queue_publication(uow.store, world.member, group, concert, 1)
+    query = scope(world)
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        admin = await post(client, 1, "open_shared", query)
+        base = (await get(client, 1, "performance", **query))["setlist"]
+        (proposal,) = (await get(client, 1, "shared_requests", **query))["proposals"]
+        declined = await action(
+            client, engine, 1, admin, "decline_proposal", base, variant=proposal["id"]
+        )
+        assert declined["proposal_decision"] == "declined"
+        assert not (await get(client, 1, "shared_requests", **query))["proposals"]
+        (item,) = (await get(client, 1, "shared_variants", **query))["variants"]
+        assert item["declined"] and not item["applied"]
+        failed = await action(
+            client, engine, 1, admin, "apply", base, variant=proposal["id"], success=False
+        )
+        assert failed["error"] == "already_done"
+
+
+async def test_shared_save_rechecks_administrator_after_queueing(engine, world):
+    await setup_workspace(engine, world)
+    query = scope(world)
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        admin = await post(client, 1, "open_draft", query)
+        base = await get(client, 1, "draft_shared", **admin)
+        payload = {
+            **admin,
+            "action": "edit",
+            "version": base["version"],
+            "token": base["token"],
+            "request_id": str(uuid4()),
+            "entries": [],
+            "default_pause_seconds": 0,
+        }
+        sent = await post(client, 1, "shared_action", payload)
+        async with PostgresUnitOfWork(engine) as uow:
+            (membership,) = await uow.store.find(
+                Membership, group_id=world.group.id, user_id=world.admin.id
+            )
+            membership.role = "member"
+            await uow.store.flush()
+        assert not await deliver_request(engine, sent["request"])
+        async with PostgresUnitOfWork(engine) as uow:
+            state = await Setlists(uow.store, world.member).read(world.group.id, world.concert.id)
+            assert state[1] == base["version"]

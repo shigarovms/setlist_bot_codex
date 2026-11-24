@@ -58,7 +58,8 @@ async def test_help_and_support_work_without_a_band_and_reuse_telegram_delivery(
             (route,) = await uow.store.find(SupportMessage, outbox_id=event.id)
             assert event.source == "miniapp" and event.actor == "telegram:3"
             assert route.user_id == world.stranger.id and route.chat_id == -900
-            assert f"Telegram ID: 3)\n\n{message}" in event.text
+            assert f"Пользователь без имени\n\n{message}" in event.text
+            assert event.buttons == [["3", "tg://user?id=3"]]
 
     telegram = FakeTelegram()
     async with Bot("123456:TEST_ONLY_NOT_A_REAL_TELEGRAM_TOKEN", session=telegram) as bot:

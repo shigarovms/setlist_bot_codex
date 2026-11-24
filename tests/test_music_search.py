@@ -261,6 +261,6 @@ async def test_selected_filter_and_bulk_selection_cover_all_pages(engine, world)
     assert len(last.articles[0].blocks[1]["cells"]) == 2
 
     preview = await send(f"mi_preview {identifier.hex}", private=True)
-    assert any(label == "✅ Добавить 41 песен" for label, _ in preview.buttons)
+    assert any(label == "✅ Добавить песни · 41" for label, _ in preview.buttons)
     await send(f"mi_back {identifier.hex}", private=True)
     assert "Выбрано 41 из 42" in (await send(f"mi_view {identifier.hex}", private=True)).text

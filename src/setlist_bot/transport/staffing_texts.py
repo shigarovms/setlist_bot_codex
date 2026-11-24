@@ -28,7 +28,7 @@ TEXTS = {
             "Введите название роли: например, Гитара, Вокал, Звукорежиссёр.\n/cancel — отмена."
         ),
         "staff_contact_prompt": (
-            "Введите роль и известный боту @ник или Telegram ID через пробел, дефис или двоеточие. "
+            "Введите роль и известный боту @username через пробел, дефис или двоеточие. "
             "Например:\nГитара  @musician\nЧеловек должен предварительно открыть "
             "бота и отправить /start.\n/cancel — отмена."
         ),
@@ -55,7 +55,7 @@ TEXTS = {
         "staff_busy_add": "＋ Отметить занятость",
         "staff_busy_remove": "Снять отметку",
         "staff_candidates": "Выбрать исполнителя",
-        "staff_not_needed": "Инструмент не нужен",
+        "staff_not_needed": "Роль не нужна",
         "staff_needed": "Нужен — искать исполнителя",
         "staff_vacant": "не назначен",
         "staff_skipped": "не требуется",
@@ -156,7 +156,7 @@ TEXTS = {
             "Enter a role, for example Guitar, Vocals or Sound engineer.\n/cancel — cancel."
         ),
         "staff_contact_prompt": (
-            "Enter a role and a known @username or Telegram ID, separated by a space, "
+            "Enter a role and a known @username, separated by a space, "
             "dash or colon:\nGuitar  @musician\nThe person must first send /start to the "
             "bot.\n/cancel — cancel."
         ),
@@ -180,7 +180,7 @@ TEXTS = {
         "staff_busy_add": "＋ Mark busy",
         "staff_busy_remove": "Remove busy period",
         "staff_candidates": "Choose performer",
-        "staff_not_needed": "Instrument not required",
+        "staff_not_needed": "Role not required",
         "staff_needed": "Required — find a performer",
         "staff_vacant": "unassigned",
         "staff_skipped": "not required",
@@ -271,8 +271,8 @@ TEXTS["ru"].update(
         "staff_setup_main": "Настроить основной состав",
         "staff_later": "Позже",
         "staff_main_prompt": (
-            "Введите роли основного состава, по одной на строку. Можно добавить @ник "
-            "или Telegram ID через пробел, дефис или двоеточие:\nВокал @singer\nБас-"
+            "Введите роли основного состава, по одной на строку. "
+            "Можно добавить @username через пробел, дефис или двоеточие:\nВокал @singer\nБас-"
             "гитара: @bassist\nЗвукорежиссёр\n/cancel — отмена."
         ),
         "staff_unknown_person": (
@@ -325,14 +325,14 @@ TEXTS["ru"].update(
             "Приглашение отправляется отдельно.\n/cancel — отмена."
         ),
         "staff_invite_person_prompt": (
-            "Введите известный боту @ник или Telegram ID исполнителя.\n/cancel — отмена."
+            "Введите известный боту @username исполнителя.\n/cancel — отмена."
         ),
         "staff_template_add_prompt": (
             "Введите роль и, при необходимости, @ник исполнителя: Бэк-вокал: @singer."
             "\n/cancel — отмена."
         ),
         "staff_template_person_prompt": (
-            "Введите @ник или Telegram ID нового основного исполнителя. Чтобы "
+            "Введите @username нового основного исполнителя. Чтобы "
             "оставить роль свободной, введите дефис (-).\n/cancel — отмена."
         ),
         "staff_template_rename_prompt": "Введите новое название состава.\n/cancel — отмена.",
@@ -362,8 +362,8 @@ TEXTS["en"].update(
         "staff_setup_main": "Set up main lineup",
         "staff_later": "Later",
         "staff_main_prompt": (
-            "Enter main lineup roles, one per line. Optionally add @username or "
-            "Telegram ID after a space, dash or colon:\nVocals @singer\nBass: @bassist\n"
+            "Enter main lineup roles, one per line. Optionally add @username after a "
+            "space, dash or colon:\nVocals @singer\nBass: @bassist\n"
             "Sound engineer\n/cancel — cancel."
         ),
         "staff_unknown_person": (
@@ -415,12 +415,12 @@ TEXTS["en"].update(
             "Enter a role and optionally a performer: Guitar @musician. Invitations "
             "are sent separately.\n/cancel — cancel."
         ),
-        "staff_invite_person_prompt": "Enter a known @username or Telegram ID.\n/cancel — cancel.",
+        "staff_invite_person_prompt": "Enter a known @username.\n/cancel — cancel.",
         "staff_template_add_prompt": (
             "Enter a role and optionally its performer: Backing vocals: @singer.\n/cancel — cancel."
         ),
         "staff_template_person_prompt": (
-            "Enter @username or Telegram ID of the new default performer. Enter - to "
+            "Enter @username of the new default performer. Enter - to "
             "leave the role vacant.\n/cancel — cancel."
         ),
         "staff_template_rename_prompt": "Enter a new lineup name.\n/cancel — cancel.",
@@ -486,13 +486,12 @@ TEXTS["ru"].update(
         "staff_no_candidates": (
             "Пока не указаны исполнители. Измените состав и выберите кандидатов."
         ),
-        "staff_enter_person": "Ввести @ник или Telegram ID",
+        "staff_enter_person": "Ввести @username",
         "staff_prep_add_prompt": (
             "Введите роль и при желании исполнителя: Гитара @musician.\n/cancel — отмена."
         ),
         "staff_prep_person_prompt": (
-            "Введите известный боту @ник или Telegram ID. Дефис (-) убирает "
-            "кандидата.\n/cancel — отмена."
+            "Введите известный боту @username. Дефис (-) убирает кандидата.\n/cancel — отмена."
         ),
     }
 )
@@ -514,13 +513,12 @@ TEXTS["en"].update(
         "staff_confirm_preparation": "Save lineup",
         "staff_choose_later": "Choose lineup later",
         "staff_no_candidates": "No performers selected yet. Edit the lineup and choose candidates.",
-        "staff_enter_person": "Enter @username or Telegram ID",
+        "staff_enter_person": "Enter @username",
         "staff_prep_add_prompt": (
             "Enter a role and optionally its performer: Guitar @musician.\n/cancel — cancel."
         ),
         "staff_prep_person_prompt": (
-            "Enter a known @username or Telegram ID. Enter - to clear the "
-            "candidate.\n/cancel — cancel."
+            "Enter a known @username. Enter - to clear the candidate.\n/cancel — cancel."
         ),
     }
 )

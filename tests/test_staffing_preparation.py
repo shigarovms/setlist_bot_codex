@@ -26,6 +26,10 @@ from setlist_bot.transport.staffing_preparation import start_preparation
 
 async def prepared(engine, world):
     async with PostgresUnitOfWork(engine) as uow:
+        member = await uow.store.get(User, world.member.id)
+        member.display_name = "Иван"
+        guest = await uow.store.get(User, world.stranger.id)
+        guest.username, guest.username_seen_at = "guest_vox", now()
         service = Staffing(uow.store, world.admin)
         guitar = await service.role(world.group.id, "Гитара")
         vocals = await service.role(world.group.id, "Вокал")
@@ -58,7 +62,9 @@ async def change_first(send, review):
     editor = await send(button(review, "Изменить состав выступления"), private=True, chat=1)
     card = await send(button(editor, "1. Гитара"), private=True, chat=1)
     changed = await send(
-        next(callback for label, callback in card.buttons if label == "3"), private=True, chat=1
+        next(callback for label, callback in card.buttons if label == "@guest_vox"),
+        private=True,
+        chat=1,
     )
     return changed
 
@@ -108,11 +114,11 @@ async def test_preview_back_discards_changes_and_keeps_real_roster_and_queue(eng
     review = await prepared(engine, world)
     assert review.text.startswith(world.group.name + "\n\n")
     assert "Проверьте состав, затем нажмите «Проверить занятость»." in review.text
-    assert "Гитара — 2" in review.text and "Вокал — 3" in review.text
+    assert "Гитара — Иван" in review.text and "Вокал — @guest_vox" in review.text
     original = await active_slots(engine, world)
     send = messenger(engine)
     changed = await change_first(send, review)
-    assert "Гитара — 3" in changed.text
+    assert "Гитара\n@guest_vox" in changed.text
     assert (await active_slots(engine, world))[0].preferred_user_id == world.member.id
     choice = await send(button(changed, "Назад"), private=True, chat=1)
     assert "несохранённые" in choice.text
@@ -132,7 +138,7 @@ async def test_confirm_saves_once_without_invites_then_availability_send_invites
     saved = await send(callback, private=True, chat=1)
     slots = await active_slots(engine, world)
     assert slots[0].preferred_user_id == world.stranger.id
-    assert "Гитара — 3" in saved.text
+    assert "Гитара — @guest_vox" in saved.text
     old = await send(callback, private=True, chat=1)
     assert "устарел" in old.text
     assert [slot.id for slot in await active_slots(engine, world)] == [slot.id for slot in slots]
@@ -193,7 +199,7 @@ async def test_back_to_choice_can_select_other_lineup_or_choose_later_without_du
     choices = await send(button(review, "К составам"), private=True, chat=1)
     assert any(label == "Выбрать состав позже" for label, _ in choices.buttons)
     new = await send(button(choices, "DJ set"), private=True, chat=1)
-    assert "DJ — 2" in new.text and "Гитара" not in new.text
+    assert "DJ — Иван" in new.text and "Гитара" not in new.text
     choices = await send(button(new, "К составам"), private=True, chat=1)
     await send(button(choices, "Выбрать состав позже"), private=True, chat=1)
     async with PostgresUnitOfWork(engine) as uow:

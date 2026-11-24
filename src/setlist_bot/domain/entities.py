@@ -187,6 +187,7 @@ class Submission(Entity):
     author_id: UUID
     snapshot: dict[str, Any]
     applied: bool = False
+    declined: bool = False
 
 
 @dataclass(kw_only=True)

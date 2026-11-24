@@ -844,7 +844,7 @@ async def keyboards(
                         )
                         if web_apps and data in web_apps
                         else InlineKeyboardButton(text=label[:100], url=data)
-                        if data.startswith("https://t.me/")
+                        if data.startswith(("https://t.me/", "tg://user?id="))
                         else InlineKeyboardButton(text=label[:100], callback_data=data)
                     )
                     for label, data in buttons[i : i + columns]

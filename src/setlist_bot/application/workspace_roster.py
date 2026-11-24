@@ -31,6 +31,7 @@ from setlist_bot.domain.entities import (
     now,
 )
 from setlist_bot.domain.rules import require
+from setlist_bot.domain.telegram_identity import fallback_profile, person_caption
 
 ROSTER_KIND = "miniapp_roster"
 SLOT_ACTIONS = {"candidates", "remove", "needed"}
@@ -95,6 +96,14 @@ class WorkspaceRoster:
         if admin:
             ids.update(slot.preferred_user_id for slot in rows if slot.preferred_user_id)
         people = {person.id: person for person in await self.store.get_many(User, ids)}
+        registered = {
+            row.user_id
+            for row in await self.store.find(Membership, group_id=group.id, status="active")
+        }
+
+        def caption(person: User) -> str:
+            return person_caption(person, registered=person.id in registered)
+
         roles = {
             role.id: role.name
             for role in await self.store.get_many(StaffRole, {slot.role_id for slot in rows})
@@ -132,7 +141,9 @@ class WorkspaceRoster:
                     "required": slot.required,
                     "preferred": (
                         {
-                            "name": person_name(people[slot.preferred_user_id]),
+                            "name": caption(people[slot.preferred_user_id]),
+                            "username": people[slot.preferred_user_id].username,
+                            "profile_url": fallback_profile(people[slot.preferred_user_id]),
                             "reference": str(people[slot.preferred_user_id].telegram_id),
                         }
                         if admin and slot.preferred_user_id
@@ -141,7 +152,8 @@ class WorkspaceRoster:
                     "invitations": [
                         {
                             "id": str(row.id),
-                            "name": person_name(people[row.user_id]),
+                            "name": caption(people[row.user_id]),
+                            "profile_url": fallback_profile(people[row.user_id]),
                             "status": row.status,
                             "version": row.version,
                             "replacement": row.replacement_id in replacement_ids,
@@ -309,7 +321,8 @@ class WorkspaceRoster:
             "review": [
                 {
                     "role": roles[slot.role_id],
-                    "person": person_name(people[person]),
+                    "person": person_caption(people[person], registered=True),
+                    "profile_url": fallback_profile(people[person]),
                     "self": self.user.id == person,
                     "status": status(*conflicts[person]),
                 }
@@ -452,7 +465,8 @@ class WorkspaceRoster:
                 "candidates": [
                     {
                         "id": str(person.id),
-                        "name": person_name(person),
+                        "name": person_caption(person),
+                        "profile_url": fallback_profile(person),
                         "status": status(busy, tentative),
                     }
                     for _, person, busy, tentative in people

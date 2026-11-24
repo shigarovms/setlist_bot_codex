@@ -29,6 +29,7 @@ from setlist_bot.domain.entities import (
 )
 from setlist_bot.domain.rules import AppError, normalize, require
 from setlist_bot.domain.staff_input import role_person
+from setlist_bot.domain.telegram_identity import fallback_profile, person_caption
 from setlist_bot.transport.controller import Controller, Response
 from setlist_bot.transport.render import render_setlist
 from setlist_bot.transport.response_context import staffing_context
@@ -270,12 +271,15 @@ async def contacts_view(c: Controller, group_id: UUID, page: int = 0) -> Respons
             if contact.preference == "preferred"
             else "staff_normal"
         )
+        caption = person_caption(person, registered=True, fallback="—")
         buttons.append(
             (
-                f"{role.name} · {person.display_name or person.telegram_id} · {c.t(label)}",
+                f"{role.name} · {caption} · {c.t(label)}",
                 action(c, "contact", contact_id=str(contact.id)),
             )
         )
+        if profile := fallback_profile(person):
+            buttons.append((str(person.telegram_id), profile))
     if page:
         buttons.append(("◀", action(c, "contacts", group_id=str(group_id), page=page - 1)))
     if (page + 1) * 15 < len(rows):
@@ -339,11 +343,13 @@ async def invitation_view(
                 )
     text = (
         f"{group.name} · {button_date(event.date)}\n{event.title} · {event.city}\n"
-        f"{role.name} · {person.display_name or person.telegram_id}\n{c.t(status_key)}"
+        f"{role.name} · {person_caption(person, registered=True, fallback='—')}\n{c.t(status_key)}"
     )
     if event.extra_info:
         text += "\n\n" + event.extra_info
     buttons = []
+    if profile := fallback_profile(person):
+        buttons.append((str(person.telegram_id), profile))
     if own and not admin_notice:
         if row.status == "accepted":
             buttons.append(
@@ -843,10 +849,14 @@ async def handle(c: Controller, command: str, args: str) -> Response:
             )
             buttons.append(
                 (
-                    (person.display_name or str(person.telegram_id))[:64] + " · " + c.t(status),
+                    (person_caption(person, registered=True, fallback="—"))[:64]
+                    + " · "
+                    + c.t(status),
                     f"sf_view {row.id.hex}",
                 )
             )
+            if profile := fallback_profile(person):
+                buttons.append((str(person.telegram_id), profile))
         for delta, symbol in ((-1, "◀"), (1, "▶")):
             if page + delta >= 0 and (delta < 0 or (page + 1) * 15 < len(invites)):
                 buttons.append(
@@ -912,8 +922,9 @@ async def handle(c: Controller, command: str, args: str) -> Response:
             busy, tentative = conflicts[person.id]
             busy_any |= busy > 0
             role = roles[slot.role_id]
+            caption = person_caption(person, registered=True, fallback="—")
             lines.append(
-                f"{role.name[:32]} · {(person.display_name or str(person.telegram_id))[:24]} · "
+                f"{role.name[:32]} · {caption[:24]} · "
                 + c.t(
                     "staff_conflicts"
                     if busy
@@ -967,7 +978,7 @@ async def handle(c: Controller, command: str, args: str) -> Response:
 
         profile = "\n\n" + summary(c, person.profile) if person.profile else ""
         return Response(
-            (person.display_name or str(person.telegram_id))
+            (person_caption(person, registered=True, fallback="—"))
             + "\n"
             + c.t("staff_experience", count=row.worked_count)
             + profile,
@@ -1064,7 +1075,7 @@ async def handle(c: Controller, command: str, args: str) -> Response:
             )
             buttons.append(
                 (
-                    f"{person.display_name or person.telegram_id} · {label}",
+                    f"{person_caption(person, registered=True, fallback='—')} · {label}",
                     action(
                         c,
                         "invite",
@@ -1075,6 +1086,8 @@ async def handle(c: Controller, command: str, args: str) -> Response:
                     ),
                 )
             )
+            if profile := fallback_profile(person):
+                buttons.append((str(person.telegram_id), profile))
         for delta, symbol in ((-1, "◀"), (1, "▶")):
             if page + delta >= 0 and (delta < 0 or (page + 1) * 15 < len(rows)):
                 buttons.append(

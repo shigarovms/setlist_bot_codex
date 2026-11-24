@@ -11,6 +11,7 @@ from setlist_bot.application.concert_details import ConcertDetails
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.application.staffing import Staffing
 from setlist_bot.application.trash import RETENTION
+from setlist_bot.domain.concerts import today
 from setlist_bot.domain.entities import Concert, GigInvitation, GigSlot, Membership, now
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.miniapp.app import create_app
@@ -40,6 +41,35 @@ def form(**changes):
 
 def observed(row):
     return {"performance": row["id"], "version": row["version"], "epoch": row["epoch"]}
+
+
+async def test_creation_options_only_count_past_active_performances(engine, world):
+    await setup_workspace(engine, world)
+    group = world.group.id
+    async with PostgresUnitOfWork(engine) as uow:
+        dates = today()
+        lists = Setlists(uow.store, world.admin)
+        for index, city in enumerate(("Тула", "Казань", "Казань", "Москва", "москва", "Москва")):
+            await lists.create(group, dates - timedelta(days=index + 1), city=city)
+        await lists.create(group, dates - timedelta(days=8), city="Пермь")
+        deleted = await lists.create(group, dates - timedelta(days=9), city="Омск")
+        deleted.deleted_at = now()
+        await lists.create(group, dates + timedelta(days=8), city="Омск")
+        await lists.create(world.other.id, dates - timedelta(days=1), city="Омск")
+        staffing = Staffing(uow.store, world.admin)
+        role = await staffing.role(group, "Вокал")
+        lineup = await staffing.template(group, "Основной", [{"role_id": str(role.id)}])
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        await get(client, 2, "performance_options", 403, band=str(group))
+        options = await get(client, 1, "performance_options", band=str(group))
+        assert options == {
+            "types": {"solo": "Сольник", "corporate": "Корпорат", "festival": "Фест"},
+            "cities": ["Москва", "Казань", "Тула"],
+            "lineups": [{"id": str(lineup.id), "name": "Основной"}],
+        }
+        admin = await post(client, 1, "open_repertoire", {"band": str(group)})
+        preview = await step(client, engine, admin, "create", lineup="none", **form())
+        assert not preview["lineup"]
 
 
 async def test_create_previews_lineups_and_is_idempotent(engine, world):

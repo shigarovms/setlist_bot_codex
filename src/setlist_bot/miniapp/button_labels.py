@@ -132,6 +132,9 @@ BOT_BUTTONS = {
         "delete": "delete_concert_button",
         "confirm": "confirm_button",
         "restore": "restore_concert_button",
+        "solo": "concert_type_solo",
+        "corporate": "concert_type_corporate",
+        "festival": "concert_type_festival",
     },
     "workspace-band-trash": {
         "restore": "restore_group_button",
@@ -144,9 +147,6 @@ BOT_BUTTONS = {
         "pdf": "export_settings",
     },
     "shared-setlist": {
-        "addPause": "selection_pause",
-        "up": "permanent_up",
-        "down": "permanent_down",
         "variants": "menu_variants",
         "apply": "submission_apply",
         "restore": "revision_restore",

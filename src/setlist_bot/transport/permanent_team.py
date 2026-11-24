@@ -8,6 +8,7 @@ from setlist_bot.application.user_lookup import known_user
 from setlist_bot.domain.entities import StaffContact, StaffRole, User
 from setlist_bot.domain.rules import require
 from setlist_bot.domain.staff_input import role_person
+from setlist_bot.domain.telegram_identity import fallback_profile, person_caption
 from setlist_bot.transport.controller import Controller, Response
 from setlist_bot.transport.response_context import staffing_context
 from setlist_bot.transport.staffing import action
@@ -110,15 +111,23 @@ async def handle(c: Controller, operation: str, data: dict[str, Any]) -> Respons
     for number, contact in enumerate(active, start=1):
         person = people[contact.user_id]
         primary = " · " + c.t("permanent_primary") if number == 1 else ""
-        names.append(f"{number}. {person.display_name or person.telegram_id}{primary}")
+        names.append(f"{number}. {person_caption(person, registered=True, fallback='—')}{primary}")
     for contact in ordered:
         if contact.preference == "hidden":
             person = people[contact.user_id]
             names.append(
-                f"{person.display_name or person.telegram_id} · " + c.t("staff_hidden_label")
+                f"{person_caption(person, registered=True, fallback='—')} · "
+                + c.t("staff_hidden_label")
             )
-    text = f"{role.name} · {user.display_name or user.telegram_id}\n\n" + "\n".join(names)
+    text = f"{role.name} · {person_caption(user, registered=True, fallback='—')}\n\n" + "\n".join(
+        names
+    )
     movement = []
+    profiles = [
+        (str(person.telegram_id), profile)
+        for person in people.values()
+        if (profile := fallback_profile(person))
+    ]
     if row in active:
         position = active.index(row)
         for step, label in ((-1, "permanent_up"), (1, "permanent_down")):
@@ -131,6 +140,7 @@ async def handle(c: Controller, operation: str, data: dict[str, Any]) -> Respons
     return Response(
         text,
         [
+            *profiles,
             (c.t("permanent_edit"), action(c, "prompt", field="permanent", **target)),
             *movement,
             (

@@ -1,6 +1,6 @@
 import { fillButtonLabel, withBotLabels } from "./bot-labels.js";
 import { requestDialog } from "./workspace-request-dialog.js";
-import { mountLineupForm } from "./workspace-staffing.js";
+import { mountLineupForm, performerCaption } from "./workspace-staffing.js";
 
 const words = withBotLabels("workspace-roster", {
   ru: {
@@ -15,7 +15,7 @@ const words = withBotLabels("workspace-roster", {
     busyDay: "Есть конфликт", tentative: "Возможен конфликт", unknown: "Конфликтов не найдено",
     force: "Подтверждаю действие при конфликте занятости",
     pick: "Проверить", myself: "Назначить себя",
-    outside: "Найти по Telegram ID или @username", none: "Подходящих знакомых исполнителей пока нет.",
+    outside: "Найти по @username", none: "Подходящих знакомых исполнителей пока нет.",
     waitingReplacement: "Ищем подмену", substituted: "Подмена утверждена",
     candidateInvited: "Кандидат на подмену", sendReplacement: "Пригласить на подмену",
     assignReplacement: "Встать на подмену", cancelReplacementHint: "Приглашения кандидатам будут отозваны.",
@@ -35,7 +35,7 @@ const words = withBotLabels("workspace-roster", {
     busyDay: "Conflicting booking", tentative: "Possible conflict", unknown: "No known conflict",
     force: "Continue despite the availability conflict",
     pick: "Check", myself: "Assign myself",
-    outside: "Find by Telegram ID or @username", none: "No matching performers in your directory yet.",
+    outside: "Find by @username", none: "No matching performers in your directory yet.",
     waitingReplacement: "Looking for a substitute", substituted: "Substitution approved",
     candidateInvited: "Substitute candidate", sendReplacement: "Invite substitute",
     assignReplacement: "Take over the role", cancelReplacementHint: "Invitations to candidates will be withdrawn.",
@@ -79,7 +79,7 @@ export function showRoster({ root, data, language, dateText, request, preview, r
     const panel = modal(t[add ? "add" : "prepare"]);
     const initial = {
       name: data.name || t.title,
-      rows: add ? [] : data.slots.map(row => ({ role: row.role, reference: row.preferred?.reference })),
+      rows: add ? [] : data.slots.map(row => ({ role: row.role, ...row.preferred })),
     };
     mountLineupForm({
       panel, language, initial, preview, showName: false, single: add, allowEmpty: !add,
@@ -107,8 +107,11 @@ export function showRoster({ root, data, language, dateText, request, preview, r
 
   function showReview(panel, record) {
     const list = el("ul", "", { class: "workspace-list" });
-    for (const row of record.review)
-      list.append(el("li", `${row.role} · ${row.person} · ${availability(row.status)}`));
+    for (const row of record.review) {
+      const item = el("li", `${row.role} · `);
+      item.append(performerCaption({ name: row.person, profile_url: row.profile_url }), ` · ${availability(row.status)}`);
+      list.append(item);
+    }
     const conflict = record.review.some(row => row.status === "busy");
     const recipients = record.recipients ?? record.review.filter(row => !row.self).length;
     const allSelf = recipients === 0;
@@ -163,7 +166,7 @@ export function showRoster({ root, data, language, dateText, request, preview, r
         if (!rows.length) panel.body.append(el("p", t.none));
         for (const person of rows) {
           const row = el("li");
-          row.append(el("strong", person.name), el("p", availability(person.status)),
+          row.append(performerCaption(person), el("p", availability(person.status)),
             button(t.pick, event => lookup(event.currentTarget, person.id)));
           list.append(row);
         }
@@ -208,13 +211,19 @@ export function showRoster({ root, data, language, dateText, request, preview, r
     const card = el("li");
     card.append(el("h3", slot.role));
     if (!slot.required) card.append(el("p", t.optional));
-    else if (!slot.invitations.length) card.append(el("p", slot.preferred ? `${t.candidate} · ${slot.preferred.name}` : t.vacancy));
+    else if (!slot.invitations.length) {
+      const name = el("p", slot.preferred ? `${t.candidate} · ` : t.vacancy);
+      if (slot.preferred) name.append(performerCaption(slot.preferred));
+      card.append(name);
+    }
     for (const row of slot.invitations) {
-      const summary = [row.name, t[row.status]];
+      const summary = [t[row.status]];
       if (row.needs_replacement) summary.push(t.waitingReplacement);
       if (row.substituted) summary.push(t.substituted);
       if (row.replacement) summary.push(t.candidateInvited);
-      card.append(el("p", summary.join(" · ")));
+      const line = el("p");
+      line.append(performerCaption(row), ` · ${summary.join(" · ")}`);
+      card.append(line);
       if (data.admin) {
         const controls = el("div", "", { class: "toolbar" });
         if (data.upcoming && row.status === "confirmed") {

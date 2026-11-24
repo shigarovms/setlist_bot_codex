@@ -1,5 +1,6 @@
 import { withBotLabels } from "./bot-labels.js";
 import { requestDialog } from "./workspace-request-dialog.js";
+import { performerCaption } from "./workspace-staffing.js";
 
 const copy = withBotLabels("workspace-team", {
   ru: {
@@ -10,7 +11,7 @@ const copy = withBotLabels("workspace-team", {
     waiting: "Предложенные роли", requested: "Запрошенные роли",
     inviteIntro: "Приглашение даёт доступ к коллективу после принятия.",
     addIntro: "Коллектив предлагает вам дополнительные роли.",
-    reference: "Telegram ID или @username", roleInput: "Роли, по одной на строку",
+    reference: "@username", roleInput: "Роли, по одной на строку",
     request_roles: "Запросить новые роли",
     removeHelp: "Подтверждённое участие в будущих выступлениях сохранится.",
     gigs: "Подтверждённые будущие выступления", noGigs: "Подтверждённых будущих выступлений нет.",
@@ -29,7 +30,7 @@ const copy = withBotLabels("workspace-team", {
     waiting: "Proposed roles", requested: "Requested roles",
     inviteIntro: "Accepting the invitation gives you access to the band.",
     addIntro: "The band has offered you additional roles.",
-    reference: "Telegram ID or @username", roleInput: "Roles, one per line",
+    reference: "@username", roleInput: "Roles, one per line",
     request_roles: "Request new roles",
     removeHelp: "Confirmed bookings for upcoming performances will be kept.",
     gigs: "Confirmed upcoming performances", noGigs: "There are no confirmed upcoming performances.",
@@ -144,10 +145,10 @@ export function teamView({ root, language, requests, refresh, status, dateText, 
       try {
         const person = await requests.recipient(identifier);
         if (!panel.dialog.open) return;
-        const username = person.username ? `@${person.username}` : "";
         panel.message.textContent = "";
-        panel.body.replaceChildren(el("h3", person.name),
-          el("p", [username, `Telegram ID ${person.telegram_id}`].filter(Boolean).join(" · ")),
+        const heading = el("h3");
+        heading.append(performerCaption(person));
+        panel.body.replaceChildren(heading,
           el("p", value, { class: "performance-info" }),
           button(t.invite, event => panel.send(event.currentTarget, {
             action, target: person.id, reference: identifier, roles: value,
@@ -169,7 +170,9 @@ export function teamView({ root, language, requests, refresh, status, dateText, 
     const list = el("ul", "", { class: "workspace-list" });
     for (const row of data.members) {
       const item = el("li");
-      item.append(el("h3", row.name), el("p", `${t[row.right]} · ${t[row.status]}`));
+      const heading = el("h3");
+      heading.append(performerCaption(row));
+      item.append(heading, el("p", `${t[row.right]} · ${t[row.status]}`));
       const roles = el("div", "", { class: "toolbar" });
       for (const role of row.roles) {
         roles.append(data.admin ? el("a", role.name, { href: contactUrl(role.id) }) : el("span", role.name));

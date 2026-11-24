@@ -195,7 +195,7 @@ class Groups:
                 group_id,
                 self.user.profile.get("name")
                 or self.user.display_name
-                or str(self.user.telegram_id),
+                or (f"@{self.user.username}" if self.user.username else "—"),
             )
         )
         if member.invitation and set(member.invitation["roles"]) == set(roles):
@@ -272,7 +272,7 @@ class Groups:
             user.profile.get("name")
             or (rows[0].musical_role if rows else "")
             or user.display_name
-            or str(user.telegram_id)
+            or (f"@{user.username}" if user.username else "—")
         )
 
     async def administrator(self, group_id: UUID, member_id: UUID, grant: bool) -> None:

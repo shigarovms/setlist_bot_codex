@@ -53,16 +53,15 @@ async def members(c: Controller, group_id: UUID, page: int = 0) -> Response:
     roles = {r.id: r.name for r in await c.store.find(StaffRole, group_id=group_id)}
     contacts = await c.store.find(StaffContact, group_id=group_id, permanent=True)
     from setlist_bot.domain.entities import User
+    from setlist_bot.domain.telegram_identity import fallback_profile, person_caption
 
     people = {u.id: u for u in await c.store.get_many(User, {m.user_id for m in rows})}
     lines, buttons = [group.name, "", c.t("permanent_title")], []
     for i, member in enumerate(sorted(rows, key=lambda m: (m.user_id != group.owner_id, m.id))):
         person = people[member.user_id]
-        name = (
-            person.profile.get("name")
-            or member.musical_role
-            or person.display_name
-            or str(person.telegram_id)
+        nickname = member.musical_role if member.musical_role != str(person.telegram_id) else ""
+        name = nickname or person_caption(
+            person, registered=member.status == "active", fallback="—"
         )
         names = [roles[r.role_id] for r in contacts if r.user_id == member.user_id]
         right = "owner" if member.user_id == group.owner_id else member.role
@@ -76,6 +75,8 @@ async def members(c: Controller, group_id: UUID, page: int = 0) -> Response:
             lines.append(c.t("team_pending") + ": " + ", ".join(member.requested_roles))
         if not page * 10 <= i < (page + 1) * 10:
             continue
+        if url := fallback_profile(person):
+            buttons.append((str(person.telegram_id), url))
         for contact in contacts:
             if contact.user_id == member.user_id:
                 from setlist_bot.transport.staffing import action
