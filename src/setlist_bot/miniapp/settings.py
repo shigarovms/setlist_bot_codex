@@ -11,6 +11,12 @@ class MiniAppSettings(CalendarSettings):
     port: int = Field(default=8091, ge=1, le=65535)
     auth_key: SecretStr
     public_base_url: str
+    browser_login_secret: SecretStr | None = None
+
+    @field_validator("browser_login_secret", mode="before")
+    @classmethod
+    def empty_login_config(cls, value: str | None) -> str | None:
+        return value or None
 
     @field_validator("public_base_url")
     @classmethod

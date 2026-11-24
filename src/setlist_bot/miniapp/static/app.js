@@ -1,7 +1,8 @@
 import { clone, clock, total, numbered, wire, move, asText } from "./model.js";
 import { DraftPersistence } from "./persistence.js";
 import { bandUrl, showWorkspace, workspaceParams, workspaceText } from "./workspace.js";
-const tg = window.Telegram?.WebApp,
+const telegram = window.Telegram?.WebApp;
+const tg = telegram?.initData ? telegram : null,
   $ = (id) => document.getElementById(id);
 const words = {
   ru: {
@@ -229,7 +230,7 @@ async function api(operation, payload = {}, method = "GET") {
     response = await fetch(url, {
       method,
       headers: {
-        Authorization: `tma ${tg?.initData ?? ""}`,
+        ...(tg ? { Authorization: `tma ${tg.initData}` } : {}),
         ...(method === "POST" ? { "Content-Type": "application/json" } : {}),
       },
       body: method === "POST" ? JSON.stringify(body) : undefined,
@@ -1206,11 +1207,6 @@ async function boot() {
       else location.assign(bandUrl(workspaceBand));
     });
   }
-  if (!tg?.initData) {
-    status(t("auth"), true);
-    $("save").disabled = true;
-    return;
-  }
   try {
     state = await api(session ? "state" : "launch");
     session = state.session;
@@ -1225,6 +1221,11 @@ async function boot() {
     render();
     status(t("ready"));
   } catch (error) {
+    if (!tg && error.data?.error === "miniapp_auth") {
+      $("editor").hidden = true;
+      await showWorkspace({ api, authenticated: false });
+      return;
+    }
     status(error.message, true);
     if (error.data?.action_url) {
       $("access-request").hidden = false;

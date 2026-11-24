@@ -13,11 +13,20 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.miniapp_catalog import MiniCatalog
 from setlist_bot.application.workspace import Workspace
-from setlist_bot.domain.entities import Confirmation, User
+from setlist_bot.domain.entities import Confirmation, User, now
 from setlist_bot.domain.miniapp_auth import verify_init_data
 from setlist_bot.domain.rules import AppError
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.infrastructure.runtime import check_schema
+from setlist_bot.miniapp.browser_login import (
+    CALLBACK_PATH,
+    FLOW_COOKIE,
+    SESSION_COOKIE,
+    BrowserLogin,
+    browser_session,
+    clear_cookie,
+    start_session,
+)
 from setlist_bot.miniapp.settings import MiniAppSettings
 from setlist_bot.transport.i18n import tr
 
@@ -98,17 +107,78 @@ async def asset(request: web.Request) -> web.Response:
     )
 
 
+async def login_config(request: web.Request) -> web.Response:
+    settings = request.app[SETTINGS]
+    return web.json_response(
+        {
+            "enabled": settings.browser_login_secret is not None,
+            "bot_url": f"https://t.me/{settings.bot_username}",
+        }
+    )
+
+
+async def login_begin(request: web.Request) -> web.Response:
+    return BrowserLogin(request.app[SETTINGS]).begin()
+
+
+async def login_callback(request: web.Request) -> web.Response:
+    login = BrowserLogin(request.app[SETTINGS])
+    gate = request.app[GATE]
+    if gate.locked():
+        raise web.HTTPServiceUnavailable()
+    async with gate:
+        try:
+            actor = await login.verify_callback(request)
+        except AppError:
+            response = web.Response(status=303, headers={"Location": "/miniapp/?login=failed"})
+        else:
+            async with PostgresUnitOfWork(request.app[ENGINE]) as uow:
+                users = await uow.store.find(User, telegram_id=actor)
+                target = "/miniapp/" if users else "/miniapp/?login=start_bot"
+                response = web.Response(status=303, headers={"Location": target})
+                if users:
+                    start_session(uow.store, users[0], response)
+        clear_cookie(response, FLOW_COOKIE, CALLBACK_PATH)
+        return response
+
+
+async def logout(request: web.Request) -> web.Response:
+    settings = request.app[SETTINGS]
+    if (
+        settings.browser_login_secret is None
+        or request.headers.get("Origin") != settings.public_base_url
+    ):
+        raise AppError("miniapp_auth")
+    gate = request.app[GATE]
+    if gate.locked():
+        raise web.HTTPServiceUnavailable()
+    async with gate, PostgresUnitOfWork(request.app[ENGINE]) as uow:
+        try:
+            row = await browser_session(uow.store, request)
+        except AppError:
+            pass
+        else:
+            row.expires_at = now()
+    response = web.json_response({"status": "ok"})
+    clear_cookie(response, SESSION_COOKIE, "/miniapp/")
+    return response
+
+
 async def api(request: web.Request) -> web.Response:
     settings = request.app[SETTINGS]
     operation = request.match_info["operation"]
     if request.method == "POST" and request.headers.get("Origin") != settings.public_base_url:
         raise AppError("miniapp_auth")
     header = request.headers.get("Authorization", "")
-    if not header.startswith("tma "):
+    actor = None
+    if header.startswith("tma "):
+        actor = verify_init_data(
+            header[4:],
+            base64.urlsafe_b64decode(settings.auth_key.get_secret_value()),
+            allow_group=True,
+        )
+    elif header or settings.browser_login_secret is None or not request.cookies.get(SESSION_COOKIE):
         raise AppError("miniapp_auth")
-    actor = verify_init_data(
-        header[4:], base64.urlsafe_b64decode(settings.auth_key.get_secret_value()), allow_group=True
-    )
     if request.app[GATE].locked():
         return web.json_response(
             {"error": "busy", "message": "Попробуйте позже / Try again"}, status=503
@@ -118,10 +188,14 @@ async def api(request: web.Request) -> web.Response:
         if not isinstance(payload, dict):
             raise ValueError("Expected an object")
         async with PostgresUnitOfWork(request.app[ENGINE]) as uow:
-            users = await uow.store.find(User, telegram_id=actor)
-            if not users:
-                raise AppError("miniapp_auth")
-            user = users[0]
+            if actor is None:
+                browser = await browser_session(uow.store, request)
+                user = await uow.store.get(User, browser.user_id)
+            else:
+                users = await uow.store.find(User, telegram_id=actor)
+                if not users:
+                    raise AppError("miniapp_auth")
+                user = users[0]
             request[LANGUAGE] = user.language
             service = MiniDrafts(uow.store, user)
             if operation == "bands" and request.method == "GET":
@@ -142,7 +216,7 @@ async def api(request: web.Request) -> web.Response:
                 # RU: Цель берётся только из проверенного Telegram start_param.
                 # EN: Never authorize a target supplied through initDataUnsafe or URL alone.
                 start = dict(parse_qsl(header[4:])).get("start_param", "")
-                if not start.startswith("sl_"):
+                if actor is None or not start.startswith("sl_"):
                     raise AppError("miniapp_auth")
                 editor = await service.open_template(UUID(start[3:]))
                 result = await service.state(editor.id)
@@ -267,6 +341,10 @@ def create_app(settings: MiniAppSettings, engine: AsyncEngine | None = None) -> 
     app.router.add_get("/miniapp/{asset}", asset)
     app.router.add_route("GET", "/miniapp/api/{operation}", api)
     app.router.add_route("POST", "/miniapp/api/{operation}", api)
+    app.router.add_get("/miniapp/auth/config", login_config)
+    app.router.add_get("/miniapp/auth/login", login_begin, allow_head=False)
+    app.router.add_get(CALLBACK_PATH, login_callback, allow_head=False)
+    app.router.add_post("/miniapp/auth/logout", logout)
     app.router.add_get("/healthz", health)
 
     async def startup(app: web.Application) -> None:

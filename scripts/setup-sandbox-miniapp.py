@@ -180,6 +180,7 @@ def main():
     # RU: Это только ключ проверки initData, не токен доступа к Bot API.
     # EN: The public process cannot call Telegram with this derived validation key.
     key = base64.urlsafe_b64encode(hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest())
+    login_secret = previous.get("MINIAPP_BROWSER_LOGIN_SECRET")
     private_write(
         path,
         (
@@ -187,6 +188,7 @@ def main():
             "MINIAPP_EXPECTED_BOT_ID=1110437563\nMINIAPP_ENVIRONMENT=sandbox\n"
             "MINIAPP_BOT_USERNAME=botToPract696_bot\n"
             f"MINIAPP_PUBLIC_BASE_URL={origin}\nMINIAPP_AUTH_KEY={key.decode()}\n"
+            + (f"MINIAPP_BROWSER_LOGIN_SECRET={login_secret}\n" if login_secret else "")
         ),
     )
     create = (

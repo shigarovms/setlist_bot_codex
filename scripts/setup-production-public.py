@@ -103,6 +103,8 @@ def role_config(kind, origin, token, values, private_write):
         entries["MINIAPP_AUTH_KEY"] = base64.urlsafe_b64encode(
             hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
         ).decode()
+        if saved.get("MINIAPP_BROWSER_LOGIN_SECRET"):
+            entries["MINIAPP_BROWSER_LOGIN_SECRET"] = saved["MINIAPP_BROWSER_LOGIN_SECRET"]
     if path.exists():
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
         private_write(ROOT / (path.name + ".before-" + stamp), path.read_text())
