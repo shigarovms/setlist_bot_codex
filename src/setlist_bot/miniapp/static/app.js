@@ -1,5 +1,6 @@
 import { clone, clock, total, numbered, wire, move, asText } from "./model.js";
 import { DraftPersistence } from "./persistence.js";
+import { bandUrl, showWorkspace, workspaceParams, workspaceText } from "./workspace.js";
 const tg = window.Telegram?.WebApp,
   $ = (id) => document.getElementById(id);
 const words = {
@@ -182,6 +183,8 @@ let lang = "ru",
   pauseDialogSerial = 0;
 const t = (key) => words[lang][key] ?? key;
 let session = new URLSearchParams(location.hash.slice(1)).get("session");
+const workspaceBand = workspaceParams.get("band");
+const workspaceDraft = session && workspaceBand && workspaceParams.get("view") === "draft";
 function status(text, error = false) {
   $("status").textContent = text;
   $("status").classList.toggle("error", error);
@@ -1089,7 +1092,7 @@ $("publish").addEventListener("click", async () => {
           ? "Предложение отправлено в группу."
           : "Proposal sent to the group.",
       );
-      tg?.close?.();
+      if (!workspaceDraft) tg?.close?.();
     } else if (result.status === "failed") {
       publishAttempt = null;
       status(t("failed"), true);
@@ -1140,6 +1143,10 @@ $("back-bot").addEventListener("click", async () => {
     render();
     return;
   }
+  if (workspaceDraft) {
+    location.assign(bandUrl(workspaceBand, workspaceParams.get("past"), workspaceParams.get("page")));
+    return;
+  }
   if (tg?.openTelegramLink) tg.openTelegramLink(state.bot_url);
   else location.href = state.bot_url;
   tg?.close?.();
@@ -1179,11 +1186,26 @@ function labels() {
     "average-submit": "apply",
   }))
     $(id).textContent = t(key);
+  if (workspaceDraft) $("back-bot").textContent = workspaceText(lang, "performances");
   $("undo").setAttribute("aria-label", t("undoLabel"));
   $("search").placeholder = t("search");
   document.documentElement.lang = lang;
 }
 async function boot() {
+  // Dispatch only. The API checks the signature before trusting the launch target.
+  const launch = new URLSearchParams(tg?.initData ?? "").get("start_param");
+  if (!session && (workspaceParams.has("workspace") || !launch?.startsWith("sl_"))) {
+    await showWorkspace({ api, authenticated: Boolean(tg?.initData), backButton: tg?.BackButton });
+    return;
+  }
+  $("editor").hidden = false;
+  if (workspaceDraft) {
+    tg?.BackButton?.show?.();
+    tg?.BackButton?.onClick?.(() => {
+      if (saver) $("back-bot").click();
+      else location.assign(bandUrl(workspaceBand));
+    });
+  }
   if (!tg?.initData) {
     status(t("auth"), true);
     $("save").disabled = true;
@@ -1219,4 +1241,8 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden && saver && dirty() && !saver.blocked)
     saver.flush().catch(() => {});
 });
+if (workspaceDraft)
+  window.addEventListener("beforeunload", (event) => {
+    if (dirty()) event.preventDefault();
+  });
 boot();

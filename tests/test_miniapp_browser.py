@@ -135,12 +135,15 @@ class Browser:
 @pytest.mark.skipif(
     shutil.which("chromium") is None, reason="Chromium is optional for local UI check"
 )
-@pytest.mark.parametrize("public_launch", [False, True])
+@pytest.mark.parametrize("launch_mode", ["session", "public", "workspace"])
 async def test_phone_editor_drag_history_pause_save_and_live_themes(
-    engine, world, tmp_path, public_launch
+    engine, world, tmp_path, launch_mode, monkeypatch
 ):
     from datetime import date
 
+    public_launch = launch_mode == "public"
+    if launch_mode == "workspace":
+        monkeypatch.setattr("setlist_bot.application.workspace.today", lambda: date(2026, 12, 31))
     async with PostgresUnitOfWork(engine) as uow:
         from setlist_bot.application.catalog import Catalog
 
@@ -222,9 +225,26 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 {
                     "url": origin
                     + "/miniapp/"
-                    + ("" if public_launch else "#session=" + str(identifier)),
+                    + ("#session=" + str(identifier) if launch_mode == "session" else ""),
                 },
             )
+            if launch_mode == "workspace":
+                await browser.wait("document.querySelectorAll('.workspace-list a').length === 2")
+                await browser.tap(".workspace-list a")
+                await browser.wait(
+                    "document.querySelectorAll('.workspace-list button').length === 2"
+                )
+                await browser.tap(".workspace-list button")
+                await browser.wait("document.querySelectorAll('.catalog-entry').length === 2")
+                assert "Новый год" in await browser.js(
+                    "document.getElementById('event').textContent"
+                )
+                await browser.js("document.getElementById('back-bot').click()")
+                await browser.wait(
+                    "document.querySelectorAll('.workspace-list button').length === 2"
+                )
+                assert await browser.js("document.getElementById('editor').hidden")
+                return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
             assert await browser.js(
                 "Array.from(document.querySelectorAll('#average-pause')).length===1 && "

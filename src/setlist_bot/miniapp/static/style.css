@@ -41,6 +41,41 @@ main {
   margin: auto;
   padding: 18px 14px 0;
 }
+#workspace-home {
+  max-width: 720px;
+  padding-bottom: 24px;
+}
+.workspace-list {
+  display: grid;
+  gap: 10px;
+  list-style: none;
+  padding: 0;
+}
+.workspace-list li {
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+.workspace-list h2 { margin-top: 0; }
+.workspace-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 12px;
+}
+#workspace-home a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--text);
+  text-underline-offset: 4px;
+}
+#workspace-home a[aria-current] {
+  font-weight: 700;
+  text-decoration-thickness: 2px;
+}
 header h1 {
   font-size: 23px;
   line-height: 1.2;

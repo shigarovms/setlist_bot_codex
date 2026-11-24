@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.miniapp_catalog import MiniCatalog
+from setlist_bot.application.workspace import Workspace
 from setlist_bot.domain.entities import Confirmation, User
 from setlist_bot.domain.miniapp_auth import verify_init_data
 from setlist_bot.domain.rules import AppError
@@ -85,6 +86,7 @@ async def asset(request: web.Request) -> web.Response:
     types = {
         "index.html": "text/html",
         "app.js": "text/javascript",
+        "workspace.js": "text/javascript",
         "model.js": "text/javascript",
         "persistence.js": "text/javascript",
         "style.css": "text/css",
@@ -122,6 +124,20 @@ async def api(request: web.Request) -> web.Response:
             user = users[0]
             request[LANGUAGE] = user.language
             service = MiniDrafts(uow.store, user)
+            if operation == "bands" and request.method == "GET":
+                return web.json_response(await Workspace(uow.store, user).bands())
+            if operation == "performances" and request.method == "GET":
+                past, page = payload.get("past", "0"), int(payload.get("page", "0"))
+                if past not in ("0", "1") or not 0 <= page <= 10000:
+                    raise ValueError("Invalid page")
+                return web.json_response(
+                    await Workspace(uow.store, user).performances(
+                        UUID(payload["band"]), past=past == "1", page=page
+                    )
+                )
+            if operation == "open_draft" and request.method == "POST":
+                editor = await service.create(UUID(payload["band"]), UUID(payload["performance"]))
+                return web.json_response({"session": str(editor.id)})
             if operation == "launch" and request.method == "GET":
                 # RU: Цель берётся только из проверенного Telegram start_param.
                 # EN: Never authorize a target supplied through initDataUnsafe or URL alone.

@@ -840,6 +840,7 @@ class PostgresStore:
         limit: int,
         past: bool = False,
         admin_only: bool = False,
+        group_id: UUID | None = None,
     ) -> list[tuple[e.Concert, e.Group]]:
         concerts, groups = (metadata.tables[name] for name in ("concerts", "groups"))
         upcoming = concerts.c.date >= current
@@ -861,6 +862,8 @@ class PostgresStore:
             .offset(offset)
             .limit(limit)
         )
+        if group_id is not None:
+            query = query.where(concerts.c.group_id == group_id)
         return [(row[0], row[1]) for row in (await self.session.execute(query)).all()]
 
     async def concert_cards(self, group_id: UUID, concert_id: UUID) -> list[e.Confirmation]:

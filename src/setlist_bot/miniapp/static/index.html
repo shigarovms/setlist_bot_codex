@@ -7,13 +7,21 @@
       content="width=device-width,initial-scale=1,viewport-fit=cover"
     />
     <meta name="color-scheme" content="light dark" />
-    <title>setListBot — редактор</title>
+    <title>setListBot</title>
     <link rel="stylesheet" href="./style.css" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script type="module" src="./app.js"></script>
   </head>
   <body>
-    <main>
+    <main id="workspace-home" hidden>
+      <header>
+        <div class="eyebrow">setListBot</div>
+        <h1 id="workspace-title">Мои коллективы</h1>
+      </header>
+      <div id="workspace-content"></div>
+      <p id="workspace-status" role="status" aria-live="polite"></p>
+    </main>
+    <main id="editor" hidden>
       <header>
         <div class="eyebrow">setListBot</div>
         <h1 id="heading">Ваш черновик</h1>

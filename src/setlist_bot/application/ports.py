@@ -38,6 +38,7 @@ class Store(Protocol):
         limit: int,
         past: bool = False,
         admin_only: bool = False,
+        group_id: UUID | None = None,
     ) -> list[tuple[Concert, Group]]: ...
 
     async def expired[T: Entity](self, kind: type[T], field: str, before: datetime) -> list[T]: ...
