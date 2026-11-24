@@ -1,8 +1,9 @@
-const words = {
+import { withBotLabels } from "./bot-labels.js";
+const words = withBotLabels("workspace-export", {
   ru: {
-    pdf: "Экспорт PDF", language: "Язык", audience: "Для кого", musicians: "Для музыкантов",
-    lights: "Для световика", all: "Для всех · два PDF", font: "Шрифт", size: "Размер, pt", align: "Выравнивание",
-    left: "По левому краю", center: "По центру", options: "Оформление PDF для музыкантов",
+    language: "Язык", audience: "Для кого",
+    font: "Шрифт", size: "Размер, pt", align: "Выравнивание",
+    left: "По левому краю", center: "По центру",
     settings: "Сохранить оформление", download: "Скачать PDF", send: "Отправить в личный чат",
     downloadMusicians: "Скачать PDF для музыкантов", downloadLights: "Скачать PDF для световика",
     waiting: "Запрос обрабатывается…", ready: "PDF готовы к скачиванию.", saved: "Оформление сохранено.",
@@ -10,16 +11,16 @@ const words = {
     retry: "Проверить результат",
   },
   en: {
-    pdf: "Export PDF", language: "Language", audience: "Audience", musicians: "For musicians",
-    lights: "For lighting", all: "For everyone · two PDFs", font: "Font", size: "Size, pt", align: "Alignment",
-    left: "Left", center: "Center", options: "Musician PDF appearance",
+    language: "Language", audience: "Audience",
+    font: "Font", size: "Size, pt", align: "Alignment",
+    left: "Left", center: "Center",
     settings: "Save appearance", download: "Download PDF", send: "Send to private chat",
     downloadMusicians: "Download musician PDF", downloadLights: "Download lighting PDF",
     waiting: "Processing your request…", ready: "The PDFs are ready to download.", saved: "Appearance saved.",
     sent: "The bot sent the PDFs to your private chat.",
     retry: "Check result",
   },
-};
+});
 
 function el(tag, value, attributes = {}) {
   const node = document.createElement(tag);

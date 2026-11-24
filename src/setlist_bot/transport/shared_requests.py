@@ -5,9 +5,10 @@ from uuid import UUID
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlist_menus import REQUEST, SetlistMenus
+from setlist_bot.domain.concerts import concert_label
 from setlist_bot.domain.entities import Concert, Confirmation, Group, Membership, Outbox, User
 from setlist_bot.transport.i18n import tr
-from setlist_bot.transport.render import concert_label, render_setlist
+from setlist_bot.transport.render import render_setlist
 
 
 async def queue_admin_request(store: Store, actor: User, request: Confirmation) -> None:

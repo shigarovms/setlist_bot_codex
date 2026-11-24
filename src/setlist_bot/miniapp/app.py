@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -40,6 +41,7 @@ from setlist_bot.miniapp.browser_login import (
     clear_cookie,
     start_session,
 )
+from setlist_bot.miniapp.button_labels import workspace_button_labels
 from setlist_bot.miniapp.settings import MiniAppSettings
 from setlist_bot.transport.help_texts import workspace_help
 from setlist_bot.transport.i18n import tr
@@ -106,9 +108,16 @@ async def errors(
 
 async def asset(request: web.Request) -> web.Response:
     name = request.match_info.get("asset", "index.html")
+    if name == "bot-labels-data.js":
+        return web.Response(
+            text=f"export const labels = {json.dumps(workspace_button_labels())};",
+            content_type="text/javascript",
+            charset="utf-8",
+        )
     types = {
         "index.html": "text/html",
         "app.js": "text/javascript",
+        "bot-labels.js": "text/javascript",
         "workspace.js": "text/javascript",
         "repertoire-import.js": "text/javascript",
         "repertoire-music.js": "text/javascript",

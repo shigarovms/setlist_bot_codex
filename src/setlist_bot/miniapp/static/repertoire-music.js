@@ -1,49 +1,42 @@
+import { fillButtonLabel, withBotLabels } from "./bot-labels.js";
 import { clock } from "./model.js";
 
-function songCount(n) {
-  const last = n % 10, lastTwo = n % 100;
-  if (lastTwo >= 11 && lastTwo <= 14) return `${n} песен`;
-  return `${n} ${last === 1 ? "песню" : last >= 2 && last <= 4 ? "песни" : "песен"}`;
-}
-
-const words = {
+const words = withBotLabels("repertoire-music", {
   ru: {
-    title: "Найти песни в интернете", query: "Имя исполнителя или ссылка на его страницу",
+    query: "Имя исполнителя или ссылка на его страницу",
     start: "Начать поиск", waiting: "Поиск идёт в фоне и может занять 20–30 минут. Можно вернуться позже.",
-    refresh: "Обновить", cancel: "Отменить поиск", choose: "Выберите исполнителя",
+    cancel: "Отменить поиск", choose: "Выберите исполнителя",
     failed: "Не удалось найти песни. Уточните исполнителя и попробуйте снова.",
     cancelled: "Поиск отменён.", done: n => `Добавлено песен: ${n}.`,
     select: "Отбор песен", count: (selected, total) => `Выбрано ${selected} из ${total}`,
     partial: "Часть источников недоступна. Показаны найденные песни.",
-    all: "Выбрать все", none: "Снять все", selectedOnly: "Только выбранные",
+    selectedOnly: "Только выбранные",
     duration: "Длительность ММ:СС", save: "Указать длительность", missing: "Нет длительности",
     needDuration: title => `Укажите длительность песни «${title}» или снимите отметку.`,
-    empty: "Нет выбранных песен.", previous: "Назад", next: "Дальше",
+    empty: "Нет выбранных песен.",
     preview: "Предпросмотр импорта", duplicates: n => `Уже в каталоге: ${n}.`,
     bpm: ({ found, missing, conflicts }) => `BPM найден: ${found}. Нет данных: ${missing}. Расхождения: ${conflicts}.`,
-    back: "К отбору", commit: n => `Добавить ${songCount(n)}`,
     noNew: "Все выбранные песни уже есть в каталоге.",
     pending: "Запрос обрабатывается…", check: "Проверить результат",
   },
   en: {
-    title: "Find songs online", query: "Artist name or a link to their page",
+    query: "Artist name or a link to their page",
     start: "Start search", waiting: "Search runs in the background and can take up to 20–30 minutes. You can come back later.",
-    refresh: "Refresh", cancel: "Cancel search", choose: "Choose the artist",
+    cancel: "Cancel search", choose: "Choose the artist",
     failed: "Couldn't find songs. Check the artist and try again.",
     cancelled: "Search cancelled.", done: n => `Added ${n} songs.`,
     select: "Select songs", count: (selected, total) => `${selected} of ${total} selected`,
     partial: "Some sources are unavailable. Showing the songs we found.",
-    all: "Select all", none: "Clear all", selectedOnly: "Selected only",
+    selectedOnly: "Selected only",
     duration: "Duration MM:SS", save: "Set duration", missing: "Duration needed",
     needDuration: title => `Set the duration for “${title}” or deselect it.`,
-    empty: "No songs selected.", previous: "Previous", next: "Next",
+    empty: "No songs selected.",
     preview: "Preview import", duplicates: n => `Already in the repertoire: ${n}.`,
     bpm: ({ found, missing, conflicts }) => `BPM found: ${found}. Missing: ${missing}. Conflicts: ${conflicts}.`,
-    back: "Back to selection", commit: n => `Add ${n} ${n === 1 ? "song" : "songs"}`,
     noNew: "All selected songs are already in the repertoire.",
     pending: "Processing your request…", check: "Check result",
   },
-};
+});
 
 const PAGE_SIZE = 20;
 
@@ -102,7 +95,7 @@ export function repertoireMusic({ root, language, band, search, read, request })
     panel.append(controls);
     showPages(visible, trackRow);
     if (!included.length) panel.append(el("p", t.empty));
-    const preview = button(t.preview, () => {
+    const preview = button(t.previewAction, () => {
       const missing = included.find(row => !row.seconds);
       if (!missing) { void action("preview"); return; }
       page = Math.floor(visible.indexOf(missing) / PAGE_SIZE);
@@ -175,7 +168,8 @@ export function repertoireMusic({ root, language, band, search, read, request })
         panel.append(el("h3", t.preview), el("p", t.duplicates(job.duplicates)));
         if (job.bpm) panel.append(el("p", t.bpm(job.bpm)));
         showPages(job.songs, row => el("li", `${row.title} · ${clock(row.duration_seconds)}${row.bpm ? ` · ${row.bpm} BPM` : ""}`));
-        panel.append(job.songs.length ? button(t.commit(job.songs.length), () => action("commit"), true) : el("p", t.noNew),
+        const commit = fillButtonLabel(t.commit, { count: job.songs.length });
+        panel.append(job.songs.length ? button(commit, () => action("commit"), true) : el("p", t.noNew),
           button(t.back, () => action("back")), button(t.cancel, () => action("cancel")));
         break;
       default:

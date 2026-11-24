@@ -1,39 +1,36 @@
+import { withBotLabels } from "./bot-labels.js";
 import { requestDialog } from "./workspace-request-dialog.js";
 
-const words = {
+const words = withBotLabels("workspace-staffing", {
   ru: {
-    contacts: "Знакомые исполнители", lineups: "Сохранённые составы", team: "К постоянной команде",
-    createContact: "Добавить исполнителя", createLineup: "Создать состав", editLineup: "Редактировать состав",
+    team: "К постоянной команде",
+    editLineup: "Редактировать состав",
     emptyContacts: "Знакомых исполнителей пока нет.", emptyLineups: "Сохранённых составов пока нет.",
     noMatches: "Совпадений нет.", search: "Поиск", name: "Название состава", role: "Роль",
     reference: "Telegram ID или @username", optional: "Исполнитель (по желанию)",
     roles: "Роли", noPerson: "Свободная роль", suggested: "Автоподбор", chosen: "Запасной исполнитель",
-    preferred: "Предлагать первым", normal: "Можно приглашать", hidden: "Не предлагать",
     preference: "Подбор на выступления", experience: "Выступлений", alreadyPermanent: "Исполнитель уже в постоянной команде.",
     city: "Город", substitutions: "Подмены", travel: "Выезды", about: "О себе", yes: "Да", no: "Нет",
-    add: "Добавить роль", remove: "Убрать роль", up: "Переместить выше", down: "Переместить ниже",
     quick: "Вставить список ролей", quickHint: "По одной роли на строку. Например «Вокал» или «Гитара: @username».",
-    copy: "Копировать состав", delete: "Удалить состав", deletePrompt: "Удалить этот сохранённый состав?",
+    deletePrompt: "Удалить этот сохранённый состав?",
     preview: "Предпросмотр", back: "Изменить", save: "Сохранить", close: "Закрыть", check: "Проверить результат",
     busy: "Запрос обрабатывается…", done: "Изменения сохранены.",
   },
   en: {
-    contacts: "Known performers", lineups: "Saved lineups", team: "Back to permanent team",
-    createContact: "Add performer", createLineup: "Create lineup", editLineup: "Edit lineup",
+    team: "Back to permanent team",
+    editLineup: "Edit lineup",
     emptyContacts: "No known performers yet.", emptyLineups: "No saved lineups yet.",
     noMatches: "No matches.", search: "Search", name: "Lineup name", role: "Role",
     reference: "Telegram ID or @username", optional: "Performer (optional)",
     roles: "Roles", noPerson: "Open role", suggested: "Suggested performer", chosen: "Fallback performer",
-    preferred: "Suggest first", normal: "Can invite", hidden: "Do not suggest",
     preference: "Performance suggestions", experience: "Performances", alreadyPermanent: "This performer is already on the permanent team.",
     city: "City", substitutions: "Substitutions", travel: "Travel", about: "About", yes: "Yes", no: "No",
-    add: "Add role", remove: "Remove role", up: "Move up", down: "Move down",
     quick: "Paste a list of roles", quickHint: "Use one role per line, such as “Vocals” or “Guitar: @username”.",
-    copy: "Copy lineup", delete: "Delete lineup", deletePrompt: "Delete this saved lineup?",
+    deletePrompt: "Delete this saved lineup?",
     preview: "Preview", back: "Edit", save: "Save", close: "Close", check: "Check result",
     busy: "Processing your request…", done: "Changes saved.",
   },
-};
+});
 
 export function staffingLabel(language, key) { return words[language][key]; }
 

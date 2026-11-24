@@ -1,11 +1,12 @@
+import { withBotLabels } from "./bot-labels.js";
 import { clock } from "./model.js";
 
-const text = {
+const text = withBotLabels("repertoire-import", {
   ru: {
     title: "Импорт песен", source: "Вставьте таблицу из Excel или Google Sheets либо текст CSV",
-    columns: "Сопоставить столбцы", header: "Первая строка", auto: "Определить автоматически",
-    withHeader: "Содержит заголовки", withoutHeader: "Содержит данные",
-    skip: "Пропустить", preview: "Предпросмотр", apply: "Подтвердить импорт",
+    header: "Первая строка", auto: "Определить автоматически",
+
+    preview: "Предпросмотр",
     added: "Новые песни", supplements: "Дополнения", duplicates: "Повторы", errors: "Ошибки",
     ready: "Проверьте изменения перед импортом.", nothing: "В таком виде импортировать нечего.",
     working: "Проверяем таблицу…", pending: "Импорт обрабатывается.", check: "Проверить результат",
@@ -14,16 +15,16 @@ const text = {
   },
   en: {
     title: "Import songs", source: "Paste a table from Excel or Google Sheets, or paste CSV text",
-    columns: "Map columns", header: "First row", auto: "Detect automatically",
-    withHeader: "Contains headers", withoutHeader: "Contains data",
-    skip: "Skip", preview: "Preview", apply: "Confirm import",
+    header: "First row", auto: "Detect automatically",
+
+    preview: "Preview",
     added: "New songs", supplements: "Updates", duplicates: "Duplicates", errors: "Errors",
     ready: "Review the changes before importing.", nothing: "This preview has nothing to import.",
     working: "Checking the table…", pending: "Import is being processed.", check: "Check result",
     success: (added, updated) => `Added ${added} songs and updated ${updated}.`,
     fields: { title: "Title", time: "Duration", lights: "Lights", bpm: "BPM", comment: "Notes" },
   },
-};
+});
 
 function el(tag, label, attributes = {}) {
   const element = document.createElement(tag);

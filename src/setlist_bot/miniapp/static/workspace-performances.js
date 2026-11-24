@@ -1,8 +1,8 @@
-const copy = {
+import { fillButtonLabel, withBotLabels } from "./bot-labels.js";
+const copy = withBotLabels("workspace-performances", {
   ru: {
-    create: "Создать выступление", update: "Параметры выступления", delete: "Переместить в корзину",
-    restore: "Восстановить выступление", trash: "Корзина выступлений", empty: "Корзина пуста.",
-    until: "Можно восстановить до", preview: "Предпросмотр", confirm: "Подтвердить", save: "Сохранить",
+    trash: "Корзина выступлений", empty: "Корзина пуста.",
+    until: "Можно восстановить до", preview: "Предпросмотр", save: "Сохранить",
     back: "Изменить", cancel: "Закрыть", check: "Проверить результат", waiting: "Запрос обрабатывается…",
     date: "Дата", title: "Название", city: "Город", performance_type: "Тип", info: "Информация",
     duration: "Длительность", durationHint: "Минуты или часы:минуты:секунды",
@@ -14,9 +14,8 @@ const copy = {
     deletePrompt: "Выступление, его сет-листы и черновики будут скрыты. Действующие приглашения отменятся. Восстановление доступно 30 дней.",
   },
   en: {
-    create: "Create performance", update: "Performance settings", delete: "Move to trash",
-    restore: "Restore performance", trash: "Performance trash", empty: "The trash is empty.",
-    until: "Can be restored until", preview: "Preview", confirm: "Confirm", save: "Save",
+    trash: "Performance trash", empty: "The trash is empty.",
+    until: "Can be restored until", preview: "Preview", save: "Save",
     back: "Edit", cancel: "Close", check: "Check result", waiting: "Processing your request…",
     date: "Date", title: "Title", city: "City", performance_type: "Type", info: "Information",
     duration: "Duration", durationHint: "Minutes or hours:minutes:seconds",
@@ -27,7 +26,7 @@ const copy = {
     dateChanged: "After changing the date, performers will need to confirm their participation again.",
     deletePrompt: "The performance, its setlists and drafts will be hidden. Active invitations will be cancelled. You can restore the performance for 30 days.",
   },
-};
+});
 
 export function performanceLabel(language, key) { return copy[language][key]; }
 
@@ -46,12 +45,13 @@ function duration(seconds) {
 
 export function performanceAction({ language, action, request, performance, onDone, dateText }) {
   const t = copy[language];
-  const button = el("button", t[action], { type: "button", ...(action === "create" ? { class: "primary" } : {}) });
+  const label = action === "restore" ? fillButtonLabel(t.restore, { name: performance.label }) : t[action];
+  const button = el("button", label, { type: "button", ...(action === "create" ? { class: "primary" } : {}) });
   button.addEventListener("click", open);
   return button;
 
   function open() {
-    const dialog = el("dialog", "", { class: "shared-tools", "aria-label": t[action] });
+    const dialog = el("dialog", "", { class: "shared-tools", "aria-label": label });
     const body = el("div");
     const message = el("p", "", { role: "status" });
     const controls = el("div", "", { class: "toolbar" });
@@ -59,7 +59,7 @@ export function performanceAction({ language, action, request, performance, onDo
     const close = el("button", t.cancel, { type: "button" });
     controls.append(check, close);
     close.addEventListener("click", () => dialog.close());
-    dialog.append(el("h2", t[action]), body, message, controls);
+    dialog.append(el("h2", label), body, message, controls);
     document.body.append(dialog);
     dialog.addEventListener("close", () => dialog.remove(), { once: true });
     let attempt, busy = false;

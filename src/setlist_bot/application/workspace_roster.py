@@ -305,6 +305,7 @@ class WorkspaceRoster:
         }
         conflicts = await self.store.staffing_conflicts(set(people), event.date, event.id)
         return {
+            "recipients": len(set(people) - {self.user.id}),
             "review": [
                 {
                     "role": roles[slot.role_id],

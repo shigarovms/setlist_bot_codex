@@ -1,56 +1,49 @@
+import { fillButtonLabel, withBotLabels } from "./bot-labels.js";
 import { requestDialog } from "./workspace-request-dialog.js";
 import { mountLineupForm } from "./workspace-staffing.js";
 
-const words = {
+const words = withBotLabels("workspace-roster", {
   ru: {
-    title: "Состав выступления", back: "К выступлению", empty: "Добавьте роли для этого выступления.",
-    noSlots: "В составе пока нет ролей.", prepare: "Редактировать состав", add: "Добавить роль",
-    apply: "Выбрать сохранённый состав", applyConfirm: "Применить состав",
+    back: "К выступлению", empty: "Добавьте роли для этого выступления.",
+    noSlots: "В составе пока нет ролей.",
     applyWarning: "Применение другого состава отменит действующие приглашения и подтверждения.",
-    review: "Проверить занятость", suggest: "Выбрать исполнителя", candidate: "Намечен",
-    vacancy: "Свободная роль", optional: "Роль отключена", needed: "Включить роль",
-    disable: "Отключить роль", remove: "Убрать роль", slotWarning: "Действующие приглашения на эту роль будут отменены.",
+    candidate: "Намечен",
+    vacancy: "Свободная роль", optional: "Роль отключена",
+    slotWarning: "Действующие приглашения на эту роль будут отменены.",
     confirmed: "Подтверждено", pending: "Ждём ответа", reconfirm: "Ждём подтверждения новой даты",
     conditional: "Участие под вопросом", accepted: "Подмена согласована исполнителем",
     busyDay: "Есть конфликт", tentative: "Возможен конфликт", unknown: "Конфликтов не найдено",
-    force: "Подтверждаю действие при конфликте занятости", send: "Отправить приглашения",
-    assign: "Подтвердить своё участие", pick: "Проверить", myself: "Назначить себя",
+    force: "Подтверждаю действие при конфликте занятости",
+    pick: "Проверить", myself: "Назначить себя",
     outside: "Найти по Telegram ID или @username", none: "Подходящих знакомых исполнителей пока нет.",
-    remind: "Напомнить", cancel: "Отменить приглашение", cancelBooking: "Отменить участие",
-    requestReplacement: "Запросить подмену", findReplacement: "Подобрать замену",
-    cancelReplacement: "Отменить запрос на подмену", approveReplacement: "Утвердить подмену",
     waitingReplacement: "Ищем подмену", substituted: "Подмена утверждена",
     candidateInvited: "Кандидат на подмену", sendReplacement: "Пригласить на подмену",
     assignReplacement: "Встать на подмену", cancelReplacementHint: "Приглашения кандидатам будут отозваны.",
-    confirm: "Подтвердить", close: "Закрыть", check: "Проверить результат",
+    close: "Закрыть", check: "Проверить результат",
     busy: "Запрос обрабатывается…", done: "Изменения сохранены.",
     sent: "Приглашения поставлены в очередь.", assigned: "Ваше участие подтверждено.",
   },
   en: {
-    title: "Performance lineup", back: "Back to performance", empty: "Add roles for this performance.",
-    noSlots: "The lineup has no roles yet.", prepare: "Edit lineup", add: "Add role",
-    apply: "Choose a saved lineup", applyConfirm: "Apply lineup",
+    back: "Back to performance", empty: "Add roles for this performance.",
+    noSlots: "The lineup has no roles yet.",
     applyWarning: "Applying another lineup will cancel current invitations and confirmed bookings.",
-    review: "Check availability", suggest: "Choose performer", candidate: "Selected",
-    vacancy: "Open role", optional: "Role disabled", needed: "Enable role",
-    disable: "Disable role", remove: "Remove role", slotWarning: "Active invitations for this role will be cancelled.",
+    candidate: "Selected",
+    vacancy: "Open role", optional: "Role disabled",
+    slotWarning: "Active invitations for this role will be cancelled.",
     confirmed: "Confirmed", pending: "Awaiting response", reconfirm: "Awaiting confirmation of the new date",
     conditional: "Tentative booking", accepted: "Substitute accepted",
     busyDay: "Conflicting booking", tentative: "Possible conflict", unknown: "No known conflict",
-    force: "Continue despite the availability conflict", send: "Send invitations",
-    assign: "Confirm my booking", pick: "Check", myself: "Assign myself",
+    force: "Continue despite the availability conflict",
+    pick: "Check", myself: "Assign myself",
     outside: "Find by Telegram ID or @username", none: "No matching performers in your directory yet.",
-    remind: "Remind", cancel: "Withdraw invitation", cancelBooking: "Cancel booking",
-    requestReplacement: "Request a substitute", findReplacement: "Find a substitute",
-    cancelReplacement: "Cancel substitution request", approveReplacement: "Approve substitute",
     waitingReplacement: "Looking for a substitute", substituted: "Substitution approved",
     candidateInvited: "Substitute candidate", sendReplacement: "Invite substitute",
     assignReplacement: "Take over the role", cancelReplacementHint: "Invitations to candidates will be withdrawn.",
-    confirm: "Confirm", close: "Close", check: "Check result",
+    close: "Close", check: "Check result",
     busy: "Processing your request…", done: "Changes saved.",
     sent: "Invitations queued.", assigned: "Your booking is confirmed.",
   },
-};
+});
 
 export function rosterLabel(language, key) { return words[language][key]; }
 
@@ -116,10 +109,14 @@ export function showRoster({ root, data, language, dateText, request, preview, r
     const list = el("ul", "", { class: "workspace-list" });
     for (const row of record.review)
       list.append(el("li", `${row.role} · ${row.person} · ${availability(row.status)}`));
-    const allSelf = record.review.every(row => row.self);
-    const key = record.replacement ? (allSelf ? "assignReplacement" : "sendReplacement")
-      : (allSelf ? "assign" : "send");
-    const send = button(t[key], event => panel.send(event.currentTarget, {
+    const conflict = record.review.some(row => row.status === "busy");
+    const recipients = record.recipients ?? record.review.filter(row => !row.self).length;
+    const allSelf = recipients === 0;
+    let label;
+    if (record.replacement) label = allSelf ? t.assignReplacement : t.sendReplacement;
+    else if (allSelf) label = conflict ? t.forceAssign : t.assign;
+    else label = fillButtonLabel(conflict ? t.forceSend : t.send, { count: recipients });
+    const send = button(label, event => panel.send(event.currentTarget, {
       action: "send", preview: record.request, force: !!force?.checked,
     }, request, async result => {
       panel.dialog.close();
@@ -128,7 +125,7 @@ export function showRoster({ root, data, language, dateText, request, preview, r
     }), true);
     let force;
     panel.body.replaceChildren(list);
-    if (record.review.some(row => row.status === "busy")) {
+    if (conflict) {
       force = el("input", "", { type: "checkbox", id: "roster-conflict-confirm" });
       const label = el("label", "", { for: force.id });
       label.append(force, document.createTextNode(t.force));

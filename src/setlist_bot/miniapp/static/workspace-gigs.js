@@ -1,45 +1,40 @@
+import { withBotLabels } from "./bot-labels.js";
 import { clock } from "./model.js";
 import { pdfTitle, mountPdfExport } from "./workspace-export.js";
 import { requestDialog } from "./workspace-request-dialog.js";
 
-const words = {
+const words = withBotLabels("workspace-gigs", {
   ru: {
-    title: "Мои выступления", invitations: "Приглашения на выступления", confirmed: "Подтверждённые",
-    schedule: "Предстоящие", managed: "Организую",
-    history: "История", invitation: "Приглашение на выступление", back: "К приглашению",
+    schedule: "Предстоящие",
+    invitation: "Приглашение на выступление", back: "К приглашению",
     empty: "В этом разделе пока нет выступлений.", pending: "Ожидает ответа",
     reconfirm: "Нужно подтвердить новую дату", conditional: "Участие под вопросом",
     accepted: "Подмена принята, ожидает утверждения", cancelled: "Отменено", declined: "Отклонено",
     replaced: "Передано другому исполнителю", inactive: "Приглашение закрыто",
-    confirmedStatus: "Участие подтверждено", yes: "Подтвердить участие", no: "Отказаться",
-    tentative: "Могу, если найду подмену", force: "Подтвердить несмотря на конфликт",
-    setlist: "Открыть сет-лист", working: "Рабочий сет-лист", approved: "Утверждённый сет-лист",
+    confirmedStatus: "Участие подтверждено",
+    working: "Рабочий сет-лист", approved: "Утверждённый сет-лист",
     version: "Версия", noSongs: "Сет-лист пока пуст.", pause: "Пауза",
-    close: "Закрыть", check: "Проверить результат", confirm: "Подтвердить",
+    close: "Закрыть", check: "Проверить результат",
     busy: "Запрос обрабатывается…", done: "Ответ сохранён.",
-    requestReplacement: "Запросить подмену", cancelReplacement: "Отменить запрос на подмену",
     awaitingReplacement: "Запрос на подмену отправлен.", replacementSources: "Где нужна подмена",
     requested: "Запрос сохранён.", withdrawn: "Запрос на подмену отменён.",
   },
   en: {
-    title: "My performances", invitations: "Performance invitations", confirmed: "Confirmed",
-    schedule: "Upcoming", managed: "I organize",
-    history: "History", invitation: "Performance invitation", back: "Back to invitation",
+    schedule: "Upcoming",
+    invitation: "Performance invitation", back: "Back to invitation",
     empty: "There are no performances here yet.", pending: "Awaiting your response",
     reconfirm: "Confirm the new date", conditional: "Tentative booking",
     accepted: "Substitute accepted, awaiting approval", cancelled: "Cancelled", declined: "Declined",
     replaced: "Assigned to another performer", inactive: "Invitation closed",
-    confirmedStatus: "Booking confirmed", yes: "Confirm booking", no: "Decline",
-    tentative: "If I find a substitute", force: "Confirm despite the conflict",
-    setlist: "Open setlist", working: "Working setlist", approved: "Approved setlist",
+    confirmedStatus: "Booking confirmed",
+    working: "Working setlist", approved: "Approved setlist",
     version: "Version", noSongs: "The setlist is empty.", pause: "Pause",
-    close: "Close", check: "Check result", confirm: "Confirm",
+    close: "Close", check: "Check result",
     busy: "Processing your request…", done: "Response saved.",
-    requestReplacement: "Request a substitute", cancelReplacement: "Cancel substitution request",
     awaitingReplacement: "Substitution requested.", replacementSources: "Bookings that may need a substitute",
     requested: "Request saved.", withdrawn: "Substitution request cancelled.",
   },
-};
+});
 
 export function gigLabel(language, key) { return words[language][key]; }
 

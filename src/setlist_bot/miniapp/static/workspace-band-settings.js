@@ -1,10 +1,10 @@
+import { withBotLabels } from "./bot-labels.js";
 import { requestDialog } from "./workspace-request-dialog.js";
 
-const words = {
+const words = withBotLabels("workspace-band-settings", {
   ru: {
-    title: "Настройки коллектива", edit: "Изменить настройки", setlists: "Сет-листы",
+    edit: "Изменить настройки", setlists: "Сет-листы",
     chat: "Чат коллектива", style: "Оформление сет-листов в Telegram",
-    article: "Таблица Article", mono: "Моноширинный блок",
     suggestions: "Кто может предлагать изменения и варианты",
     everyone: "Участники коллектива", admins: "Только администраторы",
     pause: "Пауза по умолчанию, сек.", pauseHint: "Применяется к новым выступлениям.",
@@ -16,8 +16,8 @@ const words = {
     conflict: "Настройки уже изменились. Закройте окно, чтобы увидеть актуальные значения.",
   },
   en: {
-    title: "Band settings", edit: "Edit settings", setlists: "Setlists", chat: "Band chat",
-    style: "Setlist appearance in Telegram", article: "Article table", mono: "Monospaced block",
+    edit: "Edit settings", setlists: "Setlists", chat: "Band chat",
+    style: "Setlist appearance in Telegram",
     suggestions: "Who can suggest edits and variants", everyone: "Band members",
     admins: "Admins only", pause: "Default pause in seconds", pauseHint: "Applies to new performances.",
     language: "Chat message language", reminders: "Reminders about unapproved setlists",
@@ -26,7 +26,7 @@ const words = {
     check: "Check result", busy: "Saving settings…", done: "Band settings saved.",
     conflict: "The settings have changed. Close this window to see the latest values.",
   },
-};
+});
 
 export function bandSettingsTitle(language) { return words[language].title; }
 

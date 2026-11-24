@@ -1,3 +1,4 @@
+import { withBotLabels } from "./bot-labels.js";
 import { clock, numbered } from "./model.js";
 import { repertoireImport } from "./repertoire-import.js";
 import { repertoireMusic } from "./repertoire-music.js";
@@ -13,68 +14,62 @@ import { scheduleLabel, showScheduleSettings } from "./workspace-schedule.js";
 import { profileLabel, showProfile } from "./workspace-profile.js";
 import { helpTitle, showHelp } from "./workspace-help.js";
 
-const copy = {
+const copy = withBotLabels("workspace", {
   ru: {
-    bands: "Мои коллективы", upcoming: "Предстоящие", past: "Прошедшие",
+    upcoming: "Предстоящие",
     noBands: "У вас пока нет коллективов.",
     noPerformances: "В этом разделе пока нет доступных выступлений.",
-    draft: "Открыть личный черновик", restricted: "Черновики доступны администраторам коллектива.",
+    restricted: "Черновики доступны администраторам коллектива.",
     previous: "Назад", next: "Дальше", retry: "Повторить", loading: "Загрузка…",
-    auth: "Откройте приложение через бота в Telegram.", performances: "К выступлениям",
-    connectBand: "Подключить коллектив в Telegram", joinBand: "Как вступить в коллектив",
+    auth: "Откройте приложение через бота в Telegram.",
+    joinBand: "Как вступить в коллектив",
     joinBandHelp: "В чате коллектива отправьте /register и укажите свои роли. Администратор рассмотрит заявку. Если вам уже прислали приглашение, откройте его здесь.",
-    telegramChat: "Действия в Telegram", transferChat: "Перенести в другой чат",
-    cleanupChat: "Прибраться в чате",
+    telegramChat: "Действия в Telegram",
     chatActionsHelp: "Уборку можно открыть и прямо в чате коллектива из «Опций» в карточке сет-листа.",
     login: "Войти через Telegram", logout: "Выйти", openBot: "Открыть бота",
     loginFailed: "Не удалось войти. Попробуйте ещё раз.",
     startBot: "Откройте бота и нажмите «Старт», затем повторите вход.",
-    repertoire: "Репертуар", active: "Активные песни", archive: "Архив песен",
+    active: "Активные песни", archive: "Архив песен",
     search: "Найти песню", noSongs: "В этом разделе пока нет песен.", noMatches: "Песни не найдены.",
     toSongs: "К списку песен", duration: "Длительность", lights: "Свет", comment: "Комментарий",
     aliases: "Альтернативные названия", archived: "В архиве",
-    addSong: "Добавить песню", editSong: "Редактировать", copySong: "Копировать",
-    archiveSong: "В архив", restoreSong: "Восстановить песню",
-    proposals: "Предложения", noProposals: "Предложений на рассмотрении нет.",
-    approve: "Одобрить", reject: "Отклонить", proposedBy: "Автор", forSong: "Песня",
+    addSong: "Добавить песню",
+    noProposals: "Предложений на рассмотрении нет.",
+    proposedBy: "Автор", forSong: "Песня",
     approved: "Предложение одобрено.", rejected: "Предложение отклонено.",
     pending: "Запрос обрабатывается.", check: "Проверить результат",
     importSongs: "Импорт таблицы", adminOnly: "Импорт доступен администратору коллектива.",
-    music: "Поиск песен в интернете",
     performance: "Выступление", shared: "Общий сет-лист", approvedVersion: "Утверждён", workingVersion: "В работе",
     version: "Версия", total: "Итого", planned: "План", noEntries: "В общем сет-листе пока нет песен.", pause: "Пауза",
   },
   en: {
-    bands: "My bands", upcoming: "Upcoming", past: "Past",
+    upcoming: "Upcoming",
     noBands: "You have no bands yet.",
     noPerformances: "There are no available performances here yet.",
-    draft: "Open private draft", restricted: "Drafts are available to band admins.",
+    restricted: "Drafts are available to band admins.",
     previous: "Previous", next: "Next", retry: "Try again", loading: "Loading…",
-    auth: "Open the app from the bot in Telegram.", performances: "Back to performances",
-    connectBand: "Connect a band in Telegram", joinBand: "How to join a band",
+    auth: "Open the app from the bot in Telegram.",
+    joinBand: "How to join a band",
     joinBandHelp: "Send /register in the band's chat and enter your roles. An admin will review your request. If you already have an invitation, open it here.",
-    telegramChat: "Telegram chat actions", transferChat: "Move to another chat",
-    cleanupChat: "Clean up chat",
+    telegramChat: "Telegram chat actions",
     chatActionsHelp: "You can also open cleanup from Options on a setlist card in the band's chat.",
     login: "Sign in with Telegram", logout: "Sign out", openBot: "Open the bot",
     loginFailed: "Could not sign in. Try again.",
     startBot: "Open the bot and press Start, then sign in again.",
-    repertoire: "Repertoire", active: "Active songs", archive: "Archived songs",
+    active: "Active songs", archive: "Archived songs",
     search: "Find a song", noSongs: "There are no songs here yet.", noMatches: "No matching songs.",
     toSongs: "Back to song list", duration: "Duration", lights: "Lights", comment: "Notes",
     aliases: "Alternate titles", archived: "Archived",
-    addSong: "Add a song", editSong: "Edit", copySong: "Copy",
-    archiveSong: "Archive", restoreSong: "Restore song",
-    proposals: "Suggestions", noProposals: "There are no pending suggestions.",
-    approve: "Approve", reject: "Reject", proposedBy: "Author", forSong: "Song",
+    addSong: "Add a song",
+    noProposals: "There are no pending suggestions.",
+    proposedBy: "Author", forSong: "Song",
     approved: "Suggestion approved.", rejected: "Suggestion rejected.",
     pending: "The request is being processed.", check: "Check result",
     importSongs: "Import a table", adminOnly: "Only band admins can import songs.",
-    music: "Find songs online",
     performance: "Performance", shared: "Shared setlist", approvedVersion: "Approved", workingVersion: "Working",
     version: "Version", total: "Total", planned: "Planned", noEntries: "The shared setlist is empty.", pause: "Pause",
   },
-};
+});
 
 export const workspaceParams = new URLSearchParams(location.search);
 

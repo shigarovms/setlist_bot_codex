@@ -11,7 +11,7 @@ from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.application.staffing import Staffing
 from setlist_bot.application.trash import RETENTION, Trash
-from setlist_bot.domain.concerts import today
+from setlist_bot.domain.concerts import concert_label, today
 from setlist_bot.domain.entities import Concert, Confirmation, LineupTemplate, User, now
 from setlist_bot.domain.performance_input import (
     PerformanceInput,
@@ -120,6 +120,7 @@ class WorkspacePerformances:
                 {
                     "id": str(row.id),
                     "title": row.title,
+                    "label": concert_label(row, self.user.language),
                     "date": row.date.isoformat(),
                     "epoch": row.lifecycle_version,
                     "until": ((row.deleted_at or cutoff) + RETENTION).date().isoformat(),

@@ -37,6 +37,7 @@ from setlist_bot.domain.rules import AppError, totals
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.miniapp.app import ENGINE, create_app
 from setlist_bot.miniapp.settings import MiniAppSettings
+from setlist_bot.transport.i18n import tr
 from setlist_bot.transport.telegram import Processor, keyboards
 
 KEY = hmac.new(b"WebAppData", b"test-token-not-a-real-bot", hashlib.sha256).digest()
@@ -293,6 +294,17 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
             assert response.status == 200 and "telegram-web-app.js" in await response.text()
             assert response.headers["Cache-Control"] == "no-store"
             assert "frame-ancestors" in response.headers["Content-Security-Policy"]
+            labels = await client.get("/miniapp/bot-labels-data.js")
+            assert labels.status == 200 and labels.content_type == "text/javascript"
+            words = json.loads(
+                (await labels.text()).removeprefix("export const labels = ").rstrip(";")
+            )
+            for language in ("ru", "en"):
+                assert words[language]["workspace-schedule"]["busyTitle"] == tr(
+                    language, "staff_busy_menu"
+                )
+                assert words[language]["workspace-gigs"]["title"] == tr(language, "staff_my")
+                assert words[language]["workspace-export"]["pdf"] == tr(language, "export_button")
             assert (await client.get("/miniapp/.env")).status == 404
             assert (await client.get("/healthz")).status == 200
             queue = await client.get(

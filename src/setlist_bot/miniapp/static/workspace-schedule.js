@@ -1,35 +1,32 @@
+import { withBotLabels } from "./bot-labels.js";
 import { pollRequest, requestDialog } from "./workspace-request-dialog.js";
 
-const words = {
+const words = withBotLabels("workspace-schedule", {
   ru: {
     busy: "Запрос обрабатывается…", close: "Закрыть", check: "Проверить результат", done: "Изменения сохранены.",
-    busyTitle: "Моя занятость", calendar: "Подписка на календарь", unavailable: "Подписка на календарь пока недоступна.",
-    noPeriods: "Даты занятости пока не указаны.", addPeriod: "Добавить занятость", removePeriod: "Убрать занятость",
+    noPeriods: "Даты занятости пока не указаны.",
     from: "Первый день", to: "Последний день, если их несколько", save: "Сохранить", confirm: "Подтвердить",
-    personal: "Мои подтверждённые участия", all: "Все мои коллективы", inaccessible: "Коллектив недоступен",
+    inaccessible: "Коллектив недоступен",
     enabled: "Подписка включена", disabled: "Подписка выключена",
-    create: "Создать ссылку", reveal: "Показать ссылку", rotate: "Заменить ссылку", disable: "Отключить",
     revoke: "Прежняя ссылка перестанет работать.", link: "Ссылка ICS", copy: "Скопировать ссылку",
     copied: "Ссылка скопирована.", copyManually: "Скопируйте выделенный адрес вручную.",
     instructions: "Добавьте ссылку как подписку по URL в приложении календаря.",
-    restore: "Восстановить прежнюю ссылку", legacy: "Введите сохранённую ранее ссылку или создайте новую.",
+    legacy: "Введите сохранённую ранее ссылку или создайте новую.",
     previousLink: "Прежняя ссылка ICS",
   },
   en: {
     busy: "Processing your request…", close: "Close", check: "Check result", done: "Changes saved.",
-    busyTitle: "My availability", calendar: "Calendar subscription", unavailable: "Calendar subscriptions are currently unavailable.",
-    noPeriods: "You have no unavailable dates yet.", addPeriod: "Add unavailable dates", removePeriod: "Remove unavailable dates",
+    noPeriods: "You have no unavailable dates yet.",
     from: "First day", to: "Last day, if more than one", save: "Save", confirm: "Confirm",
-    personal: "My confirmed bookings", all: "All my bands", inaccessible: "Band unavailable",
+    inaccessible: "Band unavailable",
     enabled: "Subscription enabled", disabled: "Subscription disabled",
-    create: "Create link", reveal: "Show link", rotate: "Replace link", disable: "Disable",
     revoke: "The previous link will stop working.", link: "ICS link", copy: "Copy link",
     copied: "Link copied.", copyManually: "Copy the selected address manually.",
     instructions: "Add this link as a calendar subscription by URL.",
-    restore: "Restore previous link", legacy: "Enter your saved link or create a new one.",
+    legacy: "Enter your saved link or create a new one.",
     previousLink: "Previous ICS link",
   },
-};
+});
 
 export function scheduleLabel(language, key) { return words[language][key]; }
 

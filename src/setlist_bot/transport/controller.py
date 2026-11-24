@@ -31,6 +31,7 @@ from setlist_bot.application.trash import RETENTION, Trash
 from setlist_bot.domain.concerts import (
     button_date,
     compact_duration,
+    concert_label,
     confirmation_date,
     date_label,
     parse_concert,
@@ -79,7 +80,7 @@ from setlist_bot.domain.rules import (
 from setlist_bot.infrastructure.pdf import PdfDocuments
 from setlist_bot.transport.articles import ArticlePage, catalog_articles
 from setlist_bot.transport.i18n import tr
-from setlist_bot.transport.render import concert_label, render_setlist, song_card
+from setlist_bot.transport.render import render_setlist, song_card
 
 COMMAND_SEPARATOR = re.compile(r"\t+|" + SPACED_SEPARATOR.pattern)
 

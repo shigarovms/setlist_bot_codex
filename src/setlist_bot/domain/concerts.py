@@ -4,7 +4,7 @@ import re
 from datetime import date, timedelta
 from zoneinfo import ZoneInfo
 
-from setlist_bot.domain.entities import now
+from setlist_bot.domain.entities import Concert, now
 from setlist_bot.domain.rules import AppError, normalize
 
 MONTHS = (
@@ -79,6 +79,22 @@ def compact_duration(seconds: int, language: str = "ru") -> str:
     hours, minutes = divmod((seconds + 59) // 60, 60)
     h, m = ("ч", "мин") if language == "ru" else ("h", "min")
     return (f"{hours}{h} " if hours else "") + f"{minutes}{m}"
+
+
+def concert_label(concert: Concert, language: str = "ru", *, button: bool = False) -> str:
+    title = concert.title[:50] if button else concert.title
+    text = " · ".join(
+        part
+        for part in (
+            button_date(concert.date) if button else date_label(concert.date, language),
+            title,
+            concert.city,
+        )
+        if part
+    )
+    if button and concert.performance_duration_seconds:
+        text += " · " + compact_duration(concert.performance_duration_seconds, language)
+    return text
 
 
 def parse_concert(value: str) -> tuple[date, str]:

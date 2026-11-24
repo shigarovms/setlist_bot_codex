@@ -174,7 +174,7 @@ WORKSPACE_HELP = {
     "ru": {
         "start": (
             "Начните с «Моих коллективов». В «Моём профиле» можно изменить анкету, язык "
-            "приложения и оформление PDF. Кнопка «Подключить коллектив в Telegram» "
+            "приложения и оформление PDF. Кнопка «Подключить коллектив» "
             "откроет выбор чата, а его владелец подтвердит подключение."
         ),
         "events": (
@@ -194,11 +194,11 @@ WORKSPACE_HELP = {
         ),
         "team": (
             "Роли и права доступны в «Постоянной команде» коллектива. Приглашения в команду "
-            "и приглашения на выступления находятся в отдельных разделах. В «Моих выступлениях» "
+            "и приглашения на выступления находятся в отдельных разделах. В «Моём расписании» "
             "можно ответить на приглашение и запросить подмену."
         ),
         "calendar": (
-            "В «Моих выступлениях» откройте «Подписка на календарь». Выберите расписание "
+            "В «Моём расписании» нажмите «Подключить календарь». Выберите расписание "
             "и добавьте выданную ссылку в Apple Calendar или Google Calendar. "
             "Ссылку можно заменить или отключить."
         ),
@@ -206,7 +206,7 @@ WORKSPACE_HELP = {
     "en": {
         "start": (
             "Start with My bands. In My profile you can edit your details, choose the app "
-            "language and set PDF appearance. Choose Connect a band in Telegram to pick "
+            "language and set PDF appearance. Choose Connect your band to pick "
             "a chat. Its owner confirms the connection."
         ),
         "events": (
@@ -224,11 +224,11 @@ WORKSPACE_HELP = {
         ),
         "team": (
             "Find band roles and permissions in Permanent team. Team and performance "
-            "invitations appear in separate sections. In My performances you can "
+            "invitations appear in separate sections. In My schedule you can "
             "respond to invitations and request a substitute."
         ),
         "calendar": (
-            "In My performances, open Calendar subscription. Choose a schedule and add "
+            "In My schedule, choose Connect a calendar. Choose a schedule and add "
             "its link to Apple Calendar or Google Calendar. You can replace or disable the link."
         ),
     },

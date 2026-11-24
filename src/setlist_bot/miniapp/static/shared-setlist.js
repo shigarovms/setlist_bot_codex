@@ -1,24 +1,25 @@
+import { withBotLabels } from "./bot-labels.js";
 import { asText, clock, move, numbered, total, wire } from "./model.js";
 import { mountPdfExport, pdfTitle } from "./workspace-export.js";
 
-const copy = {
+const copy = withBotLabels("shared-setlist", {
   ru: {
     edit: "Редактировать общий сет-лист", save: "Сохранить общий список", close: "Закрыть",
     note: "Сохранённые изменения увидит весь коллектив.", discard: "Закрыть без сохранения общего списка?",
     clear: "Сохранить общий список пустым?", empty: "Список пуст.", total: "Итого",
     gap: "Средняя пауза, сек.", pause: "Пауза", seconds: "Длительность паузы, сек.", caption: "Подпись паузы",
-    repertoire: "Найти песню", addPause: "Добавить паузу", unavailable: "Песня недоступна. Уберите её, чтобы сохранить список.",
-    up: "Выше", down: "Ниже", remove: "Удалить", add: "Добавить", limit: "В списке может быть не больше 200 позиций.",
+    repertoire: "Найти песню", unavailable: "Песня недоступна. Уберите её, чтобы сохранить список.",
+    remove: "Удалить", add: "Добавить", limit: "В списке может быть не больше 200 позиций.",
     invalid: "Проверьте длительности пауз и среднюю паузу.",
-    variants: "Варианты", noVariants: "Сохранённых вариантов пока нет.", submitted: "Предложение", version: "Версия",
+    noVariants: "Сохранённых вариантов пока нет.", submitted: "Предложение", version: "Версия",
     history: "История", revisionActions: { created: "Создан", approved: "Утверждён", reopened: "Возвращён в работу", restored: "Восстановлен", proposal_applied: "Применён вариант" }, edited: "Изменён",
     applied: "Применено", stale: "Общий список изменился после публикации.", preview: "Показать вариант",
-    apply: "Применить к общему списку", restore: "Восстановить вариант", replace: "Заменить общий порядок песен и пауз этим вариантом?",
-    approve: "Утвердить", reopen: "Вернуть в работу", confirmReopen: "Снять утверждение и вернуть сет-лист в работу?",
-    askApprove: "Запросить утверждение", askReopen: "Запросить возврат в работу",
+    replace: "Заменить общий порядок песен и пауз этим вариантом?",
+    confirmReopen: "Снять утверждение и вернуть сет-лист в работу?",
+    askReopen: "Запросить возврат в работу",
     requested: "Запрос поставлен в очередь на отправку администратору в Telegram.", duplicate: "Такой запрос уже ожидает решения.",
     requests: "Входящие запросы", noRequests: "Нет запросов на рассмотрении.",
-    reject: "Отклонить", accepted: "Запрос принят.", rejected: "Запрос отклонён.",
+    accepted: "Запрос принят.", rejected: "Запрос отклонён.",
     done: "Общий сет-лист обновлён.", working: "Запрос обрабатывается…", check: "Проверить результат",
     newState: "Открыть актуальную версию", copyOrder: "Скопировать мой порядок", copied: "Порядок скопирован.",
     previous: "Назад", next: "Дальше",
@@ -28,23 +29,23 @@ const copy = {
     note: "Saved changes are visible to the whole band.", discard: "Close without saving changes to the shared setlist?",
     clear: "Save the shared setlist as empty?", empty: "The setlist is empty.", total: "Total",
     gap: "Average pause, sec.", pause: "Pause", seconds: "Pause duration, sec.", caption: "Pause label",
-    repertoire: "Find a song", addPause: "Add pause", unavailable: "This song is unavailable. Remove it to save the setlist.",
-    up: "Move up", down: "Move down", remove: "Remove", add: "Add", limit: "A setlist can contain up to 200 entries.",
+    repertoire: "Find a song", unavailable: "This song is unavailable. Remove it to save the setlist.",
+    remove: "Remove", add: "Add", limit: "A setlist can contain up to 200 entries.",
     invalid: "Check the values for pauses and average pause.",
-    variants: "Versions and proposals", noVariants: "There are no saved versions or proposals.", submitted: "Proposal", version: "Version",
+    noVariants: "There are no saved versions or proposals.", submitted: "Proposal", version: "Version",
     history: "History", revisionActions: { created: "Created", approved: "Approved", reopened: "Reopened", restored: "Restored", proposal_applied: "Proposal applied" }, edited: "Edited",
     applied: "Applied", stale: "The shared list has changed since publication.", preview: "View version",
-    apply: "Apply to the shared setlist", restore: "Restore this version", replace: "Replace the current song and pause order with this version?",
-    approve: "Approve", reopen: "Reopen for editing", confirmReopen: "Reopen the approved setlist for editing?",
-    askApprove: "Request approval", askReopen: "Request reopening",
+    replace: "Replace the current song and pause order with this version?",
+    confirmReopen: "Reopen the approved setlist for editing?",
+    askReopen: "Request reopening",
     requested: "The request is queued for delivery to an admin in Telegram.", duplicate: "This request is already awaiting a decision.",
     requests: "Incoming requests", noRequests: "There are no requests awaiting a decision.",
-    reject: "Decline", accepted: "Request accepted.", rejected: "Request declined.",
+    accepted: "Request accepted.", rejected: "Request declined.",
     done: "Shared setlist updated.", working: "Processing your request…", check: "Check result",
     newState: "Open the latest version", copyOrder: "Copy my order", copied: "Order copied.",
     previous: "Previous", next: "Next",
   },
-};
+});
 
 function el(tag, title, attrs = {}) {
   const node = document.createElement(tag);

@@ -1,37 +1,38 @@
+import { withBotLabels } from "./bot-labels.js";
 import { pdfAppearanceFields } from "./workspace-export.js";
 import { requestDialog } from "./workspace-request-dialog.js";
 
-const labels = {
+const labels = withBotLabels("workspace-profile", {
   ru: {
-    title: "Мой профиль", edit: "Редактировать профиль", name: "Имя или сценический псевдоним",
+    name: "Имя или сценический псевдоним",
     roles: "Профессиональные роли", city: "Город", substitutions: "Готовность к подменам",
     travel: "Выезды в другие города", about: "О себе", yes: "Да", no: "Нет", empty: "Не указано",
-    save: "Сохранить профиль", choose: "Уточнить роли", review: "Подтвердите профессиональные роли",
+    choose: "Уточнить роли", review: "Подтвердите профессиональные роли",
     choice: "Выберите роль", change: "Вернуться к анкете",
     rolesHint: "Укажите роли в нужном порядке, по одной на строку или через запятую.",
     soundHint: "Выберите FOH, MON или общее название, если не хотите указывать специализацию.",
     cleared: "Список профессиональных ролей будет очищен.",
     visibility: "Анкета доступна администраторам коллективов, где вы в команде или в списке знакомых исполнителей.",
-    language: "Язык интерфейса", pdf: "Оформление PDF для музыкантов",
+    language: "Язык интерфейса",
     pdfHint: "Эти настройки применяются к PDF для музыкантов в боте и приложении.",
     confirm: "Сохранить", check: "Проверить результат", close: "Закрыть",
     busy: "Сохраняем…", done: "Изменения сохранены.",
   },
   en: {
-    title: "My profile", edit: "Edit profile", name: "Name or stage name", roles: "Professional roles",
+    name: "Name or stage name", roles: "Professional roles",
     city: "City", substitutions: "Available to substitute", travel: "Available to travel",
     about: "About me", yes: "Yes", no: "No", empty: "Not specified",
-    save: "Save profile", choose: "Review roles", review: "Confirm your professional roles",
+    choose: "Review roles", review: "Confirm your professional roles",
     choice: "Choose a role", change: "Back to profile form",
     rolesHint: "List roles in order, one per line or separated by commas.",
     soundHint: "Choose FOH, MON, or a general role if you prefer to leave your specialty unspecified.",
     cleared: "Your professional roles will be cleared.",
     visibility: "Your profile is available to admins of bands where you are on the team or listed as a contact.",
-    language: "Interface language", pdf: "Musician PDF appearance",
+    language: "Interface language",
     pdfHint: "These settings apply to musician PDFs in the bot and the app.",
     confirm: "Save", check: "Check result", close: "Close", busy: "Saving…", done: "Changes saved.",
   },
-};
+});
 const locales = [["ru", "Русский"], ["en", "English"]];
 const fields = ["name", "roles", "city", "substitutions", "travel", "about"];
 const preferences = ["substitutions", "travel"];

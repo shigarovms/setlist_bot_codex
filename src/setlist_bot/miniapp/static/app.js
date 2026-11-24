@@ -1,10 +1,11 @@
+import { withBotLabels } from "./bot-labels.js";
 import { clone, clock, total, numbered, wire, move, asText } from "./model.js";
 import { DraftPersistence } from "./persistence.js";
 import { bandUrl, performanceUrl, showWorkspace, workspaceParams, workspaceText } from "./workspace.js";
 const telegram = window.Telegram?.WebApp;
 const tg = telegram?.initData ? telegram : null,
   $ = (id) => document.getElementById(id);
-const words = {
+const words = withBotLabels("app", {
   ru: {
     heading: "Ваш черновик",
     planned: "Плановая длительность",
@@ -14,11 +15,9 @@ const words = {
     plannedConflict: "Данные выступления изменились. Проверьте текущую длительность и повторите правку.",
     unknown: "Не задано",
     current: "Текущий черновик",
-    catalog: "Репертуар",
     search: "Поиск песни",
     private:
       "Черновик сохраняется автоматически. Отправка группе — только по кнопке.",
-    publish: "📤 Предложить группе",
     publishing: "Отправляем предложение в группу…",
     queued: "Предложение в очереди. Нажмите ещё раз, чтобы проверить отправку.",
     failed:
@@ -31,8 +30,6 @@ const words = {
     repertoireSong: "Песня в репертуаре",
     back: "Вернуться к боту",
     pause: "пауза",
-    addPause: "＋ Пауза",
-    addPauseBottom: "+ пауза",
     older: "История",
     undo: "↶ Undo",
     empty:
@@ -56,7 +53,6 @@ const words = {
     copy: "Скопировать мой список",
     continue: "Продолжить мой ввод",
     copied: "Список скопирован",
-    cancel: "Отмена",
     add: "Добавить",
     pauseTitle: "Длительность паузы",
     editPause: "Изменить паузу",
@@ -71,17 +67,15 @@ const words = {
     averageGroupHint: "В секундах. Для этого черновика и новых сет-листов коллектива. Уже созданные списки не изменятся.",
     averagePrivateHint: "В секундах. Изменится только ваш черновик. Паузу для новых выступлений задаёт администратор.",
     apply: "Применить",
-    requestAccess: "Запросить права у владельца",
     reload: "Обновите редактор, чтобы получить актуальный каталог.",
     editSong: "Редактировать песню", addSong: "＋ Добавить песню",
-    copySong: "Копировать песню", restoreSong: "Восстановить песню",
     songRestored: "Песня восстановлена в репертуаре.",
     songTitle: "Название *", songDuration: "Длительность ММ:СС *",
     songLights: "Цвета / свет", songComment: "Комментарий",
     songAliases: "Альтернативные названия — по одному на строку",
     songScope: "Меняется запись репертуара, поэтому правка отразится во всех её вхождениях в рабочих сет-листах. Правки участника требуют одобрения администратора.",
     songSave: "Сохранить", songPending: "Запрос сохраняется ботом…",
-    songDelete: "Удалить песню", songArchived: "Песня перенесена в архив репертуара.",
+    songArchived: "Песня перенесена в архив репертуара.",
     songArchiveConfirm: "Песня исчезнет из репертуара. Её можно будет восстановить из архива.",
     songArchiveDraft: "Песня останется в текущем черновике. Чтобы сохранить следующие правки черновика, уберите её из списка или восстановите из архива.",
     songQueued: "Запрос в очереди. Проверьте сохранение перед новым изменением песни.",
@@ -99,11 +93,9 @@ const words = {
     plannedConflict: "The performance changed. Review the current duration and retry.",
     unknown: "Not set",
     current: "Current draft",
-    catalog: "Repertoire",
     search: "Find a song",
     private:
       "Draft saved automatically. Only the publish button sends it to the group.",
-    publish: "📤 Suggest to the band",
     publishing: "Sending your proposal…",
     queued: "Proposal queued. Press again to check delivery.",
     failed: "Delivery failed. Your draft is saved; you can retry.",
@@ -115,8 +107,6 @@ const words = {
     repertoireSong: "Song in repertoire",
     back: "Back to bot",
     pause: "pause",
-    addPause: "＋ Pause",
-    addPauseBottom: "+ pause",
     older: "History",
     undo: "↶ Undo",
     empty: "Add songs below or use a previous performance as a starting point.",
@@ -138,7 +128,6 @@ const words = {
     copy: "Copy my list",
     continue: "Continue editing",
     copied: "List copied",
-    cancel: "Cancel",
     add: "Add",
     pauseTitle: "Pause duration",
     editPause: "Edit pause",
@@ -153,17 +142,15 @@ const words = {
     averageGroupHint: "In seconds. Also applies to new group setlists. Individual pauses are kept.",
     averagePrivateHint: "In seconds. Only your draft changes. Administrators set the default for new performances.",
     apply: "Apply",
-    requestAccess: "Request administrator access",
     reload: "Reopen the editor to refresh the catalog.",
     editSong: "Edit song", addSong: "＋ Add song",
-    copySong: "Copy song", restoreSong: "Restore song",
     songRestored: "Song restored to the repertoire.",
     songTitle: "Title *", songDuration: "Duration MM:SS *",
     songLights: "Colors / lighting", songComment: "Comment",
     songAliases: "Alternative titles — one per line",
     songScope: "This updates the repertoire entry and all its occurrences in working setlists. Member edits require administrator approval.",
     songSave: "Save", songPending: "The bot is saving your request…",
-    songDelete: "Delete song", songArchived: "Song moved to the repertoire archive.",
+    songArchived: "Song moved to the repertoire archive.",
     songArchiveConfirm: "The song will be removed from the repertoire. You can restore it from the archive.",
     songArchiveDraft: "The song will stay in this draft. To save further draft edits, remove it from the draft or restore it from the archive.",
     songQueued: "Request queued. Check its result before editing another song.",
@@ -172,7 +159,7 @@ const words = {
     songProposed: "Changes proposed to an administrator. The repertoire stays unchanged until approval.",
     songReload: "Load current song",
   },
-};
+});
 let lang = "ru",
   state = null,
   current = [],
