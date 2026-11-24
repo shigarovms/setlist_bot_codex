@@ -476,10 +476,29 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
             assert trash.status == 200 and (await trash.json())["performances"] == []
             scoped = await client.post("/miniapp/api/open_repertoire", json=band, headers=headers)
             assert scoped.status == 200
+            band_settings = await client.get(
+                "/miniapp/api/band_settings", params=band, headers=headers
+            )
+            assert band_settings.status == 200 and (await band_settings.json())["admin"]
+            scoped_data = await scoped.json()
+            saved_settings = await client.post(
+                "/miniapp/api/band_settings_save",
+                json={
+                    **scoped_data,
+                    "expected": {"setlist_style": "mono", "reminders_enabled": True},
+                    "changes": {"setlist_style": "article", "reminders_enabled": False},
+                    "request_id": str(uuid4()),
+                },
+                headers=headers,
+            )
+            assert (
+                saved_settings.status == 200
+                and (await saved_settings.json())["status"] == "pending"
+            )
             queued_creation = await client.post(
                 "/miniapp/api/performance_action",
                 json={
-                    **(await scoped.json()),
+                    **scoped_data,
                     "action": "create",
                     "quick": "05.06.2099  Летний концерт",
                     "request_id": str(uuid4()),
@@ -516,6 +535,10 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 "UPDATE staff_roles SET name='forbidden'",
                 "UPDATE groups SET name='forbidden'",
                 "UPDATE groups SET owner_id=NULL",
+                "UPDATE groups SET setlist_style='article'",
+                "UPDATE groups SET admins_only_suggestions=true",
+                "UPDATE groups SET language='en'",
+                "UPDATE groups SET reminders_enabled=false",
                 "UPDATE users SET profile='{}'",
                 "UPDATE users SET export_settings='{}'",
                 "UPDATE users SET language='en'",

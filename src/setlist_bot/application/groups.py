@@ -135,6 +135,33 @@ class Groups:
         group.default_pause_seconds = pause_seconds(value)
         return group
 
+    async def set_language(self, group_id: UUID, language: str) -> Group:
+        group = await self.access(group_id, admin=True)
+        require(language in ("ru", "en"), "input")
+        if group.language != language:
+            group.language = language
+            record_activity(self.store, self.user, "group_language", group_id, language=language)
+        return group
+
+    async def setlist_settings(
+        self, group_id: UUID, *, style: str | None = None, admins_only: bool | None = None
+    ) -> Group:
+        group = await self.access(group_id, admin=True)
+        if style is not None:
+            require(style in ("mono", "article"), "input")
+            group.setlist_style = style
+        if admins_only is not None:
+            group.admins_only_suggestions = admins_only
+        record_activity(
+            self.store,
+            self.user,
+            "group_setlist_settings",
+            group_id,
+            style=group.setlist_style,
+            restricted=group.admins_only_suggestions,
+        )
+        return group
+
     async def register(self, group_id: UUID, musical_role: str) -> Membership:
         require(0 < len(musical_role.strip()) <= 200, "musical_role")
         group = await self.store.get(Group, group_id, lock=True)

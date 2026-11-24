@@ -3,6 +3,7 @@ import { repertoireImport } from "./repertoire-import.js";
 import { repertoireMusic } from "./repertoire-music.js";
 import { mountSharedSetlist } from "./shared-setlist.js";
 import { performanceAction, performanceLabel } from "./workspace-performances.js";
+import { bandSettingsTitle, showBandSettings } from "./workspace-band-settings.js";
 import { teamLabel, teamView } from "./workspace-team.js";
 import { showStaffDirectory, staffingLabel } from "./workspace-staffing.js";
 import { rosterLabel, showRoster } from "./workspace-roster.js";
@@ -110,6 +111,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   const page = Number(workspaceParams.get("page")) || 0;
   const view = workspaceParams.get("view");
   const profile = !band && view === "profile";
+  const bandSettings = band && view === "band-settings";
   const gigs = !band && view === "my-gigs";
   const gigInvitation = gigs && workspaceParams.get("invitation");
   const gigSetlist = gigInvitation && workspaceParams.get("setlist") === "1";
@@ -214,6 +216,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
         : gigInvitation ? gigsUrl(gigSection, page) : scheduleSettings ? gigsUrl() : bandUrl());
       else if (roster) location.assign(withManagedOrigin(performanceUrl(band, performance, past, page)));
       else if (performance) location.assign(performanceParent());
+      else if (bandSettings) location.assign(bandUrl(band, past, page));
       else if (trash) location.assign(bandUrl(band, past));
       else if (team) location.assign(teamContact ? teamUrl(page) : bandUrl(band, past));
       else if (staffing) location.assign(staffRecord ? staffingUrl(staffing, page, query) : teamUrl());
@@ -232,6 +235,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
         : await api("my_gigs", { section: gigSection, page });
       else if (roster) data = await api("performance_roster", { band, performance });
       else if (performance) data = await api("performance", { band, performance });
+      else if (bandSettings) data = await api("band_settings", { band });
       else if (trash) data = await api("performance_trash", { band, page });
       else if (team) data = await api("team", { band, page });
       else if (staffing) data = await api("staff_directory", {
@@ -262,6 +266,15 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       }
       else if (roster) showPerformanceRoster(data);
       else if (performance) showPerformance(data);
+      else if (bandSettings) {
+        const nav = element("nav", "", { class: "workspace-nav" });
+        nav.append(element("a", t("performances"), { href: bandUrl(band, past, page) }));
+        content.append(nav, element("h2", bandSettingsTitle(language)));
+        showBandSettings({
+          root: content, data, language, request: catalogApi, refresh: load,
+          status: message => { status.textContent = message; },
+        });
+      }
       else if (trash) showPerformanceTrash(data);
       else if (team || inbox) await showTeam(data);
       else if (staffing) showStaffing(data);
@@ -422,6 +435,9 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     nav.append(element("a", t("bands"), { href: bandUrl() }));
     nav.append(element("a", t("repertoire"), { href: repertoireUrl(band) }));
     nav.append(element("a", teamLabel(language, "title"), { href: teamUrl() }));
+    nav.append(element("a", bandSettingsTitle(language), {
+      href: `${bandUrl(band, past, page)}&view=band-settings`,
+    }));
     for (const [tab, key] of [["0", "upcoming"], ["1", "past"]]) {
       nav.append(element("a", t(key), {
         href: bandUrl(band, tab), ...(past === tab ? { "aria-current": "page" } : {}),

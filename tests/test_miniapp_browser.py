@@ -429,6 +429,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser_approve_self_substitution(browser, engine, world, origin)
                 await browser_schedule(browser, engine, origin)
                 await browser_profile(browser, engine, origin)
+                await browser_band_settings(browser, engine, world.group.id, origin)
                 await browser_team(browser, engine, world.group.id, origin)
                 return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
@@ -940,6 +941,12 @@ async def browser_team(browser, engine, group_id, origin):
     assert await browser.js(
         "!document.querySelector('#workspace-content').innerText.includes('Пригласить в команду')"
     )
+    await browser.click_named("#workspace-content a", "К коллективу")
+    await browser.click_named("#workspace-content a", "Настройки коллектива")
+    await browser.wait(
+        "document.querySelector('#workspace-content dl')?.innerText.includes('Таблица Article')"
+    )
+    assert not await browser.js("document.querySelector('#workspace-content button')")
 
 
 async def browser_staff_directory(browser, engine, group_id, origin):
@@ -1174,3 +1181,31 @@ async def browser_profile(browser, engine, origin):
     await browser.click_named("dialog[open] button", "Save")
     await process_catalog_request(engine)
     await browser.wait("document.documentElement.lang === 'ru'")
+
+
+async def browser_band_settings(browser, engine, group_id, origin):
+    await browser.call(
+        "Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&band={group_id}&past=1"}
+    )
+    await browser.click_named("#workspace-content a", "Настройки коллектива")
+    await browser.click_named("#workspace-content button", "Изменить настройки")
+    await browser.js("""
+        document.getElementById('band-setting-setlist_style').value = 'article';
+        document.getElementById('band-setting-language').value = 'en';
+        document.getElementById('band-setting-default_pause_seconds').value = '13';
+        document.getElementById('band-setting-reminders_enabled').value = 'false';
+    """)
+    await browser.click_named("dialog[open] button", "Сохранить настройки")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('#workspace-status')?.textContent"
+        " === 'Настройки коллектива сохранены.'"
+    )
+    assert await browser.js("""
+        const content = document.querySelector('#workspace-content');
+        ['Таблица Article', '13', 'English', 'Отключены']
+            .every(value => content.innerText.includes(value))
+    """)
+    assert await browser.js("document.documentElement.lang === 'ru'")
+    await browser.click_named("#workspace-content a", "К выступлениям")
+    await browser.wait("document.querySelector('[aria-current=page]')?.textContent === 'Прошедшие'")

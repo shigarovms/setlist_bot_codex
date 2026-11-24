@@ -1286,9 +1286,7 @@ class Controller:
             await self.store.delete(confirmation)
             return await self.execute(data["command"], confirmed=True)
         if command == "group_language":
-            await self.groups.access(group_id, admin=True)
-            require(args in ("ru", "en"), "input")
-            group.language = args
+            await self.groups.set_language(group_id, args)
             if not self.private:
                 self.language = args
             return Response(self.t("ok"))

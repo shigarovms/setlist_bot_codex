@@ -17,6 +17,10 @@ from setlist_bot.application.exports import PdfRenderer
 from setlist_bot.application.importing import Importer
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.repertoire_import import RepertoireImport
+from setlist_bot.application.workspace_band_settings import (
+    BAND_SETTINGS_KIND,
+    WorkspaceBandSettings,
+)
 from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_gigs import (
     GIG_REPLACEMENT,
@@ -61,6 +65,7 @@ CATALOG_OPERATIONS = {
     "shared_action": "miniapp_shared",
     "export_action": "miniapp_export",
     "performance_action": "miniapp_performance",
+    "band_settings_save": BAND_SETTINGS_KIND,
     "team_action": "miniapp_team",
     "staff_action": "miniapp_staff",
     "roster_action": ROSTER_KIND,
@@ -315,6 +320,10 @@ class MiniCatalog:
             require(concert is None, "input")
             details = {"performance": WorkspacePerformances.command(payload)}
             expires = min(expires, now() + timedelta(minutes=15))
+        elif operation == "band_settings_save":
+            require(concert is None, "input")
+            details = {"settings": WorkspaceBandSettings.command(payload)}
+            expires = min(expires, now() + timedelta(minutes=15))
         elif team_command is not None:
             details = {"team": team_command}
         elif operation == "staff_action":
@@ -520,6 +529,11 @@ class MiniCatalog:
             return result_profile
         require(group_id is not None, "forbidden")
         assert group_id is not None
+        if data["kind"] == BAND_SETTINGS_KIND:
+            require(concert is None and not target.shared, "miniapp_expired")
+            await WorkspaceBandSettings(self.store, self.user).apply(group_id, data["settings"])
+            row.command = json.dumps({**data, "status": "saved"})
+            return {}
         if data["kind"] == "miniapp_duration":
             require(concert is not None, "not_found")
             assert concert is not None

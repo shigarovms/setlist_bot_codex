@@ -3,7 +3,6 @@
 from typing import Any
 from uuid import UUID
 
-from setlist_bot.application.activity import record_activity
 from setlist_bot.application.message_refresh import queue_card_refreshes
 from setlist_bot.domain.entities import Confirmation, Membership
 from setlist_bot.domain.rules import require
@@ -24,18 +23,10 @@ async def settings_menu(
     require(action in ("main", "mono", "article", "toggle"), "input")
     response = Response("", markup_only=True, edit_message_ids=list(data["message_ids"]))
     if action != "main":
-        await c.groups.access(group.id, admin=True)
-        if action == "toggle":
-            group.admins_only_suggestions = not group.admins_only_suggestions
-        else:
-            group.setlist_style = action
-        record_activity(
-            c.store,
-            c.user,
-            "group_setlist_settings",
+        group = await c.groups.setlist_settings(
             group.id,
-            style=group.setlist_style,
-            restricted=group.admins_only_suggestions,
+            style=None if action == "toggle" else action,
+            admins_only=not group.admins_only_suggestions if action == "toggle" else None,
         )
         response = await c._refresh_card(row, data)
         assert response.menu_card_id is not None
