@@ -31,6 +31,8 @@ READ_TABLES = (
     "blocks",
     "items",
     "revisions",
+    "export_snapshots",
+    "export_files",
     "songs",
     "song_aliases",
     "catalog_proposals",

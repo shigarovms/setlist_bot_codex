@@ -1,4 +1,5 @@
 import { asText, clock, move, numbered, total, wire } from "./model.js";
+import { mountPdfExport, pdfTitle } from "./workspace-export.js";
 
 const copy = {
   ru: {
@@ -75,6 +76,7 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
   root.append(actions, check, dialog);
 
   if (data.can_edit_draft && !shared.approved) actions.append(button(t.edit, () => openEditor()));
+  if (shared.approved) actions.append(button(pdfTitle(language), () => openExport(shared.version)));
   actions.append(button(t.variants, () => openVariants()));
   actions.append(button(t.history, () => openVariants(0, true)));
   if (data.admin) actions.append(button(t.requests, () => openRequests()));
@@ -175,11 +177,25 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
       }
       content.append(list);
       toolbar.append(button(t.previous, () => openVariants(page, history)));
+      if (row.action === "approved" && result.entries.length)
+        toolbar.append(button(pdfTitle(language), () => openExport(row.number, row.id)));
       if (data.can_edit_draft && !shared.approved && !row.applied && !row.stale && row.number !== shared.version) {
         toolbar.append(button(row.kind === "submission" ? t.apply : t.restore, () => {
           if (confirm(t.replace)) void submit(row.kind === "submission" ? "apply" : "restore", shared, { variant: row.id });
         }, { class: "primary" }));
       }
+    } catch (error) { message.textContent = error.message; }
+  }
+
+  async function openExport(version, revision = null) {
+    if (attempt) return;
+    open(pdfTitle(language));
+    message.textContent = t.working;
+    try {
+      const options = await read("export_options");
+      if (!dialog.open) return;
+      message.textContent = "";
+      mountPdfExport({ root: content, dialog, message, options, language, version, revision, request });
     } catch (error) { message.textContent = error.message; }
   }
 

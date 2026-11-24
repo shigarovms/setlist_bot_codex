@@ -13,9 +13,11 @@ from uuid import UUID, uuid5
 
 from setlist_bot.application.catalog import SONG_FIELDS, Catalog, song_data
 from setlist_bot.application.concert_details import ConcertDetails
+from setlist_bot.application.exports import PdfRenderer
 from setlist_bot.application.importing import Importer
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.repertoire_import import RepertoireImport
+from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.application.workspace_setlists import SETLIST_SESSION, WorkspaceSetlists
 from setlist_bot.domain.entities import (
@@ -38,6 +40,7 @@ CATALOG_OPERATIONS = {
     "catalog_import": "miniapp_catalog_import",
     "music_action": "miniapp_music",
     "shared_action": "miniapp_shared",
+    "export_action": "miniapp_export",
     "duration_save": "miniapp_duration",
 }
 
@@ -113,12 +116,14 @@ class MiniCatalog:
         payload: dict[str, Any],
         *,
         operation: str = "catalog_save",
+        bot_username: str = "",
     ) -> dict[str, Any]:
         target = await self.target(session)
         group_id, concert = target.group_id, target.concert
         kind = CATALOG_OPERATIONS[operation]
-        require(target.shared == (operation == "shared_action"), "input")
-        if operation not in ("catalog_save", "shared_action"):
+        workspace_operations = ("shared_action", "export_action")
+        require(target.shared == (operation in workspace_operations), "input")
+        if operation not in ("catalog_save", *workspace_operations):
             await self.drafts.groups.access(group_id, admin=True)
         request = payload.get("request_id")
         require(isinstance(request, str) and str(UUID(request)) == request, "input")
@@ -169,6 +174,8 @@ class MiniCatalog:
             details = {"music": WorkspaceMusic.command(payload)}
         elif operation == "shared_action":
             details = {"shared": WorkspaceSetlists.command(payload)}
+        elif operation == "export_action":
+            details = {"export": WorkspaceExports.command(payload), "bot_username": bot_username}
         else:
             details = await self._catalog_details(group_id, payload)
         self.store.add(
@@ -247,7 +254,9 @@ class MiniCatalog:
         )
         return {"request": str(identifier), "status": data["status"], **data.get("result", {})}
 
-    async def execute(self, target: CatalogTarget, identifier: UUID) -> dict[str, Any]:
+    async def execute(
+        self, target: CatalogTarget, identifier: UUID, *, pdf: PdfRenderer | None = None
+    ) -> dict[str, Any]:
         """Called only by the bot worker with normal database privileges."""
         group_id, concert = target.group_id, target.concert
         row = await self.store.get(Confirmation, identifier, lock=True)
@@ -323,6 +332,14 @@ class MiniCatalog:
             }
             row.command = json.dumps({**data, "status": "saved", "result": public})
             return shared_result
+        if data["kind"] == "miniapp_export":
+            require(target.shared and concert is not None, "miniapp_expired")
+            assert concert is not None
+            result_export = await WorkspaceExports(
+                self.store, self.user, data["bot_username"]
+            ).apply(group_id, concert.id, data["export"], pdf)
+            row.command = json.dumps({**data, "status": "saved", "result": result_export})
+            return result_export
         song_id = UUID(data["song_id"]) if data["song_id"] else None
         if song_id:
             require(not (await self.catalog.song(group_id, song_id)).archived, "not_found")

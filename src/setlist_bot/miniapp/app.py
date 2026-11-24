@@ -15,11 +15,12 @@ from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.miniapp_catalog import CATALOG_OPERATIONS, MiniCatalog
 from setlist_bot.application.repertoire_import import RepertoireImport
 from setlist_bot.application.workspace import Workspace
+from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.application.workspace_setlists import WorkspaceSetlists
 from setlist_bot.domain.entities import Confirmation, User, now
 from setlist_bot.domain.miniapp_auth import verify_init_data
-from setlist_bot.domain.rules import AppError
+from setlist_bot.domain.rules import AppError, require
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.infrastructure.runtime import check_schema
 from setlist_bot.miniapp.browser_login import (
@@ -103,6 +104,7 @@ async def asset(request: web.Request) -> web.Response:
         "repertoire-import.js": "text/javascript",
         "repertoire-music.js": "text/javascript",
         "shared-setlist.js": "text/javascript",
+        "workspace-export.js": "text/javascript",
         "model.js": "text/javascript",
         "persistence.js": "text/javascript",
         "style.css": "text/css",
@@ -205,6 +207,12 @@ async def api(request: web.Request) -> web.Response:
                 user = users[0]
             request[LANGUAGE] = user.language
             service = MiniDrafts(uow.store, user)
+            if operation == "export_options" and request.method == "GET":
+                return web.json_response(
+                    await WorkspaceExports(uow.store, user).options(
+                        UUID(payload["band"]), UUID(payload["performance"])
+                    )
+                )
             if operation == "open_shared" and request.method == "POST":
                 shared = await WorkspaceSetlists(uow.store, user).open(
                     UUID(payload["band"]), UUID(payload["performance"])
@@ -350,7 +358,23 @@ async def api(request: web.Request) -> web.Response:
             elif request.method == "GET" and operation == "song":
                 result = await MiniCatalog(service).read(identifier, UUID(payload["song_id"]))
             elif request.method == "POST" and operation in CATALOG_OPERATIONS:
-                result = await MiniCatalog(service).queue(identifier, payload, operation=operation)
+                result = await MiniCatalog(service).queue(
+                    identifier, payload, operation=operation, bot_username=settings.bot_username
+                )
+            elif request.method == "GET" and operation == "export_download":
+                scoped = MiniCatalog(service)
+                target = await scoped.target(identifier)
+                require(target.shared and target.concert is not None, "miniapp_expired")
+                assert target.concert is not None
+                record = await scoped.status(identifier, UUID(payload["request"]))
+                name, content_type, content = await WorkspaceExports(uow.store, user).download(
+                    target.group_id, target.concert.id, record
+                )
+                return web.Response(
+                    body=content,
+                    content_type=content_type,
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'},
+                )
             elif request.method == "GET" and operation == "catalog_status":
                 result = await MiniCatalog(service).status(identifier, UUID(payload["request"]))
             elif request.method == "GET" and operation == "history_menu":

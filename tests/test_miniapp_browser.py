@@ -314,6 +314,30 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.wait(
                     "document.querySelector('#workspace-content').innerText.includes('Утверждён')"
                 )
+                await browser.click_named("#workspace-content button", "Экспорт PDF")
+                await browser.click_named(".shared-tools button", "Подготовить файл")
+                await process_catalog_request(engine)
+                await browser.wait(
+                    "!!document.querySelector('.shared-tools a[download]:not([hidden])')"
+                )
+                downloads = tmp_path / "downloads"
+                await browser.call(
+                    "Browser.setDownloadBehavior",
+                    {"behavior": "allow", "downloadPath": str(downloads)},
+                )
+                filename = await browser.js("""
+                    (() => {
+                        const link = document.querySelector('.shared-tools a[download]');
+                        link.click();
+                        return link.download;
+                    })()
+                """)
+                for _ in range(100):
+                    if (downloads / filename).is_file():
+                        break
+                    await asyncio.sleep(0.05)
+                assert (downloads / filename).read_bytes().startswith(b"%PDF-")
+                await browser.click_named(".shared-tools button", "Закрыть")
                 await browser.click_named("#workspace-content button", "Вернуть в работу")
                 await process_catalog_request(engine)
                 await browser.wait(

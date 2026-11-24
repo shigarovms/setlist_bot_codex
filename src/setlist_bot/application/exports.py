@@ -74,6 +74,7 @@ class Exports:
         approved: bool,
         private: bool,
         back: str,
+        reuse: bool = False,
     ) -> ExportSnapshot:
         require(approved, "export_approved_only")
         group = await Groups(self.store, self.user).access(group_id)
@@ -107,6 +108,20 @@ class Exports:
                 "language": group.language,
             },
         )
+        if reuse:
+            matches = await self.store.find(
+                ExportSnapshot,
+                group_id=group_id,
+                concert_id=concert_id,
+                chat_id=self.chat_id,
+                owner_id=export.owner_id,
+                group_epoch=export.group_epoch,
+                concert_epoch=export.concert_epoch,
+                payload=export.payload,
+            )
+            for match in matches:
+                if match.expires_at > now():
+                    return match
         self.store.add(export)
         return export
 

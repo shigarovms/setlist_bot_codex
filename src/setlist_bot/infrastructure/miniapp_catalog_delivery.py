@@ -32,7 +32,12 @@ async def deliver_catalog(uow: PostgresUnitOfWork, event: Outbox) -> bool:
                 and user.telegram_id == event.chat_id,
                 "miniapp_expired",
             )
-            result = await service.execute(target, identifier)
+            renderer = None
+            if data.get("kind") == "miniapp_export" and data["export"]["action"] == "generate":
+                from setlist_bot.infrastructure.pdf import PdfDocuments
+
+                renderer = PdfDocuments()
+            result = await service.execute(target, identifier, pdf=renderer)
             if notice := result.get("notify"):
                 from setlist_bot.transport.shared_requests import queue_admin_request
 

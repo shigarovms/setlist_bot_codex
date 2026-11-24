@@ -252,6 +252,10 @@ async function api(operation, payload = {}, method = "GET") {
         : "Connection failed. Your changes remain on screen; retry saving.",
     );
   }
+  if (operation === "export_download" && response.ok) {
+    const disposition = response.headers.get("Content-Disposition") ?? "";
+    return { blob: await response.blob(), name: /filename="([^"\r\n]+)"/.exec(disposition)?.[1] ?? "setlist.pdf" };
+  }
   const data = await response.json();
   if (!response.ok) {
     const error = new Error(data.message ?? "Ошибка / Error");

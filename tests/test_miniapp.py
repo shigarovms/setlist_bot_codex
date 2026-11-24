@@ -379,6 +379,7 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 "DELETE FROM song_aliases",
                 "UPDATE catalog_proposals SET status='approved'",
                 "UPDATE music_searches SET status='cancelled'",
+                "UPDATE export_files SET filename='forbidden.pdf'",
                 "UPDATE memberships SET role='admin'",
                 "UPDATE groups SET name='forbidden'",
                 "UPDATE groups SET owner_id=NULL",
