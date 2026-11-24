@@ -618,15 +618,16 @@ class Controller:
             )
             return await self._show(context)
         if command == "help":
-            topics = ("start", "events", "catalog", "setlists", "team", "calendar")
-            if args in topics:
+            from setlist_bot.transport.help_texts import HELP_TOPICS
+
+            if args in HELP_TOPICS:
                 return Response(
                     self.t("help_" + args),
                     [(self.t("help_back"), "help")],
                 )
             return Response(
                 self.t("help_intro"),
-                [(self.t("help_title_" + topic), "help " + topic) for topic in topics],
+                [(self.t("help_title_" + topic), "help " + topic) for topic in HELP_TOPICS],
             )
         if command == "start":
             if args in ("groups", "all_my_concerts"):

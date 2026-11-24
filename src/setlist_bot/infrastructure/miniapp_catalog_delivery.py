@@ -6,6 +6,7 @@ from uuid import UUID
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.miniapp_catalog import MiniCatalog
 from setlist_bot.application.ports import Store
+from setlist_bot.application.support import WORKSPACE_SUPPORT_KIND
 from setlist_bot.application.workspace_gigs import GIG_REPLACEMENT, GIG_REPLY
 from setlist_bot.application.workspace_profile import PROFILE_KIND
 from setlist_bot.application.workspace_roster import ROSTER_KIND, WorkspaceRoster
@@ -100,6 +101,8 @@ async def deliver_catalog(
             data.pop("source", None)
         if data.get("kind") == PROFILE_KIND:
             data.pop("profile", None)
+        if data.get("kind") == WORKSPACE_SUPPORT_KIND:
+            data.pop("support", None)
         row.command = json.dumps({**data, "status": "failed", "result": {"error": exc.code}})
         event.sent, event.discarded_at, event.last_error = True, now(), exc.code
         return False

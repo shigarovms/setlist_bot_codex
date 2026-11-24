@@ -17,6 +17,7 @@ from setlist_bot.application.exports import PdfRenderer
 from setlist_bot.application.importing import Importer
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.repertoire_import import RepertoireImport
+from setlist_bot.application.support import WORKSPACE_SUPPORT_KIND, Support, workspace_support_text
 from setlist_bot.application.workspace_band_settings import (
     BAND_SETTINGS_KIND,
     WorkspaceBandSettings,
@@ -73,6 +74,7 @@ CATALOG_OPERATIONS = {
     "gig_replacement": GIG_REPLACEMENT,
     "schedule_action": SCHEDULE_KIND,
     "profile_action": PROFILE_KIND,
+    "support_submit": WORKSPACE_SUPPORT_KIND,
     "duration_save": "miniapp_duration",
 }
 
@@ -243,14 +245,15 @@ class MiniCatalog:
         operation: str = "catalog_save",
         bot_username: str = "",
         miniapp_key: bytes = b"",
+        browser: bool = False,
     ) -> dict[str, Any]:
         target = await self.target(session)
         group_id, concert = target.group_id, target.concert
         kind = CATALOG_OPERATIONS[operation]
-        account = operation in ("profile_action", "schedule_action")
+        account = operation in ("profile_action", "schedule_action", "support_submit")
         if group_id is None:
             require(account, "forbidden")
-            return await self.queue_account(target, kind, payload, miniapp_key)
+            return await self.queue_account(target, kind, payload, miniapp_key, browser=browser)
         require(not account, "forbidden")
         workspace_operations = ("shared_action", "export_action", "roster_action")
         gig_operations = ("gig_reply", "gig_replacement")
@@ -369,7 +372,13 @@ class MiniCatalog:
         return None
 
     async def queue_account(
-        self, target: CatalogTarget, kind: str, payload: dict[str, Any], miniapp_key: bytes
+        self,
+        target: CatalogTarget,
+        kind: str,
+        payload: dict[str, Any],
+        miniapp_key: bytes,
+        *,
+        browser: bool = False,
     ) -> dict[str, Any]:
         session = await self.store.get(Confirmation, target.parent.id, lock=True)
         require(session.expires_at > now(), "miniapp_expired")
@@ -381,6 +390,13 @@ class MiniCatalog:
             return previous
         if kind == PROFILE_KIND:
             details = {"profile": WorkspaceProfile.command(payload)}
+        elif kind == WORKSPACE_SUPPORT_KIND:
+            details = {
+                "support": {
+                    "text": workspace_support_text(payload.get("text")),
+                    "source": "browser" if browser else "miniapp",
+                },
+            }
         else:
             require(bool(miniapp_key), "forbidden")
             handoff = CalendarHandoff(miniapp_key, self.user.id, identifier)
@@ -475,7 +491,7 @@ class MiniCatalog:
             "miniapp_expired",
         )
         result = dict(data.get("result", {}))
-        if data["kind"] in (SCHEDULE_KIND, PROFILE_KIND):
+        if data["kind"] in (SCHEDULE_KIND, PROFILE_KIND, WORKSPACE_SUPPORT_KIND):
             require(row.expires_at > now(), "input_expired")
         if capsule := result.pop("calendar_capsule", None):
             require(data["kind"] == SCHEDULE_KIND and bool(miniapp_key), "input_expired")
@@ -527,6 +543,15 @@ class MiniCatalog:
             )
             row.command = json.dumps({**data, "status": "saved", "result": result_profile})
             return result_profile
+        if data["kind"] == WORKSPACE_SUPPORT_KIND:
+            require(group_id is None and concert is None, "forbidden")
+            support = data.pop("support")
+            delivered = await Support(self.store, self.user).submit(
+                support["text"], source=support["source"]
+            )
+            require(delivered, "support_unavailable")
+            row.command = json.dumps({**data, "status": "saved"})
+            return {}
         require(group_id is not None, "forbidden")
         assert group_id is not None
         if data["kind"] == BAND_SETTINGS_KIND:

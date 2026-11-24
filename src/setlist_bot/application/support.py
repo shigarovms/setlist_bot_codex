@@ -14,6 +14,16 @@ from setlist_bot.domain.entities import (
 )
 from setlist_bot.domain.rules import require
 
+WORKSPACE_SUPPORT_KIND = "miniapp_support"
+
+
+def workspace_support_text(value: object) -> str:
+    require(isinstance(value, str) and 0 < len(value.strip()) <= 4000, "input")
+    assert isinstance(value, str)
+    text = value.strip()
+    require(all(ord(char) >= 32 or char in "\r\n\t" for char in text), "input")
+    return text
+
 
 class Support:
     def __init__(self, store: Store, user: User) -> None:
@@ -43,12 +53,14 @@ class Support:
         if rows:
             self.store.add(Outbox(chat_id=rows[0].chat_id, text=text, support_kind="event"))
 
-    async def submit(self, text: str) -> bool:
+    async def submit(self, text: str, *, source: str = "telegram") -> bool:
         rows = await self.store.find(SupportSettings, key="main")
         if not rows:
             return False
         event = Outbox(
             support_kind="request",
+            source=source,
+            actor=f"telegram:{self.user.telegram_id}",
             chat_id=rows[0].chat_id,
             text=(
                 f"Обращение в поддержку / Support request\n{self.actor}\n\n{text}"

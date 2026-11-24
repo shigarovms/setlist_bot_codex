@@ -1,5 +1,7 @@
 """Help topics in the same languages as the command menus."""
 
+HELP_TOPICS = ("start", "events", "catalog", "setlists", "team", "calendar")
+
 HELP_TEXTS = {
     "ru": {
         "help_intro": (
@@ -167,3 +169,78 @@ HELP_TEXTS = {
         ),
     },
 }
+
+WORKSPACE_HELP = {
+    "ru": {
+        "start": (
+            "Начните с «Моих коллективов». В «Моём профиле» можно изменить анкету, язык "
+            "приложения и оформление PDF. Для подключения нового коллектива откройте "
+            "групповой чат в Telegram."
+        ),
+        "events": (
+            "Выберите коллектив и откройте предстоящие или прошедшие выступления. "
+            "Администратор может создать выступление, изменить его параметры и настроить "
+            "напоминания в «Настройках коллектива»."
+        ),
+        "catalog": (
+            "Откройте «Репертуар» в коллективе. Ищите песни по названию и алиасам, нажмите "
+            "название, чтобы открыть карточку. Администратор может импортировать таблицу, "
+            "архивировать песни и рассматривать предложения участников."
+        ),
+        "setlists": (
+            "Откройте карточку выступления, чтобы увидеть общий сет-лист и его историю. "
+            "Личный черновик открывается отдельно. Его можно предложить коллективу. "
+            "PDF доступен из утверждённого сет-листа."
+        ),
+        "team": (
+            "Роли и права доступны в «Постоянной команде» коллектива. Приглашения в команду "
+            "и приглашения на выступления находятся в отдельных разделах. В «Моих выступлениях» "
+            "можно ответить на приглашение и запросить подмену."
+        ),
+        "calendar": (
+            "В «Моих выступлениях» откройте «Подписка на календарь». Выберите расписание "
+            "и добавьте выданную ссылку в Apple Calendar или Google Calendar. "
+            "Ссылку можно заменить или отключить."
+        ),
+    },
+    "en": {
+        "start": (
+            "Start with My bands. In My profile you can edit your details, choose the app "
+            "language and set PDF appearance. To connect a new band, open its group chat "
+            "in Telegram."
+        ),
+        "events": (
+            "Choose a band and view upcoming or past performances. Admins can create a "
+            "performance, edit its details and configure reminders in Band settings."
+        ),
+        "catalog": (
+            "Open Repertoire for your band. Search by title or alias and select a song "
+            "to open its details. Admins can import a table, archive songs and review suggestions."
+        ),
+        "setlists": (
+            "Open a performance to see the shared setlist and its history. You can open "
+            "your private draft separately and suggest it to the band. Download PDFs "
+            "from an approved setlist."
+        ),
+        "team": (
+            "Find band roles and permissions in Permanent team. Team and performance "
+            "invitations appear in separate sections. In My performances you can "
+            "respond to invitations and request a substitute."
+        ),
+        "calendar": (
+            "In My performances, open Calendar subscription. Choose a schedule and add "
+            "its link to Apple Calendar or Google Calendar. You can replace or disable the link."
+        ),
+    },
+}
+
+
+def workspace_help(language: str) -> list[dict[str, str]]:
+    return [
+        {
+            "title": HELP_TEXTS[language]["help_title_" + topic],
+            "text": WORKSPACE_HELP[language][topic],
+            "commands": HELP_TEXTS[language]["help_" + topic].partition("\n\n")[2],
+        }
+        for topic in HELP_TOPICS
+    ]

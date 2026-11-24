@@ -428,10 +428,11 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
             assert roles.status == 200 and (await roles.json())["roles"][0]["sound"]
             account = await client.post("/miniapp/api/open_account", json={}, headers=performer)
             assert account.status == 200, await account.text()
+            account_data = await account.json()
             queued_profile = await client.post(
                 "/miniapp/api/profile_action",
                 json={
-                    **(await account.json()),
+                    **account_data,
                     "action": "profile_save",
                     "version": 0,
                     "patch": {"name": "Сценическое имя"},
@@ -441,6 +442,14 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
             )
             assert queued_profile.status == 200, await queued_profile.text()
             assert (await queued_profile.json())["status"] == "pending"
+            help_page = await client.get("/miniapp/api/help", headers=performer)
+            assert help_page.status == 200 and len((await help_page.json())["topics"]) == 6
+            support = await client.post(
+                "/miniapp/api/support_submit",
+                json={**account_data, "text": "Нужна помощь", "request_id": str(uuid4())},
+                headers=performer,
+            )
+            assert support.status == 200 and (await support.json())["status"] == "pending"
             team = await client.get("/miniapp/api/team", params=band, headers=headers)
             assert team.status == 200 and (await team.json())["admin"]
             template_card = await client.get(
@@ -513,6 +522,7 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 "SELECT text FROM outbox",
                 "SELECT payload FROM outbox",
                 "SELECT * FROM support_messages",
+                "SELECT * FROM support_settings",
                 "SELECT * FROM admin_sessions",
                 "SELECT token_ciphertext FROM calendar_subscriptions",
                 "SELECT token_hash FROM calendar_subscriptions",

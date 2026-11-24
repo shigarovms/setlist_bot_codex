@@ -39,7 +39,7 @@ export function requestDialog({ title, labels: t, operation, request, refresh, s
 
   async function finish() {
     dialog.close();
-    await refresh();
+    await refresh?.();
     status(t.done);
   }
 

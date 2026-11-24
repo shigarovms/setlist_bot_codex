@@ -29,6 +29,8 @@ from aiogram.types import (
     BotCommandScopeChatMember,
     BotCommandScopeDefault,
     BotCommandScopeUnion,
+    MenuButtonWebApp,
+    WebAppInfo,
 )
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -184,6 +186,23 @@ async def _request[T](request: Callable[[], Awaitable[T]]) -> T:
             logger.info("Command menu rate limit; retrying after %s seconds", exc.retry_after)
             await asyncio.sleep(exc.retry_after)
     raise AssertionError("unreachable")
+
+
+async def synchronize_miniapp_button(bot: Bot, public_base_url: str) -> None:
+    if not public_base_url:
+        return
+    desired = MenuButtonWebApp(
+        text="Открыть miniApp",
+        web_app=WebAppInfo(url=f"{public_base_url}/miniapp/?workspace=1"),
+    )
+    current = await _request(bot.get_chat_menu_button)
+    if current.model_dump() == desired.model_dump():
+        return
+    if not await _request(partial(bot.set_chat_menu_button, menu_button=desired)):
+        raise CommandSyncError("Telegram did not confirm the Mini App menu button")
+    current = await _request(bot.get_chat_menu_button)
+    if current.model_dump() != desired.model_dump():
+        raise CommandSyncError("Telegram Mini App menu button verification failed")
 
 
 class _ScopedRequests:

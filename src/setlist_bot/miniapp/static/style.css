@@ -94,6 +94,7 @@ main {
 .song-details { overflow-wrap: anywhere; }
 .song-details dt { font-weight: 700; }
 .song-details dd { margin: 0 0 10px; white-space: pre-wrap; }
+.workspace-help-commands { white-space: pre-wrap; }
 .import-fields {
   display: grid;
   justify-items: start;

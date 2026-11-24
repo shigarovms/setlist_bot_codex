@@ -11,6 +11,9 @@ from aiogram.types import (
     BotCommandScopeChat,
     BotCommandScopeChatAdministrators,
     BotCommandScopeChatMember,
+    MenuButtonCommands,
+    MenuButtonWebApp,
+    WebAppInfo,
 )
 
 from setlist_bot import main
@@ -27,6 +30,7 @@ from setlist_bot.transport.commands import (
     menu_commands,
     scope_key,
     synchronize_commands,
+    synchronize_miniapp_button,
 )
 
 
@@ -243,7 +247,17 @@ def test_historical_scope_configuration_validates_json_and_languages():
 
 async def test_sync_only_runs_menu_sync_without_starting_polling(monkeypatch, database_url, engine):
     fake = SimpleNamespace(
-        get_me=AsyncMock(return_value=SimpleNamespace(id=123456, username="test_bot"))
+        get_me=AsyncMock(return_value=SimpleNamespace(id=123456, username="test_bot")),
+        get_chat_menu_button=AsyncMock(
+            side_effect=[
+                MenuButtonCommands(),
+                MenuButtonWebApp(
+                    text="Открыть miniApp",
+                    web_app=WebAppInfo(url="https://example.org/miniapp/?workspace=1"),
+                ),
+            ]
+        ),
+        set_chat_menu_button=AsyncMock(return_value=True),
     )
 
     class FakeBot:
@@ -258,7 +272,13 @@ async def test_sync_only_runs_menu_sync_without_starting_polling(monkeypatch, da
 
     monkeypatch.setattr(main, "Bot", FakeBot)
     monkeypatch.setattr(
-        main, "Settings", lambda: Settings(database_url=database_url, bot_token="test")
+        main,
+        "Settings",
+        lambda: Settings(
+            database_url=database_url,
+            bot_token="test",
+            miniapp_public_base_url="https://example.org",
+        ),
     )
     synchronize = AsyncMock(
         return_value=SimpleNamespace(checked=12, removed=1, registered=12, unavailable=0)
@@ -268,7 +288,36 @@ async def test_sync_only_runs_menu_sync_without_starting_polling(monkeypatch, da
     monkeypatch.setattr(main, "Dispatcher", dispatcher)
     await main.run(sync_only=True)
     synchronize.assert_awaited_once()
+    fake.set_chat_menu_button.assert_awaited_once_with(
+        menu_button=MenuButtonWebApp(
+            text="Открыть miniApp",
+            web_app=WebAppInfo(url="https://example.org/miniapp/?workspace=1"),
+        )
+    )
     dispatcher.assert_not_called()
+
+
+async def test_miniapp_menu_skips_missing_origin_and_preserves_an_already_correct_button():
+    desired = MenuButtonWebApp(
+        text="Открыть miniApp", web_app=WebAppInfo(url="https://example.org/miniapp/?workspace=1")
+    )
+    bot = SimpleNamespace(
+        get_chat_menu_button=AsyncMock(return_value=desired), set_chat_menu_button=AsyncMock()
+    )
+    await synchronize_miniapp_button(bot, "")
+    bot.get_chat_menu_button.assert_not_called()
+    await synchronize_miniapp_button(bot, "https://example.org")
+    bot.get_chat_menu_button.assert_awaited_once_with()
+    bot.set_chat_menu_button.assert_not_called()
+
+
+async def test_miniapp_menu_checks_that_telegram_applied_the_button():
+    bot = SimpleNamespace(
+        get_chat_menu_button=AsyncMock(return_value=MenuButtonCommands()),
+        set_chat_menu_button=AsyncMock(return_value=True),
+    )
+    with pytest.raises(CommandSyncError, match="menu button verification failed"):
+        await synchronize_miniapp_button(bot, "https://example.org")
 
 
 @pytest.mark.parametrize("phase", ["read", "delete", "verify"])

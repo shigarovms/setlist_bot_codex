@@ -43,7 +43,11 @@ from setlist_bot.infrastructure.database import PostgresUnitOfWork, metadata
 from setlist_bot.infrastructure.music_worker import search_worker
 from setlist_bot.infrastructure.runtime import BotInstance, check_schema, identity_details
 from setlist_bot.infrastructure.telemetry import Monitor, PollingStatusHandler
-from setlist_bot.transport.commands import collect_command_targets, synchronize_commands
+from setlist_bot.transport.commands import (
+    collect_command_targets,
+    synchronize_commands,
+    synchronize_miniapp_button,
+)
 from setlist_bot.transport.controller import Controller, Response
 from setlist_bot.transport.i18n import tr
 from setlist_bot.transport.session import VerifiedSession
@@ -544,6 +548,7 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
                     report = await synchronize_commands(
                         bot, targets, on_chat_migrated=partial(migrate_binding, engine)
                     )
+                    await synchronize_miniapp_button(bot, settings.miniapp_public_base_url)
                 except Exception as exc:
                     logger.error("Command menu synchronization failed (%s)", type(exc).__name__)
                     if not sync_only:

@@ -12,7 +12,8 @@ from pydantic import SecretStr
 from test_miniapp import KEY, settings, signed
 from test_repertoire_workspace_music import deliver_request
 
-from setlist_bot.domain.entities import DeploymentIdentity
+from setlist_bot.application.support import Support
+from setlist_bot.domain.entities import DeploymentIdentity, Outbox, SupportMessage
 from setlist_bot.domain.rules import AppError
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.miniapp.app import create_app
@@ -66,6 +67,7 @@ async def test_web_login_uses_same_account_as_mini_app_and_logout_revokes(
     config = settings(engine).model_copy(update={"browser_login_secret": SecretStr("test-only")})
     async with PostgresUnitOfWork(engine) as uow:
         uow.store.add(DeploymentIdentity(bot_id=1110437563, environment="sandbox"))
+        await Support(uow.store, world.admin).configure(-900, "shigarovms")
 
     calls = []
 
@@ -127,11 +129,12 @@ async def test_web_login_uses_same_account_as_mini_app_and_logout_revokes(
         assert (await client.get(state_url, headers=miniapp_headers)).status == 200
         account = await client.post("/miniapp/api/open_account", headers=same_origin, json={})
         assert account.status == 200
+        account_data = await account.json()
         profile_update = await client.post(
             "/miniapp/api/profile_action",
             headers=same_origin,
             json={
-                **(await account.json()),
+                **account_data,
                 "action": "profile_save",
                 "version": 0,
                 "patch": {"name": "Имя из браузера"},
@@ -144,6 +147,19 @@ async def test_web_login_uses_same_account_as_mini_app_and_logout_revokes(
         profile = await (await client.get(profile_url, headers=web_headers)).json()
         assert profile["profile"]["name"] == "Имя из браузера"
         assert profile == await (await client.get(profile_url, headers=miniapp_headers)).json()
+        help_page = await client.get("/miniapp/api/help", headers=web_headers)
+        assert help_page.status == 200 and len((await help_page.json())["topics"]) == 6
+        support = await client.post(
+            "/miniapp/api/support_submit",
+            headers=same_origin,
+            json={**account_data, "text": "Вопрос из браузера", "request_id": str(uuid4())},
+        )
+        assert support.status == 200
+        assert await deliver_request(engine, (await support.json())["request"])
+        async with PostgresUnitOfWork(engine) as uow:
+            (event,) = await uow.store.find(Outbox, support_kind="request")
+            (route,) = await uow.store.find(SupportMessage, outbox_id=event.id)
+            assert event.source == "browser" and route.user_id == world.member.id
         sign_out = "/miniapp/auth/logout"
         assert (await client.post(sign_out, headers=web_headers)).status == 401
         assert (await client.post(sign_out, headers=same_origin)).status == 200

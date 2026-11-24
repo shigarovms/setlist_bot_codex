@@ -14,6 +14,7 @@ from cryptography.fernet import Fernet
 from test_miniapp import KEY, session, settings, signed
 
 from setlist_bot.application.setlists import Setlists
+from setlist_bot.application.support import Support
 from setlist_bot.application.workspace_schedule import CalendarRuntime
 from setlist_bot.domain.entities import DeploymentIdentity, Outbox
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
@@ -430,6 +431,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser_schedule(browser, engine, origin)
                 await browser_profile(browser, engine, origin)
                 await browser_band_settings(browser, engine, world.group.id, origin)
+                await browser_help(browser, engine, world.admin, origin)
                 await browser_team(browser, engine, world.group.id, origin)
                 return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
@@ -1209,3 +1211,29 @@ async def browser_band_settings(browser, engine, group_id, origin):
     assert await browser.js("document.documentElement.lang === 'ru'")
     await browser.click_named("#workspace-content a", "К выступлениям")
     await browser.wait("document.querySelector('[aria-current=page]')?.textContent === 'Прошедшие'")
+
+
+async def browser_help(browser, engine, actor, origin):
+    async with PostgresUnitOfWork(engine) as uow:
+        await Support(uow.store, actor).configure(-900, "shigarovms")
+    await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1"})
+    await browser.click_named("#workspace-content a", "Справка и поддержка")
+    await browser.click_named("#workspace-content summary", "Репертуар")
+    assert await browser.js(
+        "document.querySelector('details[open] > p').innerText.includes('алиасам')"
+    )
+    await browser.click_named("#workspace-content details[open] summary", "Команды Telegram")
+    assert await browser.js(
+        "document.querySelector('details[open] details[open] .workspace-help-commands')"
+        "?.textContent.includes('/catalog')"
+    )
+    await browser.click_named("#workspace-content button", "Связаться с поддержкой")
+    await browser.js("document.getElementById('support-message').value = 'Вопрос о репертуаре'")
+    await browser.click_named("dialog[open] button", "Отправить обращение")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.getElementById('workspace-status').textContent.includes('Обращение принято')"
+    )
+    async with PostgresUnitOfWork(engine) as uow:
+        (event,) = await uow.store.find(Outbox, support_kind="request")
+        assert event.chat_id == -900 and "Вопрос о репертуаре" in event.text

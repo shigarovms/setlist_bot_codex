@@ -10,6 +10,7 @@ import { rosterLabel, showRoster } from "./workspace-roster.js";
 import { gigLabel, showGigs } from "./workspace-gigs.js";
 import { scheduleLabel, showScheduleSettings } from "./workspace-schedule.js";
 import { profileLabel, showProfile } from "./workspace-profile.js";
+import { helpTitle, showHelp } from "./workspace-help.js";
 
 const copy = {
   ru: {
@@ -111,6 +112,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   const page = Number(workspaceParams.get("page")) || 0;
   const view = workspaceParams.get("view");
   const profile = !band && view === "profile";
+  const help = !band && view === "help";
   const bandSettings = band && view === "band-settings";
   const gigs = !band && view === "my-gigs";
   const gigInvitation = gigs && workspaceParams.get("invitation");
@@ -139,6 +141,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   const teamUrl = (index = 0) => `${bandUrl(band, past, index)}&view=team`;
   const inboxUrl = () => `${bandUrl()}&view=team-inbox`;
   const profileUrl = () => `${bandUrl()}&view=profile`;
+  const helpUrl = () => `${bandUrl()}&view=help`;
   function gigsUrl(section = "schedule", index = 0, invitation = null, setlist = false) {
     const target = new URLSearchParams({ view: "my-gigs", section });
     if (invitation) target.set("invitation", invitation);
@@ -209,7 +212,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     });
     return button;
   }
-  if (band || inbox || gigs || profile) {
+  if (band || inbox || gigs || profile || help) {
     backButton?.show?.();
     backButton?.onClick?.(() => {
       if (gigs) location.assign(gigSetlist ? gigsUrl(gigSection, page, gigInvitation)
@@ -230,6 +233,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     try {
       let data;
       if (profile) data = await api("profile");
+      else if (help) data = await api("help");
       else if (scheduleSettings) data = await openAccount();
       else if (gigs) data = gigInvitation ? await api(gigSetlist ? "gig_setlist" : "gig_card", { invitation: gigInvitation })
         : await api("my_gigs", { section: gigSection, page });
@@ -250,7 +254,8 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       language = data.language === "en" ? "en" : "ru";
       document.documentElement.lang = language;
       title.textContent = band || gigInvitation ? data.band : gigs ? gigLabel(language, "title")
-        : inbox ? teamLabel(language, "inbox") : profile ? profileLabel(language, "title") : t("bands");
+        : inbox ? teamLabel(language, "inbox") : profile ? profileLabel(language, "title")
+          : help ? helpTitle(language) : t("bands");
       status.textContent = "";
       if (gigs) await showPersonalGigs(data);
       else if (profile) {
@@ -261,6 +266,15 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
         showProfile({
           root: content, data, language, request: accountApi, refresh: load,
           preview: payload => api("profile_roles", payload, "POST"),
+          status: message => { status.textContent = message; },
+        });
+      }
+      else if (help) {
+        const nav = element("nav", "", { class: "workspace-nav" });
+        nav.append(element("a", t("bands"), { href: bandUrl() }));
+        content.append(nav);
+        showHelp({
+          root: content, topics: data.topics, language, request: accountApi,
           status: message => { status.textContent = message; },
         });
       }
@@ -287,7 +301,8 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
         const nav = element("nav", "", { class: "workspace-nav" });
         nav.append(element("a", profileLabel(language, "title"), { href: profileUrl() }),
           element("a", gigLabel(language, "title"), { href: gigsUrl() }),
-          element("a", teamLabel(language, "inbox"), { href: inboxUrl() }));
+          element("a", teamLabel(language, "inbox"), { href: inboxUrl() }),
+          element("a", helpTitle(language), { href: helpUrl() }));
         content.append(nav);
         if (data.bands.length === 0) status.textContent = t("noBands");
         const list = element("ul", "", { class: "workspace-list" });
@@ -307,7 +322,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       status.textContent = error.message;
       const retry = element("button", t("retry"), { type: "button" });
       retry.addEventListener("click", load);
-      if (band || gigs || profile) content.append(element("a", gigs ? gigLabel(language, "title") : t("bands"),
+      if (band || gigs || profile || help) content.append(element("a", gigs ? gigLabel(language, "title") : t("bands"),
         { href: gigs ? gigsUrl() : bandUrl() }));
       content.append(retry);
     }

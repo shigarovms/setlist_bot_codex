@@ -40,6 +40,7 @@ from setlist_bot.miniapp.browser_login import (
     start_session,
 )
 from setlist_bot.miniapp.settings import MiniAppSettings
+from setlist_bot.transport.help_texts import workspace_help
 from setlist_bot.transport.i18n import tr
 
 ENGINE = web.AppKey("engine", AsyncEngine)
@@ -120,6 +121,7 @@ async def asset(request: web.Request) -> web.Response:
         "workspace-gigs.js": "text/javascript",
         "workspace-schedule.js": "text/javascript",
         "workspace-profile.js": "text/javascript",
+        "workspace-help.js": "text/javascript",
         "workspace-request-dialog.js": "text/javascript",
         "model.js": "text/javascript",
         "persistence.js": "text/javascript",
@@ -227,6 +229,10 @@ async def api(request: web.Request) -> web.Response:
                 user = users[0]
             request[LANGUAGE] = user.language
             service = MiniDrafts(uow.store, user)
+            if operation == "help" and request.method == "GET":
+                return web.json_response(
+                    {"language": user.language, "topics": workspace_help(user.language)}
+                )
             if operation in ("open_account", "open_schedule") and request.method == "POST":
                 account = MiniCatalog(service).open_account()
                 return web.json_response({"session": str(account.id), "language": user.language})
@@ -495,6 +501,7 @@ async def api(request: web.Request) -> web.Response:
                     operation=operation,
                     bot_username=settings.bot_username,
                     miniapp_key=miniapp_key,
+                    browser=actor is None,
                 )
             elif request.method == "GET" and operation == "export_download":
                 scoped = MiniCatalog(service)
