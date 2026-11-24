@@ -34,6 +34,20 @@ async def browser_tab(client, port, process):
     raise AssertionError(f"Chromium test tab did not open (exit code: {process.poll()})")
 
 
+async def process_catalog_request(engine):
+    from aiogram import Bot
+    from test_telegram import FakeTelegram
+
+    from setlist_bot.main import deliver_one_outbox
+
+    async with Bot("123456:TEST", session=FakeTelegram()) as worker:
+        for _ in range(50):
+            if await deliver_one_outbox(worker, engine):
+                return
+            await asyncio.sleep(0.1)
+    pytest.fail("Catalog request did not reach the bot worker")
+
+
 class Browser:
     def __init__(self, ws):
         self.ws, self.sequence, self.pending = ws, 0, {}
@@ -229,11 +243,6 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 },
             )
             if launch_mode == "workspace":
-                from aiogram import Bot
-                from test_telegram import FakeTelegram
-
-                from setlist_bot.main import deliver_one_outbox
-
                 await browser.wait("document.querySelectorAll('.workspace-list a').length === 2")
                 await browser.tap(".workspace-list a")
                 await browser.wait(
@@ -271,13 +280,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     document.getElementById('song-title').value = 'Комета акустика';
                     document.getElementById('song-form').requestSubmit();
                 """)
-                async with Bot("123456:TEST", session=FakeTelegram()) as worker:
-                    for _ in range(50):
-                        if await deliver_one_outbox(worker, engine):
-                            break
-                        await asyncio.sleep(0.1)
-                    else:
-                        pytest.fail("Catalog request did not reach the bot worker")
+                await process_catalog_request(engine)
                 await browser.wait(
                     "document.getElementById('workspace-status').textContent"
                     " === 'Репертуар обновлён.'"
@@ -289,6 +292,29 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 )
                 await browser.wait(
                     "document.getElementById('repertoire-query')?.value === 'Kometa'"
+                )
+                await browser.js("""
+                    Array.from(document.links).find(a => a.textContent === 'Импорт таблицы').click()
+                """)
+                await browser.wait("!!document.getElementById('import-source')")
+                await browser.js(r"""
+                    const source = 'TRACKS\tTIME\tKEY\nИнтро\t00:05\tAm';
+                    document.getElementById('import-source').value = source;
+                    document.querySelector('.import-fields').form.requestSubmit();
+                """)
+                await browser.wait(
+                    "document.querySelector('#workspace-content button.primary')?.hidden === false"
+                )
+                assert await browser.js(
+                    "document.querySelector('details').textContent.includes('KEY: Am')"
+                )
+                await browser.js(
+                    "document.querySelector('#workspace-content button.primary').click()"
+                )
+                await process_catalog_request(engine)
+                await browser.wait(
+                    "document.querySelector('#workspace-content').innerText"
+                    ".includes('Добавлено песен: 1.')"
                 )
                 return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")

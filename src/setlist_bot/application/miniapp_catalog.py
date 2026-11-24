@@ -13,7 +13,9 @@ from uuid import UUID, uuid5
 
 from setlist_bot.application.catalog import SONG_FIELDS, Catalog, song_data
 from setlist_bot.application.concert_details import ConcertDetails
+from setlist_bot.application.importing import Importer
 from setlist_bot.application.miniapp import MiniDrafts
+from setlist_bot.application.repertoire_import import RepertoireImport
 from setlist_bot.domain.entities import (
     CatalogProposal,
     Concert,
@@ -26,13 +28,14 @@ from setlist_bot.domain.entities import (
 from setlist_bot.domain.performance_input import performance_seconds
 from setlist_bot.domain.rules import duration, require, validate_song
 
-CATALOG_REQUESTS = (
-    "miniapp_catalog",
-    "miniapp_catalog_archive",
-    "miniapp_catalog_restore",
-    "miniapp_catalog_decide",
-    "miniapp_duration",
-)
+CATALOG_OPERATIONS = {
+    "catalog_save": "miniapp_catalog",
+    "catalog_archive": "miniapp_catalog_archive",
+    "catalog_restore": "miniapp_catalog_restore",
+    "catalog_decide": "miniapp_catalog_decide",
+    "catalog_import": "miniapp_catalog_import",
+    "duration_save": "miniapp_duration",
+}
 
 
 @dataclass(frozen=True)
@@ -93,22 +96,13 @@ class MiniCatalog:
         session: UUID,
         payload: dict[str, Any],
         *,
-        planned_duration: bool = False,
-        archive: bool = False,
-        restore: bool = False,
-        decide: bool = False,
+        operation: str = "catalog_save",
     ) -> dict[str, Any]:
         target = await self.target(session)
         group_id, concert = target.group_id, target.concert
-        if planned_duration or archive or restore or decide:
+        kind = CATALOG_OPERATIONS[operation]
+        if operation != "catalog_save":
             await self.drafts.groups.access(group_id, admin=True)
-        kind = "miniapp_duration" if planned_duration else "miniapp_catalog"
-        if archive:
-            kind = "miniapp_catalog_archive"
-        if restore:
-            kind = "miniapp_catalog_restore"
-        if decide:
-            kind = "miniapp_catalog_decide"
         request = payload.get("request_id")
         require(isinstance(request, str) and str(UUID(request)) == request, "input")
         assert isinstance(request, str)
@@ -120,7 +114,8 @@ class MiniCatalog:
             data = json.loads(previous[0].command)
             require(data.get("kind") == kind and data.get("fingerprint") == fingerprint, "input")
             return await self.status(session, identifier)
-        if planned_duration:
+        expires = target.parent.expires_at
+        if operation == "duration_save":
             require(concert is not None, "not_found")
             assert concert is not None
             expected = payload.get("expected")
@@ -130,21 +125,28 @@ class MiniCatalog:
             assert isinstance(value, str)
             require(value == "-" or performance_seconds(value) is not None, "pause_duration")
             details = {"value": value, "expected": expected}
-        elif archive or restore:
+        elif operation in ("catalog_archive", "catalog_restore"):
             song_id = payload.get("song_id")
             require(isinstance(song_id, str), "input")
             assert isinstance(song_id, str)
             song = await self.catalog.song(group_id, UUID(song_id))
             expected = payload.get("expected")
             require(type(expected) is int and song.version == expected, "conflict")
-            require(song.archived == restore, "conflict")
+            require(song.archived == (operation == "catalog_restore"), "conflict")
             details = {"song_id": str(song.id), "expected": expected}
-        elif decide:
+        elif operation == "catalog_decide":
             proposal = await self.store.get(CatalogProposal, UUID(payload["proposal_id"]))
             require(proposal.group_id == group_id, "not_found")
             require(proposal.status == "pending", "already_done")
             require(type(payload.get("approve")) is bool, "input")
             details = {"proposal_id": str(proposal.id), "approve": payload["approve"]}
+        elif operation == "catalog_import":
+            source = RepertoireImport.from_payload(payload)
+            importer = Importer(self.store, self.user, self.user.telegram_id)
+            plan = await source.preview(importer, group_id)
+            Importer.check_plan(plan, payload["fingerprint"])
+            details = {**source.data(), "import_fingerprint": plan.fingerprint}
+            expires = min(expires, now() + timedelta(minutes=30))
         else:
             details = await self._catalog_details(group_id, payload)
         self.store.add(
@@ -152,7 +154,7 @@ class MiniCatalog:
                 id=identifier,
                 user_id=self.user.id,
                 chat_id=self.user.telegram_id,
-                expires_at=target.parent.expires_at,
+                expires_at=expires,
                 command=json.dumps(
                     {
                         "kind": kind,
@@ -217,7 +219,7 @@ class MiniCatalog:
         data = json.loads(row.command)
         require(
             row.user_id == self.user.id
-            and data.get("kind") in CATALOG_REQUESTS
+            and data.get("kind") in CATALOG_OPERATIONS.values()
             and data.get("session") == str(session),
             "miniapp_expired",
         )
@@ -230,7 +232,7 @@ class MiniCatalog:
         data = json.loads(row.command)
         require(
             row.user_id == self.user.id
-            and data.get("kind") in CATALOG_REQUESTS
+            and data.get("kind") in CATALOG_OPERATIONS.values()
             and data.get("session") == str(target.parent.id)
             and data.get("group_id") == str(group_id)
             and data.get("concert_id") == (str(concert.id) if concert else None)
@@ -266,6 +268,20 @@ class MiniCatalog:
             decision = {"approved": data["approve"]}
             row.command = json.dumps({**data, "status": "saved", "result": decision})
             return decision
+        if data["kind"] == "miniapp_catalog_import":
+            importer = Importer(self.store, self.user, self.user.telegram_id)
+            imported = await importer.commit_source(
+                group_id,
+                data["source"],
+                data["mapping"],
+                data["has_header"],
+                data["import_fingerprint"],
+            )
+            summary = {"added": imported.added, "supplemented": imported.supplemented}
+            # The source is no longer needed after import. Keep the idempotency receipt.
+            receipt = {key: value for key, value in data.items() if key != "source"}
+            row.command = json.dumps({**receipt, "status": "saved", "result": summary})
+            return summary
         song_id = UUID(data["song_id"]) if data["song_id"] else None
         if song_id:
             require(not (await self.catalog.song(group_id, song_id)).archived, "not_found")

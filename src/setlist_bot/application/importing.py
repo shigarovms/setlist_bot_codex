@@ -88,7 +88,19 @@ class Importer:
         self, group_id: UUID, job_id: UUID, *, supplement_existing: bool = True
     ) -> ImportPlan:
         job = await self.job(group_id, job_id)
-        parsed = parse_import(job.source, job.mapping, job.has_header)
+        return await self._plan(
+            group_id, parse_import(job.source, job.mapping, job.has_header), supplement_existing
+        )
+
+    async def preview_source(
+        self, group_id: UUID, source: str, mapping: dict[str, int] | None, has_header: bool | None
+    ) -> ImportPlan:
+        await self.groups.access(group_id, admin=True)
+        return await self._plan(group_id, parse_import(source, mapping, has_header), True)
+
+    async def _plan(
+        self, group_id: UUID, parsed: ParsedImport, supplement_existing: bool
+    ) -> ImportPlan:
         plan = ImportPlan(parsed, supplement_existing=supplement_existing)
         songs = await self.store.find(Song, group_id=group_id)
         by_id = {song.id: song for song in songs}
@@ -150,11 +162,31 @@ class Importer:
     ) -> ImportResult:
         job = await self.job(group_id, job_id)
         plan = await self.preview(group_id, job_id, supplement_existing=supplement_existing)
+        result = await self._apply(group_id, plan, fingerprint)
+        job.status = "done"
+        return result
+
+    async def commit_source(
+        self,
+        group_id: UUID,
+        source: str,
+        mapping: dict[str, int] | None,
+        has_header: bool | None,
+        fingerprint: str,
+    ) -> ImportResult:
+        plan = await self.preview_source(group_id, source, mapping, has_header)
+        return await self._apply(group_id, plan, fingerprint)
+
+    @staticmethod
+    def check_plan(plan: ImportPlan, fingerprint: str) -> None:
         require(plan.fingerprint == fingerprint, "import_changed")
         require(
             not plan.parsed.error and not plan.errors and bool(plan.new or plan.supplements),
             "import_fix",
         )
+
+    async def _apply(self, group_id: UUID, plan: ImportPlan, fingerprint: str) -> ImportResult:
+        self.check_plan(plan, fingerprint)
         # RU/EN: Batch import refreshes cards once, not once per imported song.
         catalog = Catalog(self.store, self.user, refresh_cards=False)
         for data in plan.new:
@@ -169,6 +201,5 @@ class Importer:
         from setlist_bot.application.ux import milestone
 
         milestone("catalog_imported", group_id, {})
-        job.status = "done"
         await queue_card_refreshes(self.store, group_id)
         return ImportResult(len(plan.new), len(plan.supplements))

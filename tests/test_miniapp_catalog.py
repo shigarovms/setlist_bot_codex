@@ -297,15 +297,15 @@ async def test_catalog_archive_rechecks_version_and_role_and_preserves_setlist(
     async with PostgresUnitOfWork(engine) as uow:
         catalog = MiniCatalog(MiniDrafts(uow.store, world.member))
         with pytest.raises(AppError, match="admin_only"):
-            await catalog.queue(member, request, archive=True)
+            await catalog.queue(member, request, operation="catalog_archive")
         if intervening_change == "role":
             (await uow.store.find(Membership, user_id=world.member.id))[0].role = "admin"
     actor = world.member if intervening_change == "role" else world.admin
     identifier = member if intervening_change == "role" else (await session(engine, world))[0]
     async with PostgresUnitOfWork(engine) as uow:
         catalog = MiniCatalog(MiniDrafts(uow.store, actor))
-        queued = await catalog.queue(identifier, request, archive=True)
-        assert await catalog.queue(identifier, request, archive=True) == queued
+        queued = await catalog.queue(identifier, request, operation="catalog_archive")
+        assert await catalog.queue(identifier, request, operation="catalog_archive") == queued
         assert not (await uow.store.get(Song, world.song.id)).archived
         assert len(await uow.store.find(Outbox, support_kind="catalog")) == 1
         if intervening_change == "role":
@@ -322,7 +322,7 @@ async def test_catalog_archive_rechecks_version_and_role_and_preserves_setlist(
         assert stored.archived is (intervening_change is None)
         if intervening_change is None:
             assert receipt["status"] == "saved" and receipt["archived"]
-            assert await catalog.queue(identifier, request, archive=True) == receipt
+            assert await catalog.queue(identifier, request, operation="catalog_archive") == receipt
             assert str(world.song.id) not in {
                 row["id"] for row in (await drafts.state(identifier))["catalog"]
             }
@@ -354,9 +354,9 @@ async def test_planned_duration_uses_versioned_worker_and_keeps_draft(
     async with PostgresUnitOfWork(engine) as uow:
         catalog = MiniCatalog(MiniDrafts(uow.store, world.member))
         with pytest.raises(AppError, match="admin_only"):
-            await catalog.queue(member, request, planned_duration=True)
+            await catalog.queue(member, request, operation="duration_save")
         catalog = MiniCatalog(MiniDrafts(uow.store, world.admin))
-        queued = await catalog.queue(identifier, request, planned_duration=True)
+        queued = await catalog.queue(identifier, request, operation="duration_save")
         assert (await uow.store.get(Concert, world.concert.id)).metadata_version == initial[
             "metadata_version"
         ]
@@ -365,7 +365,7 @@ async def test_planned_duration_uses_versioned_worker_and_keeps_draft(
     async with PostgresUnitOfWork(engine) as uow:
         service = MiniDrafts(uow.store, world.admin)
         catalog = MiniCatalog(service)
-        receipt = await catalog.queue(identifier, request, planned_duration=True)
+        receipt = await catalog.queue(identifier, request, operation="duration_save")
         assert receipt["request"] == queued["request"]
         assert receipt["status"] == "saved" and receipt["planned_seconds"] == seconds
         updated = await service.state(identifier)
@@ -373,7 +373,7 @@ async def test_planned_duration_uses_versioned_worker_and_keeps_draft(
         assert updated["metadata_version"] == initial["metadata_version"] + 1
         with pytest.raises(AppError, match="conflict"):
             await catalog.queue(
-                identifier, {**request, "request_id": str(uuid4())}, planned_duration=True
+                identifier, {**request, "request_id": str(uuid4())}, operation="duration_save"
             )
 
 
@@ -392,7 +392,7 @@ async def test_planned_duration_worker_rechecks_role_after_queue(engine, world):
             "value": "45",
         }
         queued = await MiniCatalog(MiniDrafts(uow.store, world.member)).queue(
-            member, request, planned_duration=True
+            member, request, operation="duration_save"
         )
         (await uow.store.find(Membership, user_id=world.member.id))[0].role = "member"
     async with Bot("123456:TEST", session=FakeTelegram()) as bot:

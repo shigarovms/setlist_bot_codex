@@ -35,6 +35,8 @@ async def deliver_catalog(uow: PostgresUnitOfWork, event: Outbox) -> bool:
             await service.execute(target, identifier)
     except AppError as exc:
         row = await uow.store.get(Confirmation, identifier, lock=True)
+        if data.get("kind") == "miniapp_catalog_import":
+            data.pop("source", None)
         row.command = json.dumps({**data, "status": "failed", "result": {"error": exc.code}})
         event.sent, event.discarded_at, event.last_error = True, now(), exc.code
         return False

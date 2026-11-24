@@ -10,8 +10,10 @@ from aiohttp import web
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from setlist_bot.application.importing import Importer
 from setlist_bot.application.miniapp import MiniDrafts
-from setlist_bot.application.miniapp_catalog import MiniCatalog
+from setlist_bot.application.miniapp_catalog import CATALOG_OPERATIONS, MiniCatalog
+from setlist_bot.application.repertoire_import import RepertoireImport
 from setlist_bot.application.workspace import Workspace
 from setlist_bot.domain.entities import Confirmation, User, now
 from setlist_bot.domain.miniapp_auth import verify_init_data
@@ -60,7 +62,7 @@ async def errors(
             401
             if exc.code == "miniapp_auth"
             else 409
-            if exc.code in ("conflict", "selection_catalog_changed")
+            if exc.code in ("conflict", "selection_catalog_changed", "import_changed")
             else 403
         )
         try:
@@ -96,6 +98,7 @@ async def asset(request: web.Request) -> web.Response:
         "index.html": "text/html",
         "app.js": "text/javascript",
         "workspace.js": "text/javascript",
+        "repertoire-import.js": "text/javascript",
         "model.js": "text/javascript",
         "persistence.js": "text/javascript",
         "style.css": "text/css",
@@ -215,6 +218,42 @@ async def api(request: web.Request) -> web.Response:
             if operation == "open_repertoire" and request.method == "POST":
                 repertoire = await MiniCatalog(service).open_repertoire(UUID(payload["band"]))
                 return web.json_response({"session": str(repertoire.id)})
+            if operation == "repertoire_import_preview" and request.method == "POST":
+                source = RepertoireImport.from_payload(payload)
+                importer = Importer(uow.store, user, user.telegram_id)
+                plan = await source.preview(importer, UUID(payload["band"]))
+                table = plan.parsed.table
+                first = (
+                    table.rows[int(table.has_header)]
+                    if len(table.rows) > int(table.has_header)
+                    else []
+                )
+                return web.json_response(
+                    {
+                        "fingerprint": plan.fingerprint,
+                        "ready": not (plan.parsed.error or plan.errors)
+                        and bool(plan.new or plan.supplements),
+                        "has_header": table.has_header,
+                        "columns": [
+                            value or (first[i] if first else "")
+                            for i, value in enumerate(table.headers)
+                        ],
+                        "error": tr(user.language, plan.parsed.error) if plan.parsed.error else "",
+                        "new": plan.new,
+                        "duplicates": [row.title for row in plan.duplicates],
+                        "supplements": [
+                            {"title": row.title, "fields": row.fields} for row in plan.supplements
+                        ],
+                        "errors": [
+                            {
+                                "row": row.number,
+                                "title": row.title,
+                                "message": tr(user.language, row.error),
+                            }
+                            for row in plan.errors
+                        ],
+                    }
+                )
             if operation == "repertoire_proposals" and request.method == "GET":
                 page = int(payload.get("page", "0"))
                 if not 0 <= page <= 10000:
@@ -261,21 +300,8 @@ async def api(request: web.Request) -> web.Response:
                 )
             elif request.method == "GET" and operation == "song":
                 result = await MiniCatalog(service).read(identifier, UUID(payload["song_id"]))
-            elif request.method == "POST" and operation in (
-                "catalog_save",
-                "catalog_archive",
-                "catalog_restore",
-                "catalog_decide",
-                "duration_save",
-            ):
-                result = await MiniCatalog(service).queue(
-                    identifier,
-                    payload,
-                    planned_duration=operation == "duration_save",
-                    archive=operation == "catalog_archive",
-                    restore=operation == "catalog_restore",
-                    decide=operation == "catalog_decide",
-                )
+            elif request.method == "POST" and operation in CATALOG_OPERATIONS:
+                result = await MiniCatalog(service).queue(identifier, payload, operation=operation)
             elif request.method == "GET" and operation == "catalog_status":
                 result = await MiniCatalog(service).status(identifier, UUID(payload["request"]))
                 if result.get("error"):
