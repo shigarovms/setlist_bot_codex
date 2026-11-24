@@ -2,6 +2,7 @@ import base64
 import hashlib
 import time
 from urllib.parse import parse_qs, urlsplit
+from uuid import uuid4
 
 import jwt
 import pytest
@@ -9,6 +10,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from cryptography.hazmat.primitives.asymmetric import rsa
 from pydantic import SecretStr
 from test_miniapp import KEY, settings, signed
+from test_repertoire_workspace_music import deliver_request
 
 from setlist_bot.domain.entities import DeploymentIdentity
 from setlist_bot.domain.rules import AppError
@@ -123,6 +125,25 @@ async def test_web_login_uses_same_account_as_mini_app_and_logout_revokes(
         assert (await client.get(state_url, headers=web_headers)).status == 200
         miniapp_headers = {"Authorization": "tma " + signed(actor=2)}
         assert (await client.get(state_url, headers=miniapp_headers)).status == 200
+        account = await client.post("/miniapp/api/open_account", headers=same_origin, json={})
+        assert account.status == 200
+        profile_update = await client.post(
+            "/miniapp/api/profile_action",
+            headers=same_origin,
+            json={
+                **(await account.json()),
+                "action": "profile_save",
+                "version": 0,
+                "patch": {"name": "Имя из браузера"},
+                "request_id": str(uuid4()),
+            },
+        )
+        assert profile_update.status == 200
+        assert await deliver_request(engine, (await profile_update.json())["request"])
+        profile_url = "/miniapp/api/profile"
+        profile = await (await client.get(profile_url, headers=web_headers)).json()
+        assert profile["profile"]["name"] == "Имя из браузера"
+        assert profile == await (await client.get(profile_url, headers=miniapp_headers)).json()
         sign_out = "/miniapp/auth/logout"
         assert (await client.post(sign_out, headers=web_headers)).status == 401
         assert (await client.post(sign_out, headers=same_origin)).status == 200

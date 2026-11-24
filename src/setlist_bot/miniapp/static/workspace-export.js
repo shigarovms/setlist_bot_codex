@@ -26,6 +26,25 @@ function el(tag, value, attributes = {}) {
 
 export function pdfTitle(language) { return words[language].pdf; }
 
+function select(container, id, label, choices, selected) {
+  const node = el("select", "", { id });
+  for (const [value, name] of choices) node.append(el("option", name, { value }));
+  node.value = selected;
+  container.append(el("label", label, { for: id }), node);
+  return node;
+}
+
+export function pdfAppearanceFields(container, options, language, prefix = "workspace-pdf") {
+  const t = words[language];
+  const font = select(container, `${prefix}-font`, t.font,
+    Object.entries(options.fonts), options.settings.font);
+  const sizes = Array.from({ length: 17 }, (_, index) => [String(index + 24), String(index + 24)]);
+  const size = select(container, `${prefix}-size`, t.size, sizes, String(options.settings.size));
+  const align = select(container, `${prefix}-align`, t.align,
+    [["left", t.left], ["center", t.center]], options.settings.align);
+  return () => ({ font: font.value, size: Number(size.value), align: align.value });
+}
+
 export function mountPdfExport({ root, dialog, message, options, language, version, revision, request }) {
   const t = words[language];
   const fields = el("fieldset", "", { class: "import-fields" });
@@ -36,25 +55,13 @@ export function mountPdfExport({ root, dialog, message, options, language, versi
   const check = el("button", t.retry, { hidden: "", type: "button" });
   let pending = null, working = false, fileUrl;
 
-  function select(container, id, label, choices, selected) {
-    const node = el("select", "", { id });
-    for (const [value, name] of choices) node.append(el("option", name, { value }));
-    node.value = selected;
-    container.append(el("label", label, { for: id }), node);
-    return node;
-  }
   const pdfLanguage = select(fields, "workspace-pdf-language", t.language,
     [["ru", "Русский"], ["en", "English"]], options.language);
   const audience = select(fields, "workspace-pdf-audience", t.audience,
     [["musicians", t.musicians], ["lights", t.lights], ["all", t.all]], "musicians");
-  const font = select(appearance, "workspace-pdf-font", t.font,
-    Object.entries(options.fonts), options.settings.font);
-  const sizes = Array.from({ length: 17 }, (_, index) => [String(index + 24), String(index + 24)]);
-  const size = select(appearance, "workspace-pdf-size", t.size, sizes, String(options.settings.size));
-  const align = select(appearance, "workspace-pdf-align", t.align,
-    [["left", t.left], ["center", t.center]], options.settings.align);
+  const readAppearance = pdfAppearanceFields(appearance, options, language);
   const save = el("button", t.settings, { type: "button" });
-  save.addEventListener("click", () => begin({ action: "settings", settings: { font: font.value, size: Number(size.value), align: align.value } }));
+  save.addEventListener("click", () => begin({ action: "settings", settings: readAppearance() }));
   appearance.append(save);
   const prepare = el("button", t.prepare, { type: "button", class: "primary" });
   prepare.addEventListener("click", () => begin({ action: "generate", audience: audience.value,

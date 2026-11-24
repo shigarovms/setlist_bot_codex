@@ -10,7 +10,7 @@ from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.application.workspace_gigs import WorkspaceGigs
 from setlist_bot.domain.entities import ExportFile, Revision, User
-from setlist_bot.domain.export_settings import FONTS, settings
+from setlist_bot.domain.export_settings import FONTS, settings, validated_settings
 from setlist_bot.domain.rules import require
 
 
@@ -36,16 +36,7 @@ class WorkspaceExports:
         action = payload.get("action")
         require(action in ("generate", "settings"), "input")
         if action == "settings":
-            config = payload.get("settings")
-            require(
-                isinstance(config, dict)
-                and set(config) == {"font", "size", "align"}
-                and isinstance(config["font"], str)
-                and type(config["size"]) is int,
-                "input",
-            )
-            assert isinstance(config, dict)
-            return {"action": action, "settings": settings(config)}
+            return {"action": action, "settings": validated_settings(payload.get("settings"))}
         language, audience, version = (
             payload.get(key) for key in ("language", "audience", "version")
         )

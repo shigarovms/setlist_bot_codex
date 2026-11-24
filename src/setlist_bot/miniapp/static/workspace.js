@@ -8,6 +8,7 @@ import { showStaffDirectory, staffingLabel } from "./workspace-staffing.js";
 import { rosterLabel, showRoster } from "./workspace-roster.js";
 import { gigLabel, showGigs } from "./workspace-gigs.js";
 import { scheduleLabel, showScheduleSettings } from "./workspace-schedule.js";
+import { profileLabel, showProfile } from "./workspace-profile.js";
 
 const copy = {
   ru: {
@@ -108,6 +109,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   const past = workspaceParams.get("past") === "1" ? "1" : "0";
   const page = Number(workspaceParams.get("page")) || 0;
   const view = workspaceParams.get("view");
+  const profile = !band && view === "profile";
   const gigs = !band && view === "my-gigs";
   const gigInvitation = gigs && workspaceParams.get("invitation");
   const gigSetlist = gigInvitation && workspaceParams.get("setlist") === "1";
@@ -134,6 +136,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   const repertoireList = () => repertoireUrl(band, { archived, page, query });
   const teamUrl = (index = 0) => `${bandUrl(band, past, index)}&view=team`;
   const inboxUrl = () => `${bandUrl()}&view=team-inbox`;
+  const profileUrl = () => `${bandUrl()}&view=profile`;
   function gigsUrl(section = "schedule", index = 0, invitation = null, setlist = false) {
     const target = new URLSearchParams({ view: "my-gigs", section });
     if (invitation) target.set("invitation", invitation);
@@ -157,7 +160,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   let catalogSession;
   let sharedSession;
   const gigSessions = new Map();
-  let scheduleSession;
+  let accountSession;
   const t = (key) => workspaceText(language, key);
   main.hidden = false;
   title.textContent = t("bands");
@@ -204,7 +207,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     });
     return button;
   }
-  if (band || inbox || gigs) {
+  if (band || inbox || gigs || profile) {
     backButton?.show?.();
     backButton?.onClick?.(() => {
       if (gigs) location.assign(gigSetlist ? gigsUrl(gigSection, page, gigInvitation)
@@ -223,7 +226,8 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     status.textContent = t("loading");
     try {
       let data;
-      if (scheduleSettings) data = await openSchedule();
+      if (profile) data = await api("profile");
+      else if (scheduleSettings) data = await openAccount();
       else if (gigs) data = gigInvitation ? await api(gigSetlist ? "gig_setlist" : "gig_card", { invitation: gigInvitation })
         : await api("my_gigs", { section: gigSection, page });
       else if (roster) data = await api("performance_roster", { band, performance });
@@ -242,9 +246,20 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       language = data.language === "en" ? "en" : "ru";
       document.documentElement.lang = language;
       title.textContent = band || gigInvitation ? data.band : gigs ? gigLabel(language, "title")
-        : inbox ? teamLabel(language, "inbox") : t("bands");
+        : inbox ? teamLabel(language, "inbox") : profile ? profileLabel(language, "title") : t("bands");
       status.textContent = "";
       if (gigs) await showPersonalGigs(data);
+      else if (profile) {
+        const nav = element("nav", "", { class: "workspace-nav" });
+        nav.append(element("a", t("bands"), { href: bandUrl() }),
+          element("a", gigLabel(language, "title"), { href: gigsUrl() }));
+        content.append(nav);
+        showProfile({
+          root: content, data, language, request: accountApi, refresh: load,
+          preview: payload => api("profile_roles", payload, "POST"),
+          status: message => { status.textContent = message; },
+        });
+      }
       else if (roster) showPerformanceRoster(data);
       else if (performance) showPerformance(data);
       else if (trash) showPerformanceTrash(data);
@@ -257,7 +272,8 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       else if (band) showPerformances(data);
       else {
         const nav = element("nav", "", { class: "workspace-nav" });
-        nav.append(element("a", gigLabel(language, "title"), { href: gigsUrl() }),
+        nav.append(element("a", profileLabel(language, "title"), { href: profileUrl() }),
+          element("a", gigLabel(language, "title"), { href: gigsUrl() }),
           element("a", teamLabel(language, "inbox"), { href: inboxUrl() }));
         content.append(nav);
         if (data.bands.length === 0) status.textContent = t("noBands");
@@ -278,7 +294,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       status.textContent = error.message;
       const retry = element("button", t("retry"), { type: "button" });
       retry.addEventListener("click", load);
-      if (band || gigs) content.append(element("a", gigs ? gigLabel(language, "title") : t("bands"),
+      if (band || gigs || profile) content.append(element("a", gigs ? gigLabel(language, "title") : t("bands"),
         { href: gigs ? gigsUrl() : bandUrl() }));
       content.append(retry);
     }
@@ -326,22 +342,22 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       throw error;
     }
   }
-  function openSchedule() {
-    scheduleSession ??= api("open_schedule", {}, "POST").catch(error => {
-      scheduleSession = null;
+  function openAccount() {
+    accountSession ??= api("open_account", {}, "POST").catch(error => {
+      accountSession = null;
       throw error;
     });
-    return scheduleSession;
+    return accountSession;
   }
-  async function scheduleApi(operation, payload, method) {
-    const opening = openSchedule();
+  async function accountApi(operation, payload, method) {
+    const opening = openAccount();
     let session;
     try {
       ({ session } = await opening);
       return await api(operation, { ...payload, session }, method);
     } catch (error) {
-      if (scheduleSession === opening && (!session || error.data?.error === "miniapp_expired"))
-        scheduleSession = null;
+      if (accountSession === opening && (!session || error.data?.error === "miniapp_expired"))
+        accountSession = null;
       throw error;
     }
   }
@@ -367,7 +383,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     content.append(nav);
     if (scheduleSettings) {
       await showScheduleSettings({
-        root: content, section: gigSection, language, dateText, request: scheduleApi,
+        root: content, section: gigSection, language, dateText, request: accountApi,
         refresh: load, status: message => { status.textContent = message; },
       });
       return;

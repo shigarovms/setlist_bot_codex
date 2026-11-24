@@ -5,6 +5,7 @@ skill or a local assignment in that role. Never infer MON competence from FOH ex
 """
 
 import re
+from difflib import get_close_matches
 
 from setlist_bot.domain.rules import normalize, require
 
@@ -80,6 +81,7 @@ ALIASES = {
 }
 SOUND_ROLES = {"foh", "mon", "audio_tech", "system", "rf", "playback"}
 AMBIGUOUS = {"фон", "tm", "тм", "техник", "инженер", "оператор"}
+GENERAL_SOUND = {"ru": "Звукорежиссёр", "en": "Sound engineer"}
 
 
 class RoleIndex:
@@ -103,6 +105,16 @@ class RoleIndex:
     def matches(self, required: str, offered: str) -> bool:
         target, skill = self.key(required), self.key(offered)
         return target == skill or target == "sound" and skill in SOUND_ROLES
+
+    def profile_choice(self, name: str) -> tuple[str | None, list[str], bool]:
+        key = self.key(name)
+        if key == "sound":
+            return None, [self.titles.get(role, ROLES[role][0]) for role in ("foh", "mon")], True
+        if key in self.titles:
+            return self.titles[key], [], False
+        close = get_close_matches(normalize(name), self.aliases, n=10, cutoff=0.55)
+        nearby = list(dict.fromkeys(self.aliases[alias] for alias in close))
+        return None, [self.titles[match] for match in nearby if match != "sound"][:3], False
 
     @staticmethod
     def _names(value: str) -> list[str]:

@@ -1,5 +1,7 @@
 """Private profile and permanent-team UI, RU/EN."""
 
+from setlist_bot.domain.staff_roles import GENERAL_SOUND
+
 TEXTS = {
     "ru": {
         "permanent_primary": "основной",
@@ -22,7 +24,7 @@ TEXTS = {
         "profile_clear_about": "Очистить информацию о себе",
         "profile_role_sound": "Какую позицию указать? Выберите специализацию или оставьте общее название.",
         "profile_role_unknown": "Не нашёл точного совпадения для «{name}». Выберите похожую позицию или добавьте своё название.",
-        "profile_sound_general": "Звукорежиссёр",
+        "profile_sound_general": GENERAL_SOUND["ru"],
         "profile_keep_sound": "✅ Оставить «Звукорежиссёр»",
         "profile_add_role": "Добавить «{name}»",
         "profile_role_rename": "✏️ Ввести другое название",
@@ -84,7 +86,7 @@ TEXTS = {
         "profile_clear_about": "Clear about me",
         "profile_role_sound": "Which position should we list? Pick a specialization or keep the general title.",
         "profile_role_unknown": "No exact match for “{name}”. Choose a similar position or add your own title.",
-        "profile_sound_general": "Sound engineer",
+        "profile_sound_general": GENERAL_SOUND["en"],
         "profile_keep_sound": "✅ Keep “Sound engineer”",
         "profile_add_role": "Add “{name}”",
         "profile_role_rename": "✏️ Enter another title",

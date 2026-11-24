@@ -21,3 +21,14 @@ def settings(value: dict[str, Any]) -> dict[str, Any]:
         "input",
     )
     return result
+
+
+def validated_settings(value: Any) -> dict[str, Any]:
+    require(
+        isinstance(value, dict)
+        and set(value) == {"font", "size", "align"}
+        and isinstance(value["font"], str)
+        and type(value["size"]) is int,
+        "input",
+    )
+    return settings(value)

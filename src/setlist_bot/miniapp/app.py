@@ -19,6 +19,7 @@ from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_gigs import WorkspaceGigs
 from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.application.workspace_performances import WorkspacePerformances
+from setlist_bot.application.workspace_profile import WorkspaceProfile
 from setlist_bot.application.workspace_roster import WorkspaceRoster
 from setlist_bot.application.workspace_setlists import WorkspaceSetlists
 from setlist_bot.application.workspace_staffing import WorkspaceStaffing
@@ -116,6 +117,7 @@ async def asset(request: web.Request) -> web.Response:
         "workspace-roster.js": "text/javascript",
         "workspace-gigs.js": "text/javascript",
         "workspace-schedule.js": "text/javascript",
+        "workspace-profile.js": "text/javascript",
         "workspace-request-dialog.js": "text/javascript",
         "model.js": "text/javascript",
         "persistence.js": "text/javascript",
@@ -223,9 +225,13 @@ async def api(request: web.Request) -> web.Response:
                 user = users[0]
             request[LANGUAGE] = user.language
             service = MiniDrafts(uow.store, user)
-            if operation == "open_schedule" and request.method == "POST":
-                schedule = MiniCatalog(service).open_schedule()
-                return web.json_response({"session": str(schedule.id), "language": user.language})
+            if operation in ("open_account", "open_schedule") and request.method == "POST":
+                account = MiniCatalog(service).open_account()
+                return web.json_response({"session": str(account.id), "language": user.language})
+            if operation == "profile" and request.method == "GET":
+                return web.json_response(WorkspaceProfile(uow.store, user).view())
+            if operation == "profile_roles" and request.method == "POST":
+                return web.json_response(await WorkspaceProfile(uow.store, user).preview(payload))
             if operation == "my_gigs" and request.method == "GET":
                 section = payload.get("section", "invitations")
                 page = int(payload.get("page", "0"))

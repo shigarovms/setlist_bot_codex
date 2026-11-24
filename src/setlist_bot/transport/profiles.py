@@ -2,14 +2,13 @@
 
 import json
 from datetime import timedelta
-from difflib import get_close_matches
 from typing import Any
 from uuid import UUID
 
 from setlist_bot.application.profiles import Profiles
 from setlist_bot.application.role_dictionary import RoleDictionary
 from setlist_bot.domain.entities import Confirmation, now
-from setlist_bot.domain.rules import AppError, normalize, require
+from setlist_bot.domain.rules import AppError, require
 from setlist_bot.transport.controller import Controller, Response
 
 STEPS = ("name", "roles", "city", "availability", "about", "confirm")
@@ -192,24 +191,22 @@ async def resolve_roles(
     index = await RoleDictionary(c.store).index()
     for position in range(start, len(names)):
         name = names[position]
-        key = index.key(name)
-        if key != "sound" and key in index.titles:
-            names[position] = index.titles[key]
+        title, nearby, sound = index.profile_choice(name)
+        if title is not None:
+            names[position] = title
             continue
-        if key == "sound":
-            choices = [index.titles["foh"], index.titles["mon"], c.t("profile_sound_general")]
+        if sound:
+            choices = [*nearby, c.t("profile_sound_general")]
             labels = ["🎚 " + choices[0], "🎧 " + choices[1], c.t("profile_keep_sound")]
         else:
-            close = get_close_matches(normalize(name), index.aliases, n=10, cutoff=0.55)
-            nearby = list(dict.fromkeys(index.aliases[alias] for alias in close))
-            choices = [index.titles[match] for match in nearby if match != "sound"][:3]
+            choices = nearby
             labels = [*choices, c.t("profile_add_role", name=name)]
             choices.append(name)
         values["role_choice"] = {
             "name": name,
             "names": names,
             "position": position,
-            "sound": key == "sound",
+            "sound": sound,
             "choices": choices,
             "labels": labels,
         }

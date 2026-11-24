@@ -418,6 +418,29 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 headers=performer,
             )
             assert pending_busy.status == 200 and (await pending_busy.json())["status"] == "pending"
+            profile = await client.get("/miniapp/api/profile", headers=performer)
+            assert profile.status == 200 and (await profile.json())["version"] == 0
+            roles = await client.post(
+                "/miniapp/api/profile_roles",
+                json={"version": 0, "source": "звук"},
+                headers=performer,
+            )
+            assert roles.status == 200 and (await roles.json())["roles"][0]["sound"]
+            account = await client.post("/miniapp/api/open_account", json={}, headers=performer)
+            assert account.status == 200, await account.text()
+            queued_profile = await client.post(
+                "/miniapp/api/profile_action",
+                json={
+                    **(await account.json()),
+                    "action": "profile_save",
+                    "version": 0,
+                    "patch": {"name": "Сценическое имя"},
+                    "request_id": str(uuid4()),
+                },
+                headers=performer,
+            )
+            assert queued_profile.status == 200, await queued_profile.text()
+            assert (await queued_profile.json())["status"] == "pending"
             team = await client.get("/miniapp/api/team", params=band, headers=headers)
             assert team.status == 200 and (await team.json())["admin"]
             template_card = await client.get(
@@ -493,6 +516,9 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 "UPDATE staff_roles SET name='forbidden'",
                 "UPDATE groups SET name='forbidden'",
                 "UPDATE groups SET owner_id=NULL",
+                "UPDATE users SET profile='{}'",
+                "UPDATE users SET export_settings='{}'",
+                "UPDATE users SET language='en'",
                 "DELETE FROM personal_drafts",
             ):
                 async with app[ENGINE].connect() as connection:

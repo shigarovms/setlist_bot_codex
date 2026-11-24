@@ -26,6 +26,7 @@ from setlist_bot.application.workspace_gigs import (
 )
 from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.application.workspace_performances import WorkspacePerformances
+from setlist_bot.application.workspace_profile import PROFILE_KIND, WorkspaceProfile
 from setlist_bot.application.workspace_roster import ROSTER_KIND, WorkspaceRoster
 from setlist_bot.application.workspace_schedule import (
     CALENDAR_TTL,
@@ -66,6 +67,7 @@ CATALOG_OPERATIONS = {
     "gig_reply": GIG_REPLY,
     "gig_replacement": GIG_REPLACEMENT,
     "schedule_action": SCHEDULE_KIND,
+    "profile_action": PROFILE_KIND,
     "duration_save": "miniapp_duration",
 }
 
@@ -204,7 +206,7 @@ class MiniCatalog:
         self.store.add(parent)
         return parent
 
-    def open_schedule(self) -> Confirmation:
+    def open_account(self) -> Confirmation:
         parent = Confirmation(
             user_id=self.user.id,
             chat_id=self.user.telegram_id,
@@ -240,10 +242,11 @@ class MiniCatalog:
         target = await self.target(session)
         group_id, concert = target.group_id, target.concert
         kind = CATALOG_OPERATIONS[operation]
+        account = operation in ("profile_action", "schedule_action")
         if group_id is None:
-            require(operation == "schedule_action" and bool(miniapp_key), "forbidden")
-            return await self.queue_schedule(target, payload, miniapp_key)
-        require(operation != "schedule_action", "forbidden")
+            require(account, "forbidden")
+            return await self.queue_account(target, kind, payload, miniapp_key)
+        require(not account, "forbidden")
         workspace_operations = ("shared_action", "export_action", "roster_action")
         gig_operations = ("gig_reply", "gig_replacement")
         if target.invitation_id is not None:
@@ -356,23 +359,25 @@ class MiniCatalog:
             return await self.status(session, identifier, miniapp_key=miniapp_key)
         return None
 
-    async def queue_schedule(
-        self, target: CatalogTarget, payload: dict[str, Any], miniapp_key: bytes
+    async def queue_account(
+        self, target: CatalogTarget, kind: str, payload: dict[str, Any], miniapp_key: bytes
     ) -> dict[str, Any]:
         session = await self.store.get(Confirmation, target.parent.id, lock=True)
         require(session.expires_at > now(), "miniapp_expired")
         identifier, fingerprint = self.request_identity(session.id, payload)
         previous = await self.previous(
-            session.id, identifier, SCHEDULE_KIND, fingerprint, miniapp_key=miniapp_key
+            session.id, identifier, kind, fingerprint, miniapp_key=miniapp_key
         )
         if previous is not None:
             return previous
-        handoff = CalendarHandoff(miniapp_key, self.user.id, identifier)
-        command = WorkspaceSchedule.command(payload, handoff)
+        if kind == PROFILE_KIND:
+            details = {"profile": WorkspaceProfile.command(payload)}
+        else:
+            require(bool(miniapp_key), "forbidden")
+            handoff = CalendarHandoff(miniapp_key, self.user.id, identifier)
+            details = {"schedule": WorkspaceSchedule.command(payload, handoff)}
         expires = min(session.expires_at, now() + timedelta(seconds=CALENDAR_TTL))
-        return self.enqueue(
-            target, SCHEDULE_KIND, identifier, fingerprint, expires, {"schedule": command}
-        )
+        return self.enqueue(target, kind, identifier, fingerprint, expires, details)
 
     def enqueue(
         self,
@@ -461,7 +466,7 @@ class MiniCatalog:
             "miniapp_expired",
         )
         result = dict(data.get("result", {}))
-        if data["kind"] == SCHEDULE_KIND:
+        if data["kind"] in (SCHEDULE_KIND, PROFILE_KIND):
             require(row.expires_at > now(), "input_expired")
         if capsule := result.pop("calendar_capsule", None):
             require(data["kind"] == SCHEDULE_KIND and bool(miniapp_key), "input_expired")
@@ -506,6 +511,13 @@ class MiniCatalog:
             )
             row.command = json.dumps({**data, "status": "saved", "result": result_schedule})
             return result_schedule
+        if data["kind"] == PROFILE_KIND:
+            require(group_id is None and concert is None, "forbidden")
+            result_profile = await WorkspaceProfile(self.store, self.user).apply(
+                data.pop("profile")
+            )
+            row.command = json.dumps({**data, "status": "saved", "result": result_profile})
+            return result_profile
         require(group_id is not None, "forbidden")
         assert group_id is not None
         if data["kind"] == "miniapp_duration":

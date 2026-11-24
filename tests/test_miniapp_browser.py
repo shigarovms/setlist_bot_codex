@@ -428,6 +428,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser_guest_gig(browser, engine, world, origin)
                 await browser_approve_self_substitution(browser, engine, world, origin)
                 await browser_schedule(browser, engine, origin)
+                await browser_profile(browser, engine, origin)
                 await browser_team(browser, engine, world.group.id, origin)
                 return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
@@ -1132,3 +1133,44 @@ async def browser_schedule(browser, engine, origin):
     await process_catalog_request(engine, calendar=runtime)
     await browser.wait("document.getElementById('calendar-link')?.value.endsWith('.ics')")
     await browser.click_named("dialog[open] button", "Закрыть")
+
+
+async def browser_profile(browser, engine, origin):
+    await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1"})
+    await browser.click_named("#workspace-content a", "Мой профиль")
+    await browser.click_named("#workspace-content button", "Редактировать профиль")
+    await browser.js("document.getElementById('profile-name').value = 'Имя на сцене'")
+    await browser.js(
+        "const roles = document.getElementById('profile-roles'); "
+        "roles.value = 'басист\\nзвук'; roles.dispatchEvent(new Event('input'))"
+    )
+    await browser.click_named("dialog[open] button", "Уточнить роли")
+    await browser.wait("!!document.getElementById('profile-role-1')")
+    assert await browser.js("document.getElementById('profile-role-1').value === ''")
+    await browser.js("document.getElementById('profile-role-1').value = 'Звукорежиссёр FOH'")
+    await browser.click_named("dialog[open] button", "Сохранить профиль")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('#workspace-content dl')?.innerText.includes('Имя на сцене')"
+    )
+    assert await browser.js(
+        "document.querySelector('#workspace-content dl').innerText.includes("
+        "'Бас-гитара, Звукорежиссёр FOH')"
+    )
+    await browser.click_named("#workspace-content button", "Оформление PDF для музыкантов")
+    await browser.js("document.getElementById('profile-pdf-size').value = '30'")
+    await browser.click_named("dialog[open] button", "Сохранить")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('#workspace-content dl')?.innerText.includes('30 pt')"
+    )
+    await browser.click_named("#workspace-content button", "Язык интерфейса")
+    await browser.js("document.getElementById('profile-language').value = 'en'")
+    await browser.click_named("dialog[open] button", "Сохранить")
+    await process_catalog_request(engine)
+    await browser.wait("document.documentElement.lang === 'en'")
+    await browser.click_named("#workspace-content button", "Interface language")
+    await browser.js("document.getElementById('profile-language').value = 'ru'")
+    await browser.click_named("dialog[open] button", "Save")
+    await process_catalog_request(engine)
+    await browser.wait("document.documentElement.lang === 'ru'")

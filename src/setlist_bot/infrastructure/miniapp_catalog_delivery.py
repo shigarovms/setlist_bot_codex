@@ -7,6 +7,7 @@ from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.miniapp_catalog import MiniCatalog
 from setlist_bot.application.ports import Store
 from setlist_bot.application.workspace_gigs import GIG_REPLACEMENT, GIG_REPLY
+from setlist_bot.application.workspace_profile import PROFILE_KIND
 from setlist_bot.application.workspace_roster import ROSTER_KIND, WorkspaceRoster
 from setlist_bot.application.workspace_schedule import SCHEDULE_KIND, CalendarRuntime
 from setlist_bot.domain.entities import Confirmation, Outbox, User, now
@@ -97,6 +98,8 @@ async def deliver_catalog(
         row = await uow.store.get(Confirmation, identifier, lock=True)
         if data.get("kind") == "miniapp_catalog_import":
             data.pop("source", None)
+        if data.get("kind") == PROFILE_KIND:
+            data.pop("profile", None)
         row.command = json.dumps({**data, "status": "failed", "result": {"error": exc.code}})
         event.sent, event.discarded_at, event.last_error = True, now(), exc.code
         return False
