@@ -20,6 +20,7 @@ from setlist_bot.application.repertoire_import import RepertoireImport
 from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.application.workspace_performances import WorkspacePerformances
+from setlist_bot.application.workspace_roster import ROSTER_KIND, WorkspaceRoster
 from setlist_bot.application.workspace_setlists import SETLIST_SESSION, WorkspaceSetlists
 from setlist_bot.application.workspace_staffing import WorkspaceStaffing
 from setlist_bot.application.workspace_team import TEAM_SESSION, WorkspaceTeam
@@ -47,6 +48,7 @@ CATALOG_OPERATIONS = {
     "performance_action": "miniapp_performance",
     "team_action": "miniapp_team",
     "staff_action": "miniapp_staff",
+    "roster_action": ROSTER_KIND,
     "duration_save": "miniapp_duration",
 }
 
@@ -159,7 +161,7 @@ class MiniCatalog:
         target = await self.target(session)
         group_id, concert = target.group_id, target.concert
         kind = CATALOG_OPERATIONS[operation]
-        workspace_operations = ("shared_action", "export_action")
+        workspace_operations = ("shared_action", "export_action", "roster_action")
         require(target.shared == (operation in workspace_operations), "input")
         personal = target.membership_id is not None
         require(not personal or operation == "team_action", "forbidden")
@@ -169,7 +171,7 @@ class MiniCatalog:
             team_command = WorkspaceTeam.command(payload, personal=personal)
             if not personal and team_command["action"] != "request_roles":
                 await self.drafts.groups.access(group_id, admin=True)
-        elif operation not in ("catalog_save", *workspace_operations):
+        elif operation not in ("catalog_save", "shared_action", "export_action"):
             await self.drafts.groups.access(group_id, admin=True)
         request = payload.get("request_id")
         require(isinstance(request, str) and str(UUID(request)) == request, "input")
@@ -231,6 +233,9 @@ class MiniCatalog:
         elif operation == "staff_action":
             require(concert is None, "input")
             details = {"staff": WorkspaceStaffing.command(payload)}
+        elif operation == "roster_action":
+            details = {"roster": WorkspaceRoster.command(payload)}
+            expires = min(expires, now() + timedelta(minutes=15))
         else:
             details = await self._catalog_details(group_id, payload)
         self.store.add(
@@ -423,6 +428,16 @@ class MiniCatalog:
             )
             row.command = json.dumps({**data, "status": "saved", "result": result_staff})
             return result_staff
+        if data["kind"] == ROSTER_KIND:
+            require(target.shared and concert is not None, "miniapp_expired")
+            assert concert is not None
+            result_roster = await WorkspaceRoster(self.store, self.user).apply(
+                group_id, concert.id, data
+            )
+            if delivery := result_roster.pop("delivery", None):
+                data["delivery"] = delivery
+            row.command = json.dumps({**data, "status": "saved", "result": result_roster})
+            return result_roster
         song_id = UUID(data["song_id"]) if data["song_id"] else None
         if song_id:
             require(not (await self.catalog.song(group_id, song_id)).archived, "not_found")

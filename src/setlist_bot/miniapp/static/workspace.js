@@ -5,6 +5,7 @@ import { mountSharedSetlist } from "./shared-setlist.js";
 import { performanceAction, performanceLabel } from "./workspace-performances.js";
 import { teamLabel, teamView } from "./workspace-team.js";
 import { showStaffDirectory, staffingLabel } from "./workspace-staffing.js";
+import { rosterLabel, showRoster } from "./workspace-roster.js";
 
 const copy = {
   ru: {
@@ -104,13 +105,14 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   const band = workspaceParams.get("band");
   const past = workspaceParams.get("past") === "1" ? "1" : "0";
   const page = Number(workspaceParams.get("page")) || 0;
-  const performance = band && workspaceParams.get("view") === "performance" && workspaceParams.get("performance");
+  const view = workspaceParams.get("view");
+  const performance = band && ["performance", "lineup"].includes(view) && workspaceParams.get("performance");
+  const roster = performance && view === "lineup";
   const trash = band && workspaceParams.get("view") === "performance-trash";
   const repertoire = band && workspaceParams.get("view") === "repertoire";
   const team = band && workspaceParams.get("view") === "team";
   const teamContact = team && workspaceParams.get("contact");
   const inbox = !band && workspaceParams.get("view") === "team-inbox";
-  const view = workspaceParams.get("view");
   const staffing = band && (view === "staff-contacts" ? "contacts" : view === "staff-lineups" ? "lineups" : "");
   const staffRecord = staffing && workspaceParams.get("record");
   const song = workspaceParams.get("song") || "";
@@ -179,7 +181,8 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   if (band || inbox) {
     backButton?.show?.();
     backButton?.onClick?.(() => {
-      if (performance || trash) location.assign(bandUrl(band, past, trash ? 0 : page));
+      if (roster) location.assign(performanceUrl(band, performance, past, page));
+      else if (performance || trash) location.assign(bandUrl(band, past, trash ? 0 : page));
       else if (team) location.assign(teamContact ? teamUrl(page) : bandUrl(band, past));
       else if (staffing) location.assign(staffRecord ? staffingUrl(staffing, page, query) : teamUrl());
       else if (repertoire) location.assign(song || proposals || importing || music ? repertoireList() : bandUrl(band));
@@ -191,7 +194,8 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     status.textContent = t("loading");
     try {
       let data;
-      if (performance) data = await api("performance", { band, performance });
+      if (roster) data = await api("performance_roster", { band, performance });
+      else if (performance) data = await api("performance", { band, performance });
       else if (trash) data = await api("performance_trash", { band, page });
       else if (team) data = await api("team", { band, page });
       else if (staffing) data = await api("staff_directory", {
@@ -207,7 +211,8 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       document.documentElement.lang = language;
       title.textContent = band ? data.band : inbox ? teamLabel(language, "inbox") : t("bands");
       status.textContent = "";
-      if (performance) showPerformance(data);
+      if (roster) showPerformanceRoster(data);
+      else if (performance) showPerformance(data);
       else if (trash) showPerformanceTrash(data);
       else if (team || inbox) await showTeam(data);
       else if (staffing) showStaffing(data);
@@ -431,6 +436,9 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     const info = data.performance, list = data.setlist;
     const nav = element("nav", "", { class: "workspace-nav" });
     nav.append(element("a", t("performances"), { href: bandUrl(band, past, page) }));
+    nav.append(element("a", rosterLabel(language, "title"), {
+      href: `${bandUrl(band, past, page)}&view=lineup&performance=${encodeURIComponent(performance)}`,
+    }));
     content.append(nav, element("h2", info.title || t("performance")),
       element("p", [dateText(info.date), info.city, info.type].filter(Boolean).join(" · ")));
     if (info.info) content.append(element("p", info.info, { class: "performance-info" }));
@@ -469,6 +477,19 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       action.addEventListener("click", () => openDraft(info.id, action));
       content.append(action);
     }
+  }
+  function showPerformanceRoster(data) {
+    const nav = element("nav", "", { class: "workspace-nav" });
+    nav.append(element("a", rosterLabel(language, "back"), {
+      href: performanceUrl(band, performance, past, page),
+    }));
+    content.append(nav);
+    showRoster({
+      root: content, data, language, dateText, request: sharedApi,
+      preview: body => api("staff_lineup_preview", { ...body, band }, "POST"),
+      recipient: reference => api("team_recipient", { band, reference }, "POST"),
+      refresh: load, status: message => { status.textContent = message; },
+    });
   }
   function showRepertoire(data) {
     const nav = element("nav", "", { class: "workspace-nav" });

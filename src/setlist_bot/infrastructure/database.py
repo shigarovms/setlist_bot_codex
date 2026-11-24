@@ -831,6 +831,28 @@ class PostgresStore:
             ).all()
         )
 
+    async def roster_invitations(self, group_id: UUID, concert_id: UUID) -> list[e.GigInvitation]:
+        invites = metadata.tables["gig_invitations"]
+        columns = (
+            "id",
+            "group_id",
+            "concert_id",
+            "slot_id",
+            "user_id",
+            "date",
+            "concert_epoch",
+            "expires_at",
+            "status",
+            "version",
+            "replacement_id",
+            "created_at",
+        )
+        query = select(*(invites.c[column] for column in columns)).where(
+            invites.c.group_id == group_id, invites.c.concert_id == concert_id
+        )
+        rows = (await self.session.execute(query)).mappings()
+        return [e.GigInvitation(**row) for row in rows]
+
     async def concerts_for_user(
         self,
         user_id: UUID,

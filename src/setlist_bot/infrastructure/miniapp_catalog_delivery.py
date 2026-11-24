@@ -5,6 +5,7 @@ from uuid import UUID
 
 from setlist_bot.application.miniapp import MiniDrafts
 from setlist_bot.application.miniapp_catalog import MiniCatalog
+from setlist_bot.application.workspace_roster import ROSTER_KIND, WorkspaceRoster
 from setlist_bot.domain.entities import Confirmation, Outbox, User, now
 from setlist_bot.domain.rules import AppError, require
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
@@ -25,6 +26,14 @@ async def deliver_catalog(uow: PostgresUnitOfWork, event: Outbox) -> bool:
             user = await uow.store.get(User, row.user_id)
             session = UUID(data["session"])
             service = MiniCatalog(MiniDrafts(uow.store, user))
+            if (
+                data.get("kind") == ROSTER_KIND
+                and data["status"] == "pending"
+                and data["roster"]["action"] == "send"
+            ):
+                plan = await WorkspaceRoster(uow.store, user).send_plan(data)
+                # Follow Staffing's person-before-band lock order across both transports.
+                await uow.store.lock_people({UUID(row["person"]) for row in plan["targets"]})
             target = await service.target(session)
             require(
                 target.group_id == event.group_id

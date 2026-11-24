@@ -57,29 +57,120 @@ function field(root, label, id, attrs, type = "input") {
   return input;
 }
 
+function review(panel, form, submit, t, load, render) {
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (submit.disabled) return;
+    submit.disabled = true;
+    panel.message.textContent = t.busy;
+    try {
+      const value = await load();
+      if (!panel.dialog.open) return;
+      panel.message.textContent = "";
+      render(value);
+      panel.body.append(button(t.back, () => panel.body.replaceChildren(form)));
+    } catch (error) {
+      panel.message.textContent = error.message;
+    } finally {
+      submit.disabled = false;
+    }
+  });
+}
+
+function lineupRows(rows, t, previewMode = false) {
+  const list = el("ol", "", { class: "workspace-list" });
+  for (const row of rows) {
+    const item = el("li");
+    item.append(el("strong", row.role));
+    if (previewMode) {
+      item.append(el("p", row.name ? `${row.name} · Telegram ID ${row.telegram_id}` : t.noPerson));
+    } else {
+      item.append(el("p", row.suggested ? `${t.suggested} · ${row.suggested}` : t.noPerson));
+      if (row.name && row.name !== row.suggested) item.append(el("p", `${t.chosen} · ${row.name}`));
+    }
+    list.append(item);
+  }
+  return list;
+}
+
+export function mountLineupForm({ panel, language, preview, onSave, initial, allowEmpty, showName = true, single = false }) {
+  const t = words[language];
+  const form = el("form", "", { class: "import-fields" });
+  const name = field(form, t.name, "staff-lineup-name", { maxlength: "100", required: "" });
+  name.value = initial?.name || "";
+  name.hidden = !showName;
+  form.querySelector("label").hidden = !showName;
+  const rows = el("div", "", { class: "import-fields" });
+  const toggle = el("input", "", { id: "staff-lineup-quick", type: "checkbox" });
+  const toggleLabel = el("label", "", { for: toggle.id });
+  toggleLabel.append(toggle, document.createTextNode(t.quick));
+  const quickArea = el("div", "", { hidden: "" });
+  const quick = field(quickArea, t.quickHint, "staff-lineup-paste", { rows: "5", maxlength: "8000" }, "textarea");
+  const submit = el("button", t.preview, { type: "submit", class: "primary" });
+  const add = button(t.add, () => addRow().focus());
+  let serial = 0;
+  function sync() {
+    const items = [...rows.children];
+    items.forEach((row, index) => {
+      if (single) return;
+      row.querySelector("[data-move=up]").disabled = index === 0;
+      row.querySelector("[data-move=down]").disabled = index === items.length - 1;
+    });
+    add.disabled = items.length >= 40;
+    submit.disabled = !toggle.checked && !allowEmpty && items.length === 0;
+  }
+  function addRow(saved = {}) {
+    const index = serial++;
+    const item = el("fieldset", "", { class: "staff-lineup-row import-fields" });
+    const role = field(item, t.role, `staff-lineup-role-${index}`, { maxlength: "100", required: "", "data-role": "" });
+    const person = field(item, t.optional, `staff-lineup-person-${index}`, {
+      maxlength: "64", placeholder: t.reference, "data-reference": "",
+    });
+    role.value = saved.role || "";
+    person.value = saved.reference || "";
+    const controls = el("div", "", { class: "toolbar" });
+    controls.append(
+      button("↑", () => { rows.insertBefore(item, item.previousElementSibling); sync(); }, false, { "data-move": "up", "aria-label": t.up }),
+      button("↓", () => { item.nextElementSibling.after(item); sync(); }, false, { "data-move": "down", "aria-label": t.down }),
+      button(t.remove, () => { item.remove(); sync(); }),
+    );
+    if (!single) item.append(controls);
+    rows.append(item);
+    sync();
+    return role;
+  }
+  if (!single) form.append(toggleLabel, quickArea);
+  form.append(rows);
+  if (!single) form.append(add);
+  form.append(submit);
+  const initialRows = initial?.rows ?? [];
+  for (const row of initialRows.length || allowEmpty ? initialRows : [{}]) addRow(row);
+  sync();
+  toggle.addEventListener("change", () => {
+    rows.hidden = add.hidden = toggle.checked;
+    quickArea.hidden = !toggle.checked;
+    quick.required = toggle.checked;
+    for (const input of rows.querySelectorAll("input")) input.disabled = toggle.checked;
+    sync();
+    if (toggle.checked) quick.focus();
+  });
+  panel.body.append(form);
+  review(panel, form, submit, t, () => preview({
+    name: name.value, ...(toggle.checked ? { quick: quick.value } : {
+      rows: Array.from(rows.children, row => ({
+        role: row.querySelector("[data-role]").value,
+        reference: row.querySelector("[data-reference]").value,
+      })),
+    }),
+  }), plan => {
+    panel.body.replaceChildren(...(showName ? [el("h3", plan.name)] : []), lineupRows(plan.rows, t, true),
+      button(t.save, event => onSave(event, plan), true));
+  });
+}
+
 export function showStaffDirectory({ root, language, data, section, recordUrl, listUrl, query, request, preview, recipient, refresh, status }) {
   const t = words[language];
   const modal = title => requestDialog({ title, labels: t, operation: "staff_action", request, refresh, status });
-
-  function review(panel, form, submit, load, render) {
-    form.addEventListener("submit", async event => {
-      event.preventDefault();
-      if (submit.disabled) return;
-      submit.disabled = true;
-      panel.message.textContent = t.busy;
-      try {
-        const value = await load();
-        if (!panel.dialog.open) return;
-        panel.message.textContent = "";
-        render(value);
-        panel.body.append(button(t.back, () => panel.body.replaceChildren(form)));
-      } catch (error) {
-        panel.message.textContent = error.message;
-      } finally {
-        submit.disabled = false;
-      }
-    });
-  }
 
   function contactAdd() {
     const panel = modal(t.createContact);
@@ -89,7 +180,7 @@ export function showStaffDirectory({ root, language, data, section, recordUrl, l
     const submit = el("button", t.preview, { type: "submit", class: "primary" });
     form.append(submit);
     panel.body.append(form);
-    review(panel, form, submit, async () => {
+    review(panel, form, submit, t, async () => {
       const selectedRole = role.value;
       const account = reference.value;
       return { role: selectedRole, reference: account, person: await recipient(account) };
@@ -131,98 +222,22 @@ export function showStaffDirectory({ root, language, data, section, recordUrl, l
     }));
   }
 
-  function lineupRows(rows, previewMode = false) {
-    const list = el("ol", "", { class: "workspace-list" });
-    for (const row of rows) {
-      const item = el("li");
-      item.append(el("strong", row.role));
-      if (previewMode) {
-        item.append(el("p", row.name ? `${row.name} · Telegram ID ${row.telegram_id}` : t.noPerson));
-      } else {
-        item.append(el("p", row.suggested ? `${t.suggested} · ${row.suggested}` : t.noPerson));
-        if (row.name && row.name !== row.suggested) item.append(el("p", `${t.chosen} · ${row.name}`));
-      }
-      list.append(item);
-    }
-    return list;
-  }
-
   function editLineup(lineup = null) {
     const panel = modal(t[lineup ? "editLineup" : "createLineup"]);
-    const form = el("form", "", { class: "import-fields" });
-    const name = field(form, t.name, "staff-lineup-name", { maxlength: "100", required: "" });
-    name.value = lineup?.name || "";
-    const rows = el("div", "", { class: "import-fields" });
-    const toggle = el("input", "", { id: "staff-lineup-quick", type: "checkbox" });
-    const toggleLabel = el("label", "", { for: toggle.id });
-    toggleLabel.append(toggle, document.createTextNode(t.quick));
-    const quickArea = el("div", "", { hidden: "" });
-    const quick = field(quickArea, t.quickHint, "staff-lineup-paste", { rows: "5", maxlength: "8000" }, "textarea");
-    const submit = el("button", t.preview, { type: "submit", class: "primary" });
-    const add = button(t.add, () => addRow().focus());
-    let serial = 0;
-    function sync() {
-      const items = [...rows.children];
-      items.forEach((row, index) => {
-        row.querySelector("[data-move=up]").disabled = index === 0;
-        row.querySelector("[data-move=down]").disabled = index === items.length - 1;
-      });
-      add.disabled = items.length >= 40;
-      submit.disabled = !toggle.checked && !lineup && items.length === 0;
-    }
-    function addRow(saved = {}) {
-      const index = serial++;
-      const item = el("fieldset", "", { class: "staff-lineup-row import-fields" });
-      const role = field(item, t.role, `staff-lineup-role-${index}`, { maxlength: "100", required: "", "data-role": "" });
-      const person = field(item, t.optional, `staff-lineup-person-${index}`, {
-        maxlength: "64", placeholder: t.reference, "data-reference": "",
-      });
-      role.value = saved.role || "";
-      person.value = saved.reference || "";
-      const controls = el("div", "", { class: "toolbar" });
-      controls.append(
-        button("↑", () => { rows.insertBefore(item, item.previousElementSibling); sync(); }, false, { "data-move": "up", "aria-label": t.up }),
-        button("↓", () => { item.nextElementSibling.after(item); sync(); }, false, { "data-move": "down", "aria-label": t.down }),
-        button(t.remove, () => { item.remove(); sync(); }),
-      );
-      item.append(controls);
-      rows.append(item);
-      sync();
-      return role;
-    }
-    form.append(toggleLabel, quickArea, rows, add, submit);
-    for (const row of lineup?.rows || [{}]) addRow(row);
-    sync();
-    toggle.addEventListener("change", () => {
-      rows.hidden = add.hidden = toggle.checked;
-      quickArea.hidden = !toggle.checked;
-      quick.required = toggle.checked;
-      for (const input of rows.querySelectorAll("input")) input.disabled = toggle.checked;
-      sync();
-      if (toggle.checked) quick.focus();
-    });
-    panel.body.append(form);
-    review(panel, form, submit, () => preview({
-      name: name.value, ...(toggle.checked ? { quick: quick.value } : {
-        rows: Array.from(rows.children, row => ({
-          role: row.querySelector("[data-role]").value,
-          reference: row.querySelector("[data-reference]").value,
-        })),
+    mountLineupForm({
+      panel, language, initial: lineup, preview, allowEmpty: !!lineup,
+      onSave: (event, plan) => panel.send(event.currentTarget, {
+        ...plan, action: lineup ? "lineup_update" : "lineup_create", target: lineup?.id, version: lineup?.version,
+      }, request, result => {
+        panel.dialog.close();
+        if (lineup) return refresh().then(() => status(t.done));
+        location.assign(recordUrl(result.lineup));
       }),
-    }), plan => {
-      panel.body.replaceChildren(el("h3", plan.name), lineupRows(plan.rows, true),
-        button(t.save, event => panel.send(event.currentTarget, {
-          ...plan, action: lineup ? "lineup_update" : "lineup_create", target: lineup?.id, version: lineup?.version,
-        }, request, result => {
-          panel.dialog.close();
-          if (lineup) return refresh().then(() => status(t.done));
-          location.assign(recordUrl(result.lineup));
-        }), true));
     });
   }
 
   function lineupCard(row) {
-    root.append(el("h2", row.name), lineupRows(row.rows));
+    root.append(el("h2", row.name), lineupRows(row.rows, t));
     const actions = el("div", "", { class: "toolbar" });
     const target = { target: row.id, version: row.version };
     actions.append(button(t.editLineup, () => editLineup(row), true), button(t.copy, () => {

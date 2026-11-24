@@ -422,6 +422,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser_music_search(browser, engine, world.group.id)
                 await browser_manage_performance(browser, engine, world.group.id, origin)
                 await browser_staff_directory(browser, engine, world.group.id, origin)
+                await browser_roster(browser, engine, world, origin)
                 await browser_team(browser, engine, world.group.id, origin)
                 return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
@@ -984,4 +985,41 @@ async def browser_staff_directory(browser, engine, group_id, origin):
     await process_catalog_request(engine)
     await browser.wait(
         "document.querySelector('#workspace-content li strong')?.textContent === 'Вокал'"
+    )
+
+
+async def browser_roster(browser, engine, world, origin):
+    await browser.call(
+        "Page.navigate",
+        {
+            "url": f"{origin}/miniapp/?workspace=1&band={world.group.id}"
+            f"&view=performance&performance={world.concert2.id}",
+        },
+    )
+    await browser.click_named("#workspace-content a", "Состав выступления")
+    await browser.click_named("#workspace-content button", "Редактировать состав")
+    await browser.js(r"""
+        document.getElementById('staff-lineup-quick').click();
+        document.getElementById('staff-lineup-paste').value = 'Гитара: 2\nВокал: 1';
+    """)
+    await browser.click_named("dialog[open] button", "Предпросмотр")
+    await browser.wait(
+        "document.querySelector('dialog[open]')?.innerText.includes('Telegram ID 2')"
+    )
+    await browser.click_named("dialog[open] button", "Сохранить")
+    await process_catalog_request(engine)
+    await browser.click_named("#workspace-content button", "Проверить занятость")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('dialog[open]')?.innerText.includes('Конфликтов не найдено')"
+    )
+    await browser.click_named("dialog[open] button", "Отправить приглашения")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('#workspace-content')?.innerText.includes('Ждём ответа')"
+        " && document.querySelector('#workspace-content')?.innerText.includes('Подтверждено')"
+    )
+    await browser.click_named("#workspace-content a", "К выступлению")
+    await browser.wait(
+        "document.querySelector('#workspace-content h2')?.textContent === 'Второй концерт'"
     )

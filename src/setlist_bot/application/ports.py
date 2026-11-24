@@ -3,7 +3,7 @@ from types import TracebackType
 from typing import Any, Protocol
 from uuid import UUID
 
-from setlist_bot.domain.entities import Concert, Confirmation, Entity, Group
+from setlist_bot.domain.entities import Concert, Confirmation, Entity, GigInvitation, Group
 
 
 class Store(Protocol):
@@ -28,6 +28,8 @@ class Store(Protocol):
     ) -> str: ...
 
     async def visible_concert_ids(self, user_id: UUID, group_id: UUID) -> set[UUID]: ...
+
+    async def roster_invitations(self, group_id: UUID, concert_id: UUID) -> list[GigInvitation]: ...
 
     async def concerts_for_user(
         self,

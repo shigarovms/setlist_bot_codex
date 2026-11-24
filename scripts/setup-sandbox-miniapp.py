@@ -29,6 +29,7 @@ READ_TABLES = (
     "staff_roles",
     "staff_contacts",
     "lineup_templates",
+    "gig_slots",
     "concerts",
     "setlists",
     "blocks",
@@ -61,6 +62,8 @@ def grants():
         f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {ROLE};\n"
         f"GRANT SELECT ON {','.join(READ_TABLES)} TO {ROLE};\n"
         "GRANT SELECT(id,user_id,concert_id,group_id,status,date,concert_epoch,expires_at) "
+        f"ON gig_invitations TO {ROLE};\n"
+        "GRANT SELECT(slot_id,version,replacement_id,created_at) "
         f"ON gig_invitations TO {ROLE};\n"
         f"GRANT UPDATE(id) ON groups,memberships TO {ROLE};\n"
         f"GRANT UPDATE(default_pause_seconds) ON groups TO {ROLE};\n"

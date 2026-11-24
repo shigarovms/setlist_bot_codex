@@ -18,6 +18,7 @@ from setlist_bot.application.workspace import PAGE_SIZE, Workspace
 from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.application.workspace_performances import WorkspacePerformances
+from setlist_bot.application.workspace_roster import WorkspaceRoster
 from setlist_bot.application.workspace_setlists import WorkspaceSetlists
 from setlist_bot.application.workspace_staffing import WorkspaceStaffing
 from setlist_bot.application.workspace_team import WorkspaceTeam, text_field
@@ -111,6 +112,7 @@ async def asset(request: web.Request) -> web.Response:
         "workspace-performances.js": "text/javascript",
         "workspace-team.js": "text/javascript",
         "workspace-staffing.js": "text/javascript",
+        "workspace-roster.js": "text/javascript",
         "workspace-request-dialog.js": "text/javascript",
         "model.js": "text/javascript",
         "persistence.js": "text/javascript",
@@ -320,6 +322,12 @@ async def api(request: web.Request) -> web.Response:
             if operation == "performance" and request.method == "GET":
                 return web.json_response(
                     await Workspace(uow.store, user).performance(
+                        UUID(payload["band"]), UUID(payload["performance"])
+                    )
+                )
+            if operation == "performance_roster" and request.method == "GET":
+                return web.json_response(
+                    await WorkspaceRoster(uow.store, user).view(
                         UUID(payload["band"]), UUID(payload["performance"])
                     )
                 )

@@ -375,6 +375,14 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
             )
             assert song_status.status == 200 and (await song_status.json())["status"] == "pending"
             band = {"band": str(world.group.id)}
+            roster = await client.get(
+                "/miniapp/api/performance_roster",
+                params={**band, "performance": str(world.concert.id)},
+                headers=headers,
+            )
+            assert roster.status == 200, await roster.text()
+            slots = (await roster.json())["slots"]
+            assert slots[0]["invitations"][0]["status"] == "confirmed"
             team = await client.get("/miniapp/api/team", params=band, headers=headers)
             assert team.status == 200 and (await team.json())["admin"]
             template_card = await client.get(
@@ -433,6 +441,8 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 "UPDATE setlists SET approved=true",
                 "UPDATE concerts SET deleted_at=now()",
                 "UPDATE lineup_templates SET slots='[]'",
+                "UPDATE gig_slots SET required=false",
+                "SELECT last_reminded_at FROM gig_invitations",
                 "UPDATE songs SET title='bad'",
                 "INSERT INTO song_aliases(id,group_id,song_id,title) "
                 "SELECT id,group_id,id,'bad' FROM songs",
