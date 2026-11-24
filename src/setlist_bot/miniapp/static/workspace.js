@@ -7,6 +7,7 @@ import { teamLabel, teamView } from "./workspace-team.js";
 import { showStaffDirectory, staffingLabel } from "./workspace-staffing.js";
 import { rosterLabel, showRoster } from "./workspace-roster.js";
 import { gigLabel, showGigs } from "./workspace-gigs.js";
+import { scheduleLabel, showScheduleSettings } from "./workspace-schedule.js";
 
 const copy = {
   ru: {
@@ -110,8 +111,11 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   const gigs = !band && view === "my-gigs";
   const gigInvitation = gigs && workspaceParams.get("invitation");
   const gigSetlist = gigInvitation && workspaceParams.get("setlist") === "1";
-  const gigSection = ["confirmed", "history"].includes(workspaceParams.get("section"))
-    ? workspaceParams.get("section") : "invitations";
+  const gigSections = ["schedule", "invitations", "confirmed", "history", "managed", "busy", "calendar"];
+  const gigSection = gigSections.includes(workspaceParams.get("section"))
+    ? workspaceParams.get("section") : "schedule";
+  const scheduleSettings = gigs && !gigInvitation && ["busy", "calendar"].includes(gigSection);
+  const managedPage = workspaceParams.get("from") === "managed" ? workspaceParams.get("managed_page") || "0" : null;
   const performance = band && ["performance", "lineup"].includes(view) && workspaceParams.get("performance");
   const roster = performance && view === "lineup";
   const trash = band && workspaceParams.get("view") === "performance-trash";
@@ -130,11 +134,17 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   const repertoireList = () => repertoireUrl(band, { archived, page, query });
   const teamUrl = (index = 0) => `${bandUrl(band, past, index)}&view=team`;
   const inboxUrl = () => `${bandUrl()}&view=team-inbox`;
-  function gigsUrl(section = "invitations", index = 0, invitation = null, setlist = false) {
+  function gigsUrl(section = "schedule", index = 0, invitation = null, setlist = false) {
     const target = new URLSearchParams({ view: "my-gigs", section });
     if (invitation) target.set("invitation", invitation);
     if (setlist) target.set("setlist", "1");
     return `${bandUrl(null, "0", index)}&${target}`;
+  }
+  function performanceParent() {
+    return managedPage === null ? bandUrl(band, past, page) : gigsUrl("managed", managedPage);
+  }
+  function withManagedOrigin(url) {
+    return managedPage === null ? url : `${url}&from=managed&managed_page=${encodeURIComponent(managedPage)}`;
   }
   function staffingUrl(section, index = 0, search = "", record = null) {
     const target = new URLSearchParams({ view: `staff-${section}` });
@@ -147,6 +157,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   let catalogSession;
   let sharedSession;
   const gigSessions = new Map();
+  let scheduleSession;
   const t = (key) => workspaceText(language, key);
   main.hidden = false;
   title.textContent = t("bands");
@@ -197,9 +208,10 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     backButton?.show?.();
     backButton?.onClick?.(() => {
       if (gigs) location.assign(gigSetlist ? gigsUrl(gigSection, page, gigInvitation)
-        : gigInvitation ? gigsUrl(gigSection, page) : bandUrl());
-      else if (roster) location.assign(performanceUrl(band, performance, past, page));
-      else if (performance || trash) location.assign(bandUrl(band, past, trash ? 0 : page));
+        : gigInvitation ? gigsUrl(gigSection, page) : scheduleSettings ? gigsUrl() : bandUrl());
+      else if (roster) location.assign(withManagedOrigin(performanceUrl(band, performance, past, page)));
+      else if (performance) location.assign(performanceParent());
+      else if (trash) location.assign(bandUrl(band, past));
       else if (team) location.assign(teamContact ? teamUrl(page) : bandUrl(band, past));
       else if (staffing) location.assign(staffRecord ? staffingUrl(staffing, page, query) : teamUrl());
       else if (repertoire) location.assign(song || proposals || importing || music ? repertoireList() : bandUrl(band));
@@ -211,7 +223,8 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     status.textContent = t("loading");
     try {
       let data;
-      if (gigs) data = gigInvitation ? await api(gigSetlist ? "gig_setlist" : "gig_card", { invitation: gigInvitation })
+      if (scheduleSettings) data = await openSchedule();
+      else if (gigs) data = gigInvitation ? await api(gigSetlist ? "gig_setlist" : "gig_card", { invitation: gigInvitation })
         : await api("my_gigs", { section: gigSection, page });
       else if (roster) data = await api("performance_roster", { band, performance });
       else if (performance) data = await api("performance", { band, performance });
@@ -231,7 +244,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       title.textContent = band || gigInvitation ? data.band : gigs ? gigLabel(language, "title")
         : inbox ? teamLabel(language, "inbox") : t("bands");
       status.textContent = "";
-      if (gigs) showPersonalGigs(data);
+      if (gigs) await showPersonalGigs(data);
       else if (roster) showPerformanceRoster(data);
       else if (performance) showPerformance(data);
       else if (trash) showPerformanceTrash(data);
@@ -313,26 +326,65 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       throw error;
     }
   }
-  function showPersonalGigs(data) {
+  function openSchedule() {
+    scheduleSession ??= api("open_schedule", {}, "POST").catch(error => {
+      scheduleSession = null;
+      throw error;
+    });
+    return scheduleSession;
+  }
+  async function scheduleApi(operation, payload, method) {
+    const opening = openSchedule();
+    let session;
+    try {
+      ({ session } = await opening);
+      return await api(operation, { ...payload, session }, method);
+    } catch (error) {
+      if (scheduleSession === opening && (!session || error.data?.error === "miniapp_expired"))
+        scheduleSession = null;
+      throw error;
+    }
+  }
+  async function showPersonalGigs(data) {
     const label = key => gigLabel(language, key);
     const nav = element("nav", "", { class: "workspace-nav" });
     if (gigInvitation) nav.append(element("a", label(gigSetlist ? "back" : "title"), {
       href: gigSetlist ? gigsUrl(gigSection, page, gigInvitation) : gigsUrl(gigSection, page),
     }));
-    else {
+    else if (scheduleSettings) {
+      nav.append(element("a", label("title"), { href: gigsUrl() }));
+      nav.append(element("a", scheduleLabel(language, gigSection === "busy" ? "calendar" : "busyTitle"),
+        { href: gigsUrl(gigSection === "busy" ? "calendar" : "busy") }));
+    } else {
       nav.append(element("a", t("bands"), { href: bandUrl() }));
-      for (const section of ["invitations", "confirmed", "history"])
+      const sections = ["schedule", "invitations", "confirmed", "history"];
+      if (data.can_manage || gigSection === "managed") sections.push("managed");
+      for (const section of sections)
         nav.append(element("a", label(section), {
           href: gigsUrl(section), ...(section === gigSection ? { "aria-current": "page" } : {}),
         }));
     }
     content.append(nav);
+    if (scheduleSettings) {
+      await showScheduleSettings({
+        root: content, section: gigSection, language, dateText, request: scheduleApi,
+        refresh: load, status: message => { status.textContent = message; },
+      });
+      return;
+    }
+    if (!gigInvitation) {
+      const options = element("div", "", { class: "toolbar" });
+      options.append(element("a", scheduleLabel(language, "busyTitle"), { href: gigsUrl("busy") }),
+        element("a", scheduleLabel(language, "calendar"), { href: gigsUrl("calendar") }));
+      content.append(options);
+    }
     showGigs({
       root: content, data, language, dateText, refresh: load,
       invitationUrl: gigSection === "history" ? null : id => gigsUrl(gigSection, page, id),
       setlistUrl: gigsUrl(gigSection, page, gigInvitation, true), historyUrl: gigsUrl("history"),
       request: gigApi, options: () => api("export_options", { invitation: gigInvitation }),
       requestFor: invitation => (operation, payload, method) => gigApi(operation, payload, method, invitation),
+      managedUrl: row => `${performanceUrl(row.band_id, row.id, "0", 0)}&from=managed&managed_page=${page}`,
       status: message => { status.textContent = message; },
     });
     if (!gigInvitation) showPages(data.has_next, index => gigsUrl(gigSection, index));
@@ -470,9 +522,9 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       action, performance: info, language, dateText, request: catalogApi,
       onDone: result => {
         const tab = result.past ? "1" : "0";
-        if (action === "delete") location.assign(bandUrl(band, past));
+        if (action === "delete") location.assign(managedPage === null ? bandUrl(band, past) : performanceParent());
         else if (action === "update" && tab === past) return load();
-        else location.assign(performanceUrl(band, result.performance, tab, 0));
+        else location.assign(withManagedOrigin(performanceUrl(band, result.performance, tab, 0)));
       },
     });
   }
@@ -496,9 +548,9 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   function showPerformance(data) {
     const info = data.performance, list = data.setlist;
     const nav = element("nav", "", { class: "workspace-nav" });
-    nav.append(element("a", t("performances"), { href: bandUrl(band, past, page) }));
+    nav.append(element("a", t("performances"), { href: performanceParent() }));
     nav.append(element("a", rosterLabel(language, "title"), {
-      href: `${bandUrl(band, past, page)}&view=lineup&performance=${encodeURIComponent(performance)}`,
+      href: withManagedOrigin(`${bandUrl(band, past, page)}&view=lineup&performance=${encodeURIComponent(performance)}`),
     }));
     content.append(nav, element("h2", info.title || t("performance")),
       element("p", [dateText(info.date), info.city, info.type].filter(Boolean).join(" · ")));
@@ -542,7 +594,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   function showPerformanceRoster(data) {
     const nav = element("nav", "", { class: "workspace-nav" });
     nav.append(element("a", rosterLabel(language, "back"), {
-      href: performanceUrl(band, performance, past, page),
+      href: withManagedOrigin(performanceUrl(band, performance, past, page)),
     }));
     content.append(nav);
     showRoster({
@@ -707,7 +759,8 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     try {
       const { session } = await api("open_draft", { band, performance }, "POST");
       const parent = performance ? `&performance=${encodeURIComponent(performance)}` : "";
-      location.assign(`${bandUrl(band, past, page)}&view=draft${parent}#session=${encodeURIComponent(session)}`);
+      const destination = withManagedOrigin(`${bandUrl(band, past, page)}&view=draft${parent}`);
+      location.assign(`${destination}#session=${encodeURIComponent(session)}`);
     } catch (error) {
       status.textContent = error.message;
       button.disabled = false;

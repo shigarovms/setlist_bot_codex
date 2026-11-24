@@ -10,9 +10,11 @@ import subprocess
 import aiohttp
 import pytest
 from aiohttp.test_utils import TestServer
-from test_miniapp import session, settings, signed
+from cryptography.fernet import Fernet
+from test_miniapp import KEY, session, settings, signed
 
 from setlist_bot.application.setlists import Setlists
+from setlist_bot.application.workspace_schedule import CalendarRuntime
 from setlist_bot.domain.entities import DeploymentIdentity, Outbox
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.infrastructure.miniapp_catalog_delivery import deliver_catalog
@@ -35,12 +37,12 @@ async def browser_tab(client, port, process):
     raise AssertionError(f"Chromium test tab did not open (exit code: {process.poll()})")
 
 
-async def process_catalog_request(engine):
+async def process_catalog_request(engine, *, calendar=None):
     for _ in range(50):
         async with PostgresUnitOfWork(engine) as uow:
             events = await uow.store.find(Outbox, support_kind="catalog", sent=False)
             if events:
-                assert await deliver_catalog(uow, events[0])
+                assert await deliver_catalog(uow, events[0], calendar=calendar)
                 return
         await asyncio.sleep(0.1)
     pytest.fail("Catalog request did not reach the bot worker")
@@ -425,6 +427,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser_roster(browser, engine, world, origin)
                 await browser_guest_gig(browser, engine, world, origin)
                 await browser_approve_self_substitution(browser, engine, world, origin)
+                await browser_schedule(browser, engine, origin)
                 await browser_team(browser, engine, world.group.id, origin)
                 return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
@@ -1045,6 +1048,7 @@ async def browser_guest_gig(browser, engine, world, origin):
             "=== 'У вас пока нет коллективов.'"
         )
         await browser.click_named("#workspace-content a", "Мои выступления")
+        await browser.click_named("#workspace-content a", "Приглашения на выступления")
         await browser.click_named(".workspace-list a", "Коллектив А · Второй концерт")
         await browser.click_named("#workspace-content button", "Подтвердить участие")
         await browser.click_named("dialog[open] button", "Подтвердить")
@@ -1097,3 +1101,34 @@ async def browser_approve_self_substitution(browser, engine, world, origin):
     assert not await browser.js(
         "document.querySelector('.workspace-list li').innerText.includes('3 · Подтверждено')"
     )
+
+
+async def browser_schedule(browser, engine, origin):
+    await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&view=my-gigs"})
+    await browser.wait(
+        "document.querySelector('.workspace-list li')?.innerText.includes('Второй концерт')"
+    )
+    await browser.click_named("#workspace-content a", "Моя занятость")
+    await process_catalog_request(engine)
+    await browser.click_named("#workspace-content button", "Добавить занятость")
+    await browser.js("document.getElementById('busy-starts').value = '2099-06-06'")
+    await browser.click_named("dialog[open] button", "Сохранить")
+    await process_catalog_request(engine)
+    await process_catalog_request(engine)
+    await browser.wait("document.querySelector('.workspace-list li')?.innerText.includes('2099')")
+    await browser.click_named("#workspace-content a", "Подписка на календарь")
+    runtime = CalendarRuntime("https://example.org", Fernet.generate_key().decode(), KEY)
+    await process_catalog_request(engine, calendar=runtime)
+    await browser.click_named(".workspace-list li:first-child button", "Создать ссылку")
+    await browser.click_named("dialog[open] button", "Подтвердить")
+    await process_catalog_request(engine, calendar=runtime)
+    await browser.wait(
+        "document.getElementById('calendar-link')?.value.startsWith('https://example.org/calendar/')"
+    )
+    assert await browser.js("document.getElementById('calendar-link').readOnly")
+    await browser.click_named("dialog[open] button", "Закрыть")
+    await process_catalog_request(engine, calendar=runtime)
+    await browser.click_named(".workspace-list li:first-child button", "Показать ссылку")
+    await process_catalog_request(engine, calendar=runtime)
+    await browser.wait("document.getElementById('calendar-link')?.value.endsWith('.ics')")
+    await browser.click_named("dialog[open] button", "Закрыть")

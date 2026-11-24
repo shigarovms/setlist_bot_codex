@@ -7,7 +7,7 @@ Confirmation/outbox records; the bot revalidates permissions before calling Cata
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid5
 
@@ -27,6 +27,14 @@ from setlist_bot.application.workspace_gigs import (
 from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.application.workspace_performances import WorkspacePerformances
 from setlist_bot.application.workspace_roster import ROSTER_KIND, WorkspaceRoster
+from setlist_bot.application.workspace_schedule import (
+    CALENDAR_TTL,
+    SCHEDULE_KIND,
+    SCHEDULE_SESSION,
+    CalendarHandoff,
+    CalendarRuntime,
+    WorkspaceSchedule,
+)
 from setlist_bot.application.workspace_setlists import SETLIST_SESSION, WorkspaceSetlists
 from setlist_bot.application.workspace_staffing import WorkspaceStaffing
 from setlist_bot.application.workspace_team import TEAM_SESSION, WorkspaceTeam
@@ -57,6 +65,7 @@ CATALOG_OPERATIONS = {
     "roster_action": ROSTER_KIND,
     "gig_reply": GIG_REPLY,
     "gig_replacement": GIG_REPLACEMENT,
+    "schedule_action": SCHEDULE_KIND,
     "duration_save": "miniapp_duration",
 }
 
@@ -64,7 +73,7 @@ CATALOG_OPERATIONS = {
 @dataclass(frozen=True)
 class CatalogTarget:
     parent: Confirmation
-    group_id: UUID
+    group_id: UUID | None
     concert: Concert | None = None
     shared: bool = False
     membership_id: UUID | None = None
@@ -118,7 +127,13 @@ class MiniCatalog:
         parent = await self.store.get(Confirmation, session)
         data = json.loads(parent.command)
         kind = data.get("kind")
-        if kind not in ("miniapp_repertoire", SETLIST_SESSION, TEAM_SESSION, GIG_SESSION):
+        if kind not in (
+            "miniapp_repertoire",
+            SETLIST_SESSION,
+            TEAM_SESSION,
+            GIG_SESSION,
+            SCHEDULE_SESSION,
+        ):
             parent, _, concert = await self.drafts.load(session)
             return CatalogTarget(parent, concert.group_id, concert)
         require(
@@ -127,6 +142,8 @@ class MiniCatalog:
             and parent.expires_at > now(),
             "miniapp_expired",
         )
+        if kind == SCHEDULE_SESSION:
+            return CatalogTarget(parent, None)
         if kind == GIG_SESSION:
             scope = await WorkspaceGigs(self.store, self.user).scope(
                 UUID(data["invitation_id"]), active=False
@@ -187,9 +204,25 @@ class MiniCatalog:
         self.store.add(parent)
         return parent
 
+    def open_schedule(self) -> Confirmation:
+        parent = Confirmation(
+            user_id=self.user.id,
+            chat_id=self.user.telegram_id,
+            expires_at=now() + timedelta(hours=1),
+            command=json.dumps({"kind": SCHEDULE_SESSION}),
+        )
+        self.store.add(parent)
+        return parent
+
     async def read(self, session: UUID, song_id: UUID) -> dict[str, Any]:
         target = await self.target(session)
-        require(target.membership_id is None and target.invitation_id is None, "forbidden")
+        require(
+            target.group_id is not None
+            and target.membership_id is None
+            and target.invitation_id is None,
+            "forbidden",
+        )
+        assert target.group_id is not None
         song = await self.catalog.song(target.group_id, song_id)
         require(target.concert is None or not song.archived, "not_found")
         aliases = await self.store.find(SongAlias, group_id=target.group_id, song_id=song.id)
@@ -202,10 +235,15 @@ class MiniCatalog:
         *,
         operation: str = "catalog_save",
         bot_username: str = "",
+        miniapp_key: bytes = b"",
     ) -> dict[str, Any]:
         target = await self.target(session)
         group_id, concert = target.group_id, target.concert
         kind = CATALOG_OPERATIONS[operation]
+        if group_id is None:
+            require(operation == "schedule_action" and bool(miniapp_key), "forbidden")
+            return await self.queue_schedule(target, payload, miniapp_key)
+        require(operation != "schedule_action", "forbidden")
         workspace_operations = ("shared_action", "export_action", "roster_action")
         gig_operations = ("gig_reply", "gig_replacement")
         if target.invitation_id is not None:
@@ -226,17 +264,10 @@ class MiniCatalog:
                 await self.drafts.groups.access(group_id, admin=True)
         elif operation not in ("catalog_save", "shared_action", "export_action", *gig_operations):
             await self.drafts.groups.access(group_id, admin=True)
-        request = payload.get("request_id")
-        require(isinstance(request, str) and str(UUID(request)) == request, "input")
-        assert isinstance(request, str)
-        identifier = uuid5(session, request)
-        # RU: Один request_id всегда означает одни данные. EN: Lost responses are safe to retry.
-        fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
-        previous = await self.store.find(Confirmation, id=identifier)
-        if previous:
-            data = json.loads(previous[0].command)
-            require(data.get("kind") == kind and data.get("fingerprint") == fingerprint, "input")
-            return await self.status(session, identifier)
+        identifier, fingerprint = self.request_identity(session, payload)
+        previous = await self.previous(session, identifier, kind, fingerprint)
+        if previous is not None:
+            return previous
         expires = target.parent.expires_at
         if operation == "duration_save":
             require(concert is not None, "not_found")
@@ -297,6 +328,62 @@ class MiniCatalog:
             expires = min(expires, now() + timedelta(minutes=15))
         else:
             details = await self._catalog_details(group_id, payload)
+        return self.enqueue(target, kind, identifier, fingerprint, expires, details)
+
+    @staticmethod
+    def request_identity(session: UUID, payload: dict[str, Any]) -> tuple[UUID, str]:
+        request = payload.get("request_id")
+        require(isinstance(request, str) and str(UUID(request)) == request, "input")
+        assert isinstance(request, str)
+        identifier = uuid5(session, request)
+        # RU: Один request_id всегда означает одни данные. EN: Lost responses are safe to retry.
+        fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        return identifier, fingerprint
+
+    async def previous(
+        self,
+        session: UUID,
+        identifier: UUID,
+        kind: str,
+        fingerprint: str,
+        *,
+        miniapp_key: bytes = b"",
+    ) -> dict[str, Any] | None:
+        previous = await self.store.find(Confirmation, id=identifier)
+        if previous:
+            data = json.loads(previous[0].command)
+            require(data.get("kind") == kind and data.get("fingerprint") == fingerprint, "input")
+            return await self.status(session, identifier, miniapp_key=miniapp_key)
+        return None
+
+    async def queue_schedule(
+        self, target: CatalogTarget, payload: dict[str, Any], miniapp_key: bytes
+    ) -> dict[str, Any]:
+        session = await self.store.get(Confirmation, target.parent.id, lock=True)
+        require(session.expires_at > now(), "miniapp_expired")
+        identifier, fingerprint = self.request_identity(session.id, payload)
+        previous = await self.previous(
+            session.id, identifier, SCHEDULE_KIND, fingerprint, miniapp_key=miniapp_key
+        )
+        if previous is not None:
+            return previous
+        handoff = CalendarHandoff(miniapp_key, self.user.id, identifier)
+        command = WorkspaceSchedule.command(payload, handoff)
+        expires = min(session.expires_at, now() + timedelta(seconds=CALENDAR_TTL))
+        return self.enqueue(
+            target, SCHEDULE_KIND, identifier, fingerprint, expires, {"schedule": command}
+        )
+
+    def enqueue(
+        self,
+        target: CatalogTarget,
+        kind: str,
+        identifier: UUID,
+        fingerprint: str,
+        expires: datetime,
+        details: dict[str, Any],
+    ) -> dict[str, Any]:
+        session, group_id, concert = target.parent.id, target.group_id, target.concert
         self.store.add(
             Confirmation(
                 id=identifier,
@@ -307,7 +394,7 @@ class MiniCatalog:
                     {
                         "kind": kind,
                         "session": str(session),
-                        "group_id": str(group_id),
+                        "group_id": str(group_id) if group_id else None,
                         "concert_id": str(concert.id) if concert else None,
                         "fingerprint": fingerprint,
                         "status": "pending",
@@ -361,7 +448,9 @@ class MiniCatalog:
             "expected": expected,
         }
 
-    async def status(self, session: UUID, identifier: UUID) -> dict[str, Any]:
+    async def status(
+        self, session: UUID, identifier: UUID, *, miniapp_key: bytes = b""
+    ) -> dict[str, Any]:
         await self.target(session)
         row = await self.store.get(Confirmation, identifier)
         data = json.loads(row.command)
@@ -371,10 +460,23 @@ class MiniCatalog:
             and data.get("session") == str(session),
             "miniapp_expired",
         )
-        return {"request": str(identifier), "status": data["status"], **data.get("result", {})}
+        result = dict(data.get("result", {}))
+        if data["kind"] == SCHEDULE_KIND:
+            require(row.expires_at > now(), "input_expired")
+        if capsule := result.pop("calendar_capsule", None):
+            require(data["kind"] == SCHEDULE_KIND and bool(miniapp_key), "input_expired")
+            result["url"] = CalendarHandoff(miniapp_key, self.user.id, identifier).open(
+                "reveal", capsule
+            )
+        return {"request": str(identifier), "status": data["status"], **result}
 
     async def execute(
-        self, target: CatalogTarget, identifier: UUID, *, pdf: PdfRenderer | None = None
+        self,
+        target: CatalogTarget,
+        identifier: UUID,
+        *,
+        pdf: PdfRenderer | None = None,
+        calendar: CalendarRuntime | None = None,
     ) -> dict[str, Any]:
         """Called only by the bot worker with normal database privileges."""
         group_id, concert = target.group_id, target.concert
@@ -384,7 +486,7 @@ class MiniCatalog:
             row.user_id == self.user.id
             and data.get("kind") in CATALOG_OPERATIONS.values()
             and data.get("session") == str(target.parent.id)
-            and data.get("group_id") == str(group_id)
+            and data.get("group_id") == (str(group_id) if group_id else None)
             and data.get("concert_id") == (str(concert.id) if concert else None)
             and row.expires_at > now(),
             "miniapp_expired",
@@ -397,6 +499,15 @@ class MiniCatalog:
         )
         if data["status"] != "pending":
             return dict(data.get("result", {}))
+        if data["kind"] == SCHEDULE_KIND:
+            require(group_id is None and concert is None, "forbidden")
+            result_schedule = await WorkspaceSchedule(self.store, self.user).apply(
+                data["schedule"], row.id, calendar
+            )
+            row.command = json.dumps({**data, "status": "saved", "result": result_schedule})
+            return result_schedule
+        require(group_id is not None, "forbidden")
+        assert group_id is not None
         if data["kind"] == "miniapp_duration":
             require(concert is not None, "not_found")
             assert concert is not None

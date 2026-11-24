@@ -11,6 +11,18 @@ function button(text, handler) {
   return node;
 }
 
+export async function pollRequest(attempt, operation, isCurrent) {
+  let result = attempt.receipt ? await attempt.api("catalog_status", { request: attempt.receipt })
+    : await attempt.api(operation, attempt.payload, "POST");
+  attempt.receipt = result.request;
+  for (let i = 0; result.status === "pending" && i < 8; i++) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    if (!isCurrent()) return null;
+    result = await attempt.api("catalog_status", { request: attempt.receipt });
+  }
+  return isCurrent() ? result : null;
+}
+
 export function requestDialog({ title, labels: t, operation, request, refresh, status }) {
   const dialog = el("dialog", "", { class: "shared-tools", "aria-label": title });
   const body = el("div");
@@ -38,15 +50,8 @@ export function requestDialog({ title, labels: t, operation, request, refresh, s
     retry.hidden = true;
     message.textContent = t.busy;
     try {
-      let result = current.receipt ? await current.api("catalog_status", { request: current.receipt })
-        : await current.api(operation, current.payload, "POST");
-      current.receipt = result.request;
-      for (let i = 0; result.status === "pending" && i < 8; i++) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        if (!dialog.open) return;
-        result = await current.api("catalog_status", { request: current.receipt });
-      }
-      if (!dialog.open || result.status === "pending") return;
+      const result = await pollRequest(current, operation, () => dialog.open);
+      if (!result || result.status === "pending") return;
       attempt = null;
       if (result.status === "failed") {
         message.textContent = result.message;

@@ -115,6 +115,7 @@ async def asset(request: web.Request) -> web.Response:
         "workspace-staffing.js": "text/javascript",
         "workspace-roster.js": "text/javascript",
         "workspace-gigs.js": "text/javascript",
+        "workspace-schedule.js": "text/javascript",
         "workspace-request-dialog.js": "text/javascript",
         "model.js": "text/javascript",
         "persistence.js": "text/javascript",
@@ -193,11 +194,12 @@ async def api(request: web.Request) -> web.Response:
     if request.method == "POST" and request.headers.get("Origin") != settings.public_base_url:
         raise AppError("miniapp_auth")
     header = request.headers.get("Authorization", "")
+    miniapp_key = base64.urlsafe_b64decode(settings.auth_key.get_secret_value())
     actor = None
     if header.startswith("tma "):
         actor = verify_init_data(
             header[4:],
-            base64.urlsafe_b64decode(settings.auth_key.get_secret_value()),
+            miniapp_key,
             allow_group=True,
         )
     elif header or settings.browser_login_secret is None or not request.cookies.get(SESSION_COOKIE):
@@ -221,10 +223,16 @@ async def api(request: web.Request) -> web.Response:
                 user = users[0]
             request[LANGUAGE] = user.language
             service = MiniDrafts(uow.store, user)
+            if operation == "open_schedule" and request.method == "POST":
+                schedule = MiniCatalog(service).open_schedule()
+                return web.json_response({"session": str(schedule.id), "language": user.language})
             if operation == "my_gigs" and request.method == "GET":
                 section = payload.get("section", "invitations")
                 page = int(payload.get("page", "0"))
-                if section not in ("invitations", "confirmed", "history") or not 0 <= page <= 10000:
+                if (
+                    section not in ("invitations", "confirmed", "history", "schedule", "managed")
+                    or not 0 <= page <= 10000
+                ):
                     raise ValueError("Invalid personal invitation options")
                 return web.json_response(
                     await WorkspaceGigs(uow.store, user).listing(section, page, PAGE_SIZE)
@@ -470,7 +478,11 @@ async def api(request: web.Request) -> web.Response:
                 result = await MiniCatalog(service).read(identifier, UUID(payload["song_id"]))
             elif request.method == "POST" and operation in CATALOG_OPERATIONS:
                 result = await MiniCatalog(service).queue(
-                    identifier, payload, operation=operation, bot_username=settings.bot_username
+                    identifier,
+                    payload,
+                    operation=operation,
+                    bot_username=settings.bot_username,
+                    miniapp_key=miniapp_key,
                 )
             elif request.method == "GET" and operation == "export_download":
                 scoped = MiniCatalog(service)
@@ -481,6 +493,7 @@ async def api(request: web.Request) -> web.Response:
                     "miniapp_expired",
                 )
                 assert target.concert is not None
+                assert target.group_id is not None
                 record = await scoped.status(identifier, UUID(payload["request"]))
                 name, content_type, content = await WorkspaceExports(
                     uow.store, user, invitation_id=target.invitation_id
@@ -491,7 +504,9 @@ async def api(request: web.Request) -> web.Response:
                     headers={"Content-Disposition": f'attachment; filename="{name}"'},
                 )
             elif request.method == "GET" and operation == "catalog_status":
-                result = await MiniCatalog(service).status(identifier, UUID(payload["request"]))
+                result = await MiniCatalog(service).status(
+                    identifier, UUID(payload["request"]), miniapp_key=miniapp_key
+                )
             elif request.method == "GET" and operation == "history_menu":
                 result = {"sources": await service.history_menu(identifier)}
             elif request.method == "GET" and operation == "history":

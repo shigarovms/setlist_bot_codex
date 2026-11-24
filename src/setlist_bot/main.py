@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import contextlib
+import hmac
 import json
 import logging
 import os
@@ -18,6 +19,7 @@ from setlist_bot.application.chat_cleanup import message_ids as known_message_id
 from setlist_bot.application.chat_migration import migrate_binding
 from setlist_bot.application.setlist_menus import REQUEST, SetlistMenus
 from setlist_bot.application.trash import TrashCleanup
+from setlist_bot.application.workspace_schedule import CalendarRuntime
 from setlist_bot.config import Settings
 from setlist_bot.domain.entities import (
     ChatBinding,
@@ -116,7 +118,9 @@ async def deliver_card_refresh(bot: Bot, uow: PostgresUnitOfWork, event: Outbox)
     event.last_error, event.next_attempt_at = "", None
 
 
-async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
+async def deliver_one_outbox(
+    bot: Bot, engine: AsyncEngine, *, calendar: CalendarRuntime | None = None
+) -> bool:
     event_id = None
     try:
         async with PostgresUnitOfWork(engine) as uow:
@@ -165,7 +169,7 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
                 from setlist_bot.infrastructure.miniapp_catalog_delivery import deliver_catalog
 
                 return await deliver_catalog(
-                    uow, event, people_locked=True, preflight=catalog_preflight
+                    uow, event, people_locked=True, preflight=catalog_preflight, calendar=calendar
                 )
             if event.support_kind == "staffing":
                 from setlist_bot.infrastructure.staffing_delivery import deliver_staffing
@@ -427,10 +431,16 @@ async def deliver_one_outbox(bot: Bot, engine: AsyncEngine) -> bool:
         raise
 
 
-async def deliver_outbox(bot: Bot, engine: AsyncEngine, monitor: Monitor | None = None) -> None:
+async def deliver_outbox(
+    bot: Bot,
+    engine: AsyncEngine,
+    monitor: Monitor | None = None,
+    *,
+    calendar: CalendarRuntime | None = None,
+) -> None:
     while True:
         try:
-            delivered = await deliver_one_outbox(bot, engine)
+            delivered = await deliver_one_outbox(bot, engine, calendar=calendar)
             if monitor:
                 monitor.set("outbox", "running", success=delivered)
         except Exception as exc:
@@ -575,8 +585,15 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
                         diagnostics=settings.telegram_diagnostics,
                     )
                 )
+                calendar = CalendarRuntime(
+                    settings.calendar_public_base_url,
+                    settings.calendar_link_key.get_secret_value()
+                    if settings.calendar_link_key
+                    else "",
+                    hmac.digest(b"WebAppData", bot.token.encode(), "sha256"),
+                )
                 workers = [
-                    asyncio.create_task(deliver_outbox(bot, engine, monitor)),
+                    asyncio.create_task(deliver_outbox(bot, engine, monitor, calendar=calendar)),
                     asyncio.create_task(cleanup_trash(engine, bot, monitor)),
                     asyncio.create_task(daily_reminders(engine, monitor)),
                     asyncio.create_task(monitor.persist(engine)),

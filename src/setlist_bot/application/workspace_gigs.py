@@ -20,6 +20,7 @@ from setlist_bot.domain.entities import (
     GigInvitation,
     GigSlot,
     Group,
+    Membership,
     Setlist,
     StaffRole,
     User,
@@ -76,6 +77,38 @@ class WorkspaceGigs:
         return await Setlists(self.store, self.user)._read_shared(rows[0])
 
     async def listing(self, section: str, page: int, size: int) -> dict[str, Any]:
+        memberships = await self.store.find(
+            Membership, user_id=self.user.id, status="active", role="admin"
+        )
+        admin_groups = await self.store.get_many(Group, {row.group_id for row in memberships})
+        context = {
+            "language": self.user.language,
+            "can_manage": any(row.deleted_at is None for row in admin_groups),
+        }
+        current = today()
+        if section == "managed":
+            managed = await self.store.concerts_for_user(
+                self.user.id,
+                current,
+                offset=page * size,
+                limit=size + 1,
+                admin_only=True,
+            )
+            return {
+                **context,
+                "has_next": len(managed) > size,
+                "managed": [
+                    {
+                        "id": str(event.id),
+                        "band_id": str(group.id),
+                        "band": group.name,
+                        "date": event.date.isoformat(),
+                        "title": event.title,
+                        "city": event.city,
+                    }
+                    for event, group in managed[:size]
+                ],
+            }
         invitations = await self.store.personal_invitations(self.user.id)
         events = {
             row.id: row
@@ -85,18 +118,20 @@ class WorkspaceGigs:
             row.id: row
             for row in await self.store.get_many(Group, {row.group_id for row in invitations})
         }
-        current = today()
         selected = []
         for row in invitations:
             event, group = events.get(row.concert_id), groups.get(row.group_id)
             if not event or not group or event.group_id != group.id:
                 continue
             active = row.status in OPEN | {"confirmed"} and self.staffing.valid(row, event, group)
-            matching = (
-                section == ("confirmed" if row.status == "confirmed" else "invitations")
-                if active
-                else section == "history"
-            )
+            if section == "schedule":
+                matching = active and row.status == "confirmed" and row.date >= current
+            else:
+                matching = (
+                    section == ("confirmed" if row.status == "confirmed" else "invitations")
+                    if active
+                    else section == "history"
+                )
             if matching:
                 selected.append((row, event, group))
         selected.sort(
@@ -106,17 +141,33 @@ class WorkspaceGigs:
                 item[0].id,
             )
         )
+        extra_roles: dict[UUID, list[GigInvitation]] = {}
+        if section == "schedule":
+            unique = {}
+            for row, event, group in selected:
+                if event.id in unique:
+                    extra_roles.setdefault(event.id, []).append(row)
+                else:
+                    unique[event.id] = (row, event, group)
+            selected = list(unique.values())
         shown = selected[page * size : (page + 1) * size]
         slots = {
             slot.id: slot
-            for slot in await self.store.get_many(GigSlot, {r.slot_id for r, _, _ in shown})
+            for slot in await self.store.get_many(
+                GigSlot,
+                {
+                    r.slot_id
+                    for row, event, _ in shown
+                    for r in (row, *extra_roles.get(event.id, []))
+                },
+            )
         }
         roles = {
             role.id: role.name
             for role in await self.store.get_many(StaffRole, {s.role_id for s in slots.values()})
         }
         return {
-            "language": self.user.language,
+            **context,
             "has_next": len(selected) > (page + 1) * size,
             "invitations": [
                 {
@@ -129,6 +180,11 @@ class WorkspaceGigs:
                     "status": "inactive"
                     if section == "history" and row.status in OPEN | {"confirmed"}
                     else row.status,
+                    "other_roles": [
+                        {"id": str(other.id), "role": roles[slots[other.slot_id].role_id]}
+                        for other in extra_roles.get(event.id, [])
+                        if other.slot_id in slots
+                    ],
                 }
                 for row, event, group in shown
                 if row.slot_id in slots

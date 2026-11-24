@@ -5,6 +5,7 @@ import { requestDialog } from "./workspace-request-dialog.js";
 const words = {
   ru: {
     title: "Мои выступления", invitations: "Приглашения на выступления", confirmed: "Подтверждённые",
+    schedule: "Предстоящие", managed: "Организую",
     history: "История", invitation: "Приглашение на выступление", back: "К приглашению",
     empty: "В этом разделе пока нет выступлений.", pending: "Ожидает ответа",
     reconfirm: "Нужно подтвердить новую дату", conditional: "Участие под вопросом",
@@ -22,6 +23,7 @@ const words = {
   },
   en: {
     title: "My performances", invitations: "Performance invitations", confirmed: "Confirmed",
+    schedule: "Upcoming", managed: "I organize",
     history: "History", invitation: "Performance invitation", back: "Back to invitation",
     empty: "There are no performances here yet.", pending: "Awaiting your response",
     reconfirm: "Confirm the new date", conditional: "Tentative booking",
@@ -54,7 +56,7 @@ function button(label, click, primary = false) {
   return node;
 }
 
-export function showGigs({ root, data, language, dateText, invitationUrl, setlistUrl, historyUrl, request, requestFor, options, refresh, status }) {
+export function showGigs({ root, data, language, dateText, invitationUrl, setlistUrl, historyUrl, request, requestFor, managedUrl, options, refresh, status }) {
   const t = words[language];
   const statusLabel = value => t[value === "confirmed" ? "confirmedStatus" : value] || t.inactive;
 
@@ -169,6 +171,18 @@ export function showGigs({ root, data, language, dateText, invitationUrl, setlis
     return;
   }
 
+  if (data.managed) {
+    if (!data.managed.length) root.append(el("p", t.empty));
+    const list = el("ul", "", { class: "workspace-list" });
+    for (const row of data.managed) {
+      const item = el("li");
+      item.append(el("a", [row.band, row.title].filter(Boolean).join(" · "), { href: managedUrl(row) }),
+        el("p", [dateText(row.date), row.city].filter(Boolean).join(" · ")));
+      list.append(item);
+    }
+    root.append(list);
+    return;
+  }
   if (!data.invitations.length) root.append(el("p", t.empty));
   const list = el("ul", "", { class: "workspace-list" });
   for (const row of data.invitations) {
@@ -176,6 +190,11 @@ export function showGigs({ root, data, language, dateText, invitationUrl, setlis
     const heading = [row.band, row.title].filter(Boolean).join(" · ");
     item.append(invitationUrl ? el("a", heading, { href: invitationUrl(row.id, row.status) }) : el("strong", heading),
       el("p", [dateText(row.date), row.city, row.role, statusLabel(row.status)].filter(Boolean).join(" · ")));
+    if (invitationUrl && row.other_roles.length) {
+      const roles = el("div", "", { class: "toolbar" });
+      for (const role of row.other_roles) roles.append(el("a", role.role, { href: invitationUrl(role.id) }));
+      item.append(roles);
+    }
     list.append(item);
   }
   root.append(list);

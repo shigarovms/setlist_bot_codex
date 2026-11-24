@@ -8,6 +8,7 @@ from setlist_bot.application.miniapp_catalog import MiniCatalog
 from setlist_bot.application.ports import Store
 from setlist_bot.application.workspace_gigs import GIG_REPLACEMENT, GIG_REPLY
 from setlist_bot.application.workspace_roster import ROSTER_KIND, WorkspaceRoster
+from setlist_bot.application.workspace_schedule import SCHEDULE_KIND, CalendarRuntime
 from setlist_bot.domain.entities import Confirmation, Outbox, User, now
 from setlist_bot.domain.rules import AppError, require
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
@@ -23,6 +24,11 @@ async def lock_catalog_people(store: Store, event: Outbox) -> AppError | None:
     if data.get("status") != "pending":
         return None
     if data.get("kind") in (GIG_REPLY, GIG_REPLACEMENT):
+        await store.lock_people({row.user_id})
+    if data.get("kind") == SCHEDULE_KIND and data["schedule"]["action"] in (
+        "busy_add",
+        "busy_remove",
+    ):
         await store.lock_people({row.user_id})
     if data.get("kind") == ROSTER_KIND:
         user = await store.get(User, row.user_id)
@@ -41,6 +47,7 @@ async def deliver_catalog(
     *,
     people_locked: bool = False,
     preflight: AppError | None = None,
+    calendar: CalendarRuntime | None = None,
 ) -> bool:
     identifier = UUID(event.payload["request_id"])
     rows = await uow.store.find(Confirmation, id=identifier)
@@ -72,7 +79,7 @@ async def deliver_catalog(
                 from setlist_bot.infrastructure.pdf import PdfDocuments
 
                 renderer = PdfDocuments()
-            result = await service.execute(target, identifier, pdf=renderer)
+            result = await service.execute(target, identifier, pdf=renderer, calendar=calendar)
             if notice := result.get("notify"):
                 from setlist_bot.transport.shared_requests import queue_admin_request
 

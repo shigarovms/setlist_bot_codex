@@ -193,7 +193,11 @@ const workspaceDraft = session && workspaceBand && workspaceParams.get("view") =
 const parentPerformance = workspaceParams.get("performance");
 function draftParentUrl() {
   const past = workspaceParams.get("past"), page = workspaceParams.get("page");
-  return parentPerformance ? performanceUrl(workspaceBand, parentPerformance, past, page) : bandUrl(workspaceBand, past, page);
+  if (!parentPerformance) return bandUrl(workspaceBand, past, page);
+  const url = performanceUrl(workspaceBand, parentPerformance, past, page);
+  if (workspaceParams.get("from") !== "managed") return url;
+  const managed = encodeURIComponent(workspaceParams.get("managed_page") || "0");
+  return `${url}&from=managed&managed_page=${managed}`;
 }
 function status(text, error = false) {
   $("status").textContent = text;

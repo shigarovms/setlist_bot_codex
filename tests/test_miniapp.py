@@ -406,6 +406,18 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
             )
             assert personal_list.status == 200, await personal_list.text()
             assert (await personal_list.json())["invitations"][0]["id"] == invite_id
+            schedule = await client.post("/miniapp/api/open_schedule", json={}, headers=performer)
+            assert schedule.status == 200, await schedule.text()
+            pending_busy = await client.post(
+                "/miniapp/api/schedule_action",
+                json={
+                    **(await schedule.json()),
+                    "action": "busy_list",
+                    "request_id": str(uuid4()),
+                },
+                headers=performer,
+            )
+            assert pending_busy.status == 200 and (await pending_busy.json())["status"] == "pending"
             team = await client.get("/miniapp/api/team", params=band, headers=headers)
             assert team.status == 200 and (await team.json())["admin"]
             template_card = await client.get(
@@ -461,6 +473,8 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
                 "SELECT * FROM support_messages",
                 "SELECT * FROM admin_sessions",
                 "SELECT token_ciphertext FROM calendar_subscriptions",
+                "SELECT token_hash FROM calendar_subscriptions",
+                "SELECT * FROM busy_periods",
                 "UPDATE setlists SET approved=true",
                 "UPDATE concerts SET deleted_at=now()",
                 "UPDATE lineup_templates SET slots='[]'",
