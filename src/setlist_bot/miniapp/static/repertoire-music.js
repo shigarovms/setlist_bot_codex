@@ -138,7 +138,7 @@ export function repertoireMusic({ root, language, band, search, read, request })
     for (const row of rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)) list.append(render(row));
     panel.append(list);
     if (pages <= 1) return;
-    const nav = el("nav", "", { class: "workspace-nav" });
+    const nav = el("nav", "", { class: "workspace-nav inline-pager" });
     const back = button(t.previous, () => { page--; draw(); });
     const next = button(t.next, () => { page++; draw(); });
     back.disabled = page === 0;

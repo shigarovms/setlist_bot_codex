@@ -144,11 +144,12 @@ export function mountSharedSetlist({ root, data, language, editorButton, decisio
       for (const row of result.requests) {
         const item = el("li", "", { id: `shared-request-${row.id}` });
         const acceptLabel = row.operation === "approve" ? t.approve : t.reopen;
-        item.append(el("p", `${row.requester} · ${row.operation === "approve" ? t.askApprove : t.askReopen}`),
-          button(acceptLabel, () => {
-            if (row.operation !== "reopen" || confirm(t.confirmReopen))
-              void submit("decide", shared, { request: row.id, accept: true });
-          }), button(t.reject, () => submit("decide", shared, { request: row.id, accept: false })));
+        const actions = el("div", "", { class: "toolbar" });
+        actions.append(button(acceptLabel, () => {
+          if (row.operation !== "reopen" || confirm(t.confirmReopen))
+            void submit("decide", shared, { request: row.id, accept: true });
+        }), button(t.reject, () => submit("decide", shared, { request: row.id, accept: false })));
+        item.append(el("p", `${row.requester} · ${row.operation === "approve" ? t.askApprove : t.askReopen}`), actions);
         list.append(item);
       }
       for (const row of result.proposals) {

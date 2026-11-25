@@ -114,7 +114,7 @@ class Browser:
 
     async def assert_button_text_fits(self):
         overflow = await self.js("""
-            [...document.querySelectorAll('button, .workspace-nav a')]
+            [...document.querySelectorAll('button, .workspace-nav a, .toolbar a')]
                 .filter(control => control.getClientRects().length && control.textContent.trim())
                 .filter(control => {
                     const bounds = control.getBoundingClientRect();
@@ -126,6 +126,36 @@ class Browser:
                 }).map(control => control.textContent.trim())
         """)
         assert not overflow, overflow
+
+    async def assert_button_rows(self, selector):
+        result = await self.js(f"""
+            (() => {{
+                const group = document.querySelector({json.dumps(selector)});
+                const controlGap = Number.parseFloat(
+                    getComputedStyle(document.documentElement).getPropertyValue('--control-gap')
+                );
+                const bounds = group.getBoundingClientRect();
+                const lines = new Map();
+                for (const control of group.querySelectorAll(':scope > button, :scope > a')) {{
+                    if (!control.getClientRects().length) continue;
+                    const box = control.getBoundingClientRect();
+                    const top = Math.round(box.top);
+                    if (!lines.has(top)) lines.set(top, []);
+                    lines.get(top).push(box);
+                }}
+                const near = (a, b) => Math.abs(a - b) <= 1;
+                return [...lines.values()].every((row, index, rows) =>
+                    near(row[0].left, bounds.left) && near(row.at(-1).right, bounds.right)
+                    && (index === 0 || near(row[0].top - rows[index - 1][0].bottom, controlGap))
+                    && row.every((box, column) =>
+                        box.height >= 44 && near(box.width, row[0].width)
+                        && near(box.height, row[0].height)
+                        && (column === 0 || near(box.left - row[column - 1].right, controlGap))
+                    )
+                ) && lines.size > 0;
+            }})()
+        """)
+        assert result, selector
 
     async def tap(self, selector):
         point = await self.js(
@@ -189,6 +219,8 @@ async def browser_editor_layout(browser):
                 "getComputedStyle(document.querySelector('footer')).position"
             ) == ("static")
         await browser.assert_button_text_fits()
+        await browser.assert_button_rows(".editor-tools")
+        await browser.assert_button_rows("#editor footer")
     await browser.call(
         "Emulation.setDeviceMetricsOverride",
         {"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True},
@@ -367,6 +399,8 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     "document.querySelector('.shared-setlist')?.innerText.includes('Комета')"
                 )
                 await browser.wait("!!document.getElementById('readiness-title')")
+                await browser.assert_button_rows(".performance-details-nav")
+                await browser.assert_button_rows("#workspace-content > .toolbar")
                 assert await browser.js("""
                     const editor = document.querySelector('#workspace-content button.primary');
                     !!(editor.compareDocumentPosition(document.querySelector('.shared-setlist'))
