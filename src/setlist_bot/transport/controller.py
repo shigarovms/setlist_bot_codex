@@ -283,6 +283,10 @@ class Controller:
                     [(self.t("profile_button"), f"https://t.me/{self.bot_username}?start=profile")],
                 )
             return await profile_handle(self, args) if command == "pf_go" else await begin(self)
+        if command in ("pt_send", "pt_pre"):
+            from setlist_bot.transport.performance_timing import handle as timing_handle
+
+            return await timing_handle(self, command, UUID(args))
         if command.startswith("tm_"):
             from setlist_bot.transport.team import handle as team_handle
 

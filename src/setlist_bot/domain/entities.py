@@ -120,6 +120,8 @@ class Concert(Entity):
     performance_type: str = ""
     city: str = ""
     extra_info: str = ""
+    timing: dict[str, Any] = field(default_factory=dict)
+    template_source_id: UUID | None = None
     lineup_name: str = ""
     lineup_version: int = 0
     metadata_version: int = 0

@@ -7,6 +7,7 @@ import logging
 import os
 from datetime import datetime, time, timedelta
 from functools import partial
+from typing import cast
 from uuid import UUID
 
 from aiogram import Bot, Dispatcher
@@ -20,6 +21,7 @@ from setlist_bot.application.chat_migration import migrate_binding
 from setlist_bot.application.setlist_menus import REQUEST, SetlistMenus
 from setlist_bot.application.trash import TrashCleanup
 from setlist_bot.application.workspace_schedule import CalendarRuntime
+from setlist_bot.application.workspace_timing import TIMING_KIND, schedule_timing
 from setlist_bot.config import Settings
 from setlist_bot.domain.entities import (
     ChatBinding,
@@ -179,6 +181,12 @@ async def deliver_one_outbox(
                     preflight=catalog_preflight,
                     calendar=calendar,
                     bot=bot,
+                )
+            if event.support_kind == TIMING_KIND:
+                from setlist_bot.infrastructure.timing_delivery import deliver_timing
+
+                return await deliver_timing(
+                    bot, uow, event, group, os.environ.get("MINIAPP_PUBLIC_BASE_URL", "")
                 )
             if event.support_kind == "staffing":
                 from setlist_bot.infrastructure.staffing_delivery import deliver_staffing
@@ -481,6 +489,30 @@ async def cleanup_trash(engine: AsyncEngine, bot: Bot, monitor: Monitor | None =
         await asyncio.sleep(60)
 
 
+async def timing_reminders(engine: AsyncEngine) -> None:
+    while True:
+        try:
+            instant = now()
+            # The evening in different time zones can fall on adjacent UTC dates.
+            dates = [instant.date() + timedelta(days=offset) for offset in range(-1, 3)]
+            concerts = metadata.tables["concerts"]
+            async with engine.connect() as connection:
+                result = await connection.execute(
+                    select(concerts.c.group_id, concerts.c.id).where(
+                        concerts.c.date.in_(dates), concerts.c.deleted_at.is_(None)
+                    )
+                )
+                candidates = result.all()
+            for group_id, concert_id in candidates:
+                async with PostgresUnitOfWork(engine) as uow:
+                    await schedule_timing(
+                        uow.store, cast(UUID, group_id), cast(UUID, concert_id), instant
+                    )
+        except Exception as exc:
+            logger.warning("Timing scheduling failed (%s); will retry", type(exc).__name__)
+        await asyncio.sleep(30)
+
+
 async def daily_reminders(engine: AsyncEngine, monitor: Monitor | None = None) -> None:
     # RU: Один план в день, затем ожидание назначенного времени каждого коллектива.
     # EN: Build one daily plan, sleep until each due time, and deduplicate in PostgreSQL.
@@ -606,6 +638,7 @@ async def run(*, check: bool = False, sync_only: bool = False) -> None:
                     asyncio.create_task(deliver_outbox(bot, engine, monitor, calendar=calendar)),
                     asyncio.create_task(cleanup_trash(engine, bot, monitor)),
                     asyncio.create_task(daily_reminders(engine, monitor)),
+                    asyncio.create_task(timing_reminders(engine)),
                     asyncio.create_task(monitor.persist(engine)),
                     asyncio.create_task(search_worker(engine, monitor)),
                     asyncio.create_task(analytics.run(engine, monitor)),

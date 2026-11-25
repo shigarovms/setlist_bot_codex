@@ -439,7 +439,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     "document.querySelector('.workspace-pdf-downloads a').download"
                 )
                 for _ in range(100):
-                    if (downloads / filename).is_file():
+                    if (downloads / filename).is_file() and (downloads / filename).stat().st_size:
                         break
                     await asyncio.sleep(0.05)
                 assert (downloads / filename).read_bytes().startswith(b"%PDF-")
@@ -462,7 +462,9 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                         }})()
                     """)
                     for _ in range(100):
-                        if (downloads / filename).is_file():
+                        if (downloads / filename).is_file() and (
+                            downloads / filename
+                        ).stat().st_size:
                             break
                         await asyncio.sleep(0.05)
                     assert (downloads / filename).read_bytes().startswith(b"%PDF-")
@@ -1006,6 +1008,17 @@ async def browser_manage_performance(browser, engine, group_id, origin):
     await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&band={group_id}"})
     await browser.click_named("#workspace-content button", "Новое выступление")
     await browser.wait("!!document.getElementById('workspace-performance-performance_type')")
+    await browser.click_named("dialog[open] button", "История")
+    await browser.click_named("dialog[open] button", "Взять за шаблон")
+    await browser.wait("!document.querySelector('dialog[aria-label=История]')")
+    assert await browser.js("document.getElementById('workspace-performance-date').value") == ""
+    assert await browser.js("document.getElementById('workspace-performance-title').value") == (
+        "Прошлое выступление"
+    )
+    await browser.click_named("dialog[open] button", "Назад")
+    await browser.wait("!document.getElementById('workspace-performance-performance_type')")
+    await browser.click_named("#workspace-content button", "Новое выступление")
+    await browser.wait("!!document.getElementById('workspace-quick-performance')")
     await browser.call(
         "Emulation.setDeviceMetricsOverride",
         {"width": 320, "height": 640, "deviceScaleFactor": 1, "mobile": True},
@@ -1069,6 +1082,33 @@ async def browser_manage_performance(browser, engine, group_id, origin):
     await process_catalog_request(engine)
     await browser.wait(
         "document.querySelector('#workspace-content h2')?.textContent === 'Летний концерт'"
+    )
+    await browser.click_named("#workspace-content a", "Тайминг выступления")
+    await browser.wait("!!document.querySelector('.timing-form')")
+    await browser.click_named(".timing-form button", "Добавить строку")
+    await browser.call(
+        "Emulation.setDeviceMetricsOverride",
+        {"width": 320, "height": 640, "deviceScaleFactor": 1, "mobile": True},
+    )
+    await browser.assert_button_text_fits()
+    assert await browser.js("document.documentElement.scrollWidth <= innerWidth")
+    await browser.js("""
+        document.querySelector('.timing-form [name=start]').value = '17:00';
+        document.querySelector('.timing-form [name=end]').value = '17:45';
+        document.querySelector('.timing-form [name=label]').value = 'Саундчек';
+        document.querySelector('.timing-form').requestSubmit();
+    """)
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.getElementById('workspace-status').textContent === 'Тайминг сохранён.'"
+    )
+    assert (
+        await browser.js("document.querySelector('.timing-form [name=label]').value") == "Саундчек"
+    )
+    await browser.click_named("#workspace-content a", "Назад")
+    await browser.call(
+        "Emulation.setDeviceMetricsOverride",
+        {"width": 390, "height": 900, "deviceScaleFactor": 1, "mobile": True},
     )
     await browser.click_named("#workspace-content button", "Данные выступления")
     await browser.js("document.getElementById('workspace-performance-city').value = 'Казань'")

@@ -23,7 +23,7 @@ PRODUCTION = Path("/opt/setlist_bot_codex")
 SANDBOX = Path("/opt/setlist_bot_sandbox")
 ROLE = "setlist_web_admin"
 CONTAINER = "setlist_bot_codex-db-1"
-SCHEMA = "cdd481792e03"
+SCHEMA = "5ac5b58ec9d1"
 READ_TABLES = (
     "users",
     "professional_roles",

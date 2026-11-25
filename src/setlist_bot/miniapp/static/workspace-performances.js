@@ -1,3 +1,4 @@
+import { historyButton } from "./workspace-timing.js";
 import { fillButtonLabel, withBotLabels } from "./bot-labels.js";
 const copy = withBotLabels("workspace-performances", {
   ru: {
@@ -10,7 +11,8 @@ const copy = withBotLabels("workspace-performances", {
     duration: "Длительность", durationHint: "Минуты или часы:минуты:секунды",
     quick: "Ввести одной строкой", quickLabel: "Дата и данные выступления",
     quickHint: "Например: 15.12.2026  Санкт-Петербург  Фест  45 мин",
-    lineup: "Состав",
+    lineup: "Состав", source: "Шаблон", copy_timing: "Скопировать тайминг",
+    copy_lineup: "Скопировать состав", copy_setlist: "Скопировать общий сет-лист",
     noLineup: "Без сохранённого состава",
     dateChanged: "При изменении даты участникам нужно будет подтвердить участие заново.",
     deletePrompt: "Выступление, его сет-листы и черновики будут скрыты. Действующие приглашения отменятся. Восстановление доступно 30 дней.",
@@ -25,7 +27,8 @@ const copy = withBotLabels("workspace-performances", {
     duration: "Duration", durationHint: "Minutes or hours:minutes:seconds",
     quick: "Enter on one line", quickLabel: "Date and performance details",
     quickHint: "For example: 15.12.2026  London  Festival  45 min",
-    lineup: "Lineup",
+    lineup: "Lineup", source: "Template", copy_timing: "Copy schedule",
+    copy_lineup: "Copy lineup", copy_setlist: "Copy shared setlist",
     noLineup: "Without a saved lineup",
     dateChanged: "After changing the date, performers will need to confirm their participation again.",
     deletePrompt: "The performance, its setlists and drafts will be hidden. Active invitations will be cancelled. You can restore the performance for 30 days.",
@@ -47,7 +50,7 @@ function duration(seconds) {
     .map(value => String(value).padStart(2, "0")).join(":");
 }
 
-export function performanceAction({ language, action, request, readOptions, performance, onDone, dateText }) {
+export function performanceAction({ language, action, request, readOptions, readHistory, performance, onDone, dateText }) {
   const t = copy[language];
   const label = action === "restore" ? fillButtonLabel(t.restore, { name: performance.label }) : t[action];
   const button = el("button", label, { type: "button", ...(action === "create" ? { class: "primary" } : {}) });
@@ -86,8 +89,12 @@ export function performanceAction({ language, action, request, readOptions, perf
         const formatted = field === "date" ? dateText(value) : field === "duration" ? duration(value) : value;
         details.append(el("dt", t[field]), el("dd", formatted));
       }
-      if (action === "create")
+      if (action === "create" && (!result.source || result.lineup || !result.copied.includes("copy_lineup")))
         details.append(el("dt", t.lineup), el("dd", result.lineup || t.noLineup));
+      if (result.source) {
+        details.append(el("dt", t.source), el("dd", result.source));
+        for (const key of result.copied) details.append(el("dd", t[key]));
+      }
       body.replaceChildren(details);
       if (result.date_changed) body.append(el("p", t.dateChanged));
       if (action === "delete") body.append(el("p", t.deletePrompt));
@@ -107,7 +114,7 @@ export function performanceAction({ language, action, request, readOptions, perf
       confirm.focus();
     }
 
-    function withCustom(parent, name, options, ownLabel, otherLabel) {
+    function withCustom(parent, name, options, ownLabel, otherLabel, initial) {
       const id = `workspace-performance-${name}`;
       const select = el("select", "", { id });
       select.append(el("option", "—", { value: "" }));
@@ -117,18 +124,32 @@ export function performanceAction({ language, action, request, readOptions, perf
       const custom = el("input", "", { name, id: `${id}-custom`, maxlength: 200 });
       const extra = el("div", "", { class: "import-fields", hidden: "" });
       extra.append(el("label", ownLabel, { for: custom.id }), custom);
-      select.addEventListener("change", () => {
+      function sync() {
         extra.hidden = select.value !== "other";
         custom.required = !extra.hidden;
+      }
+      const index = options.findIndex(option => option.value === initial);
+      select.value = initial ? (index < 0 ? "other" : String(index)) : "";
+      custom.value = index < 0 ? initial || "" : "";
+      sync();
+      select.addEventListener("change", () => {
+        sync();
         if (custom.required) custom.focus();
       });
       parent.append(el("label", t[name], { for: id }), select, extra);
       return () => select.value === "other" ? custom.value : options[select.value]?.value ?? "";
     }
 
-    function showForm(options) {
+    function showForm(options, source = null) {
+      fields.replaceChildren();
       const inputFields = el("div", "", { class: "import-fields" });
-      const initial = { ...performance, duration: duration(performance?.planned_seconds), performance_type: performance?.type };
+      const initial = source
+        ? { ...source.fields, date: "", duration: duration(source.fields.duration) }
+        : { ...performance, duration: duration(performance?.planned_seconds), performance_type: performance?.type };
+      if (options) {
+        fields.append(historyButton({ language, read: readHistory, select: row => showForm(options, row) }));
+        if (source) fields.append(el("p", `${t.source} · ${source.label}`));
+      }
       const choices = {};
       for (const [name, max] of [["date", 10], ["title", 200], ["city", 200], ["performance_type", 200], ["duration", 80], ["info", 2000]]) {
         if (options && (name === "city" || name === "performance_type")) {
@@ -136,7 +157,7 @@ export function performanceAction({ language, action, request, readOptions, perf
           const values = city ? options.cities.map(value => ({ value, label: value }))
             : Object.entries(options.types).map(([key, value]) => ({ value, label: t[key] }));
           choices[name] = withCustom(inputFields, name, values,
-            city ? t.ownCity : t.ownType, city ? t.otherCity : t.other);
+            city ? t.ownCity : t.ownType, city ? t.otherCity : t.other, initial[name]);
           continue;
         }
         const id = `workspace-performance-${name}`;
@@ -154,7 +175,7 @@ export function performanceAction({ language, action, request, readOptions, perf
       }
       fields.append(inputFields);
       let quick;
-      if (action === "create") {
+      if (action === "create" && !source) {
         const toggle = el("input", "", { type: "checkbox", id: "workspace-quick-performance" });
         const quickFields = el("div", "", { hidden: "" });
         quick = el("input", "", { id: "workspace-quick-input", maxlength: "4000", "aria-describedby": "workspace-quick-hint" });
@@ -170,7 +191,8 @@ export function performanceAction({ language, action, request, readOptions, perf
         });
         const toggleLabel = el("label", "", { for: toggle.id });
         toggleLabel.append(toggle, document.createTextNode(t.quick));
-        fields.prepend(toggleLabel, quickFields);
+        fields.insertBefore(toggleLabel, inputFields);
+        fields.insertBefore(quickFields, inputFields);
       }
       let lineup;
       if (options?.lineups.length) {
@@ -178,6 +200,18 @@ export function performanceAction({ language, action, request, readOptions, perf
         lineup.append(el("option", t.noLineup, { value: "" }));
         for (const row of options.lineups) lineup.append(el("option", row.name, { value: row.id }));
         fields.append(el("label", t.lineup, { for: lineup.id }), lineup);
+      }
+      const copyOptions = {};
+      if (source) {
+        for (const key of ["copy_lineup", "copy_setlist", "copy_timing"]) {
+          if (key === "copy_timing" && !source.has_timing) continue;
+          const checkbox = el("input", "", { type: "checkbox", id: `performance-${key}` });
+          checkbox.checked = key !== "copy_timing";
+          const label = el("label", "", { for: checkbox.id });
+          label.append(checkbox, t[key]);
+          copyOptions[key] = checkbox;
+          fields.append(label);
+        }
       }
       const actions = el("div", "", { class: "performance-actions" });
       actions.append(el("button", action === "create" ? t.reviewCreate : t.preview, { type: "submit", class: "primary" }));
@@ -192,11 +226,16 @@ export function performanceAction({ language, action, request, readOptions, perf
         event.preventDefault();
         const values = quick?.required ? { quick: quick.value } : Object.fromEntries(new FormData(form));
         if (action === "create") {
-          if (!quick.required) {
+          if (!quick?.required) {
             values.city = choices.city();
             values.performance_type = choices.performance_type();
           }
-          values.lineup = lineup?.value || (quick.required ? "named" : "none");
+          values.lineup = lineup?.value || (quick?.required ? "named" : "none");
+        }
+        if (source) {
+          values.source = source.id;
+          for (const key of ["copy_timing", "copy_lineup", "copy_setlist"])
+            values[key] = !!copyOptions[key]?.checked;
         }
         begin({ action, ...target, ...values });
       });

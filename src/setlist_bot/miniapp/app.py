@@ -27,6 +27,7 @@ from setlist_bot.application.workspace_roster import WorkspaceRoster
 from setlist_bot.application.workspace_setlists import WorkspaceSetlists
 from setlist_bot.application.workspace_staffing import WorkspaceStaffing
 from setlist_bot.application.workspace_team import WorkspaceTeam, text_field
+from setlist_bot.application.workspace_timing import WorkspaceTiming
 from setlist_bot.domain.entities import Confirmation, User, now
 from setlist_bot.domain.miniapp_auth import verify_init_data
 from setlist_bot.domain.rules import AppError, require
@@ -124,6 +125,7 @@ async def asset(request: web.Request) -> web.Response:
         "shared-setlist.js": "text/javascript",
         "workspace-export.js": "text/javascript",
         "workspace-performances.js": "text/javascript",
+        "workspace-timing.js": "text/javascript",
         "workspace-band-settings.js": "text/javascript",
         "workspace-band-trash.js": "text/javascript",
         "workspace-team.js": "text/javascript",
@@ -410,6 +412,24 @@ async def api(request: web.Request) -> web.Response:
                 return web.json_response(
                     await Workspace(uow.store, user).performances(
                         UUID(payload["band"]), past=past == "1", page=page
+                    )
+                )
+            if operation == "timing" and request.method == "GET":
+                return web.json_response(
+                    await WorkspaceTiming(uow.store, user).view(
+                        UUID(payload["performance"]), UUID(payload["band"])
+                    )
+                )
+            if operation == "performance_history" and request.method == "GET":
+                page = int(payload.get("page", "0"))
+                require(0 <= page <= 10000, "input")
+                return web.json_response(
+                    await WorkspacePerformances(uow.store, user).history(
+                        UUID(payload["band"]),
+                        page,
+                        timing_for=UUID(payload["performance"])
+                        if payload.get("performance")
+                        else None,
                     )
                 )
             if operation == "performance_options" and request.method == "GET":

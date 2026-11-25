@@ -678,3 +678,40 @@ pre {
   padding: 4px 8px;
   font-variant-numeric: tabular-nums;
 }
+
+.performance-details-nav > * { flex: 1 1 0; }
+.timing-fields {
+  display: grid;
+  gap: 8px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-inline-size: 0;
+}
+.timing-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  color: var(--text);
+}
+.timing-table th {
+  color: var(--hint);
+  text-align: start;
+  font-size: .875rem;
+}
+.timing-table :is(th, td) {
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.timing-table :is(th, td):first-child {
+  width: 115px;
+  font-variant-numeric: tabular-nums;
+}
+.timing-edit-table input:not([type="checkbox"]) {
+  min-inline-size: 0;
+  padding-inline: 6px;
+}
+.timing-end-label { display: block; font-size: .8rem; color: var(--hint); margin-block: 4px; }
+.timing-edit-table button { min-inline-size: 44px; }

@@ -45,6 +45,7 @@ from setlist_bot.application.workspace_schedule import (
 from setlist_bot.application.workspace_setlists import SETLIST_SESSION, WorkspaceSetlists
 from setlist_bot.application.workspace_staffing import WorkspaceStaffing
 from setlist_bot.application.workspace_team import TEAM_SESSION, WorkspaceTeam
+from setlist_bot.application.workspace_timing import WorkspaceTiming
 from setlist_bot.domain.entities import (
     CatalogProposal,
     Concert,
@@ -67,6 +68,7 @@ CATALOG_OPERATIONS = {
     "shared_action": "miniapp_shared",
     "export_action": "miniapp_export",
     "performance_action": "miniapp_performance",
+    "timing_action": "miniapp_timing",
     "band_settings_save": BAND_SETTINGS_KIND,
     "team_action": "miniapp_team",
     "staff_action": "miniapp_staff",
@@ -279,7 +281,13 @@ class MiniCatalog:
             team_command = WorkspaceTeam.command(payload, personal=personal)
             if not personal and team_command["action"] != "request_roles":
                 await self.drafts.groups.access(group_id, admin=True)
-        elif operation not in ("catalog_save", "shared_action", "export_action", *gig_operations):
+        elif operation not in (
+            "catalog_save",
+            "shared_action",
+            "export_action",
+            "timing_action",
+            *gig_operations,
+        ):
             await self.drafts.groups.access(group_id, admin=True)
         identifier, fingerprint = self.request_identity(session, payload)
         previous = await self.previous(session, identifier, kind, fingerprint)
@@ -329,6 +337,12 @@ class MiniCatalog:
             details = {"shared": shared}
         elif operation == "export_action":
             details = {"export": WorkspaceExports.command(payload), "bot_username": bot_username}
+        elif operation == "timing_action":
+            require(concert is None, "input")
+            details = {
+                "timing": await WorkspaceTiming(self.store, self.user).command(group_id, payload)
+            }
+            expires = min(expires, now() + timedelta(minutes=15))
         elif operation == "performance_action":
             require(concert is None, "input")
             details = {"performance": WorkspacePerformances.command(payload)}
@@ -654,6 +668,13 @@ class MiniCatalog:
             ).apply(group_id, concert.id, data["export"], pdf)
             row.command = json.dumps({**data, "status": "saved", "result": result_export})
             return result_export
+        if data["kind"] == "miniapp_timing":
+            require(group_id is not None and concert is None, "miniapp_expired")
+            result_timing = await WorkspaceTiming(self.store, self.user).apply(
+                group_id, data["timing"]
+            )
+            row.command = json.dumps({**data, "status": "saved", "result": result_timing})
+            return result_timing
         if data["kind"] == "miniapp_performance":
             require(concert is None, "miniapp_expired")
             manager = WorkspacePerformances(self.store, self.user)

@@ -1,3 +1,4 @@
+import { timingLabel } from "./workspace-timing.js";
 import { withBotLabels } from "./bot-labels.js";
 import { clock } from "./model.js";
 import { pdfTitle, mountPdfExport } from "./workspace-export.js";
@@ -51,7 +52,7 @@ function button(label, click, primary = false) {
   return node;
 }
 
-export function showGigs({ root, data, language, dateText, invitationUrl, setlistUrl, historyUrl, request, requestFor, managedUrl, options, refresh, status }) {
+export function showGigs({ root, data, language, dateText, invitationUrl, setlistUrl, timingUrl, historyUrl, request, requestFor, managedUrl, options, refresh, status }) {
   const t = words[language];
   const statusLabel = value => t[value === "confirmed" ? "confirmedStatus" : value] || t.inactive;
 
@@ -122,6 +123,7 @@ export function showGigs({ root, data, language, dateText, invitationUrl, setlis
       el("p", [row.role, statusLabel(row.status)].join(" · ")));
     if (row.info) root.append(el("p", row.info, { class: "performance-info" }));
     if (row.setlist) root.append(el("a", t.setlist, { href: setlistUrl }));
+    if (row.status === "confirmed") root.append(el("a", timingLabel(language), { href: timingUrl(row) }));
     const actions = el("div", "", { class: "toolbar" });
     for (const answer of row.answers)
       actions.append(button(t[answer === "conditional" ? "tentative" : answer], () => reply(row, answer), answer === "yes"));

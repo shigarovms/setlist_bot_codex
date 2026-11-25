@@ -128,6 +128,12 @@ BOT_BUTTONS = {
         "approveReplacement": "staff_approve_swap",
         "confirm": "confirm_button",
     },
+    "workspace-timing": {
+        "title": "timing_title",
+        "preliminary": "timing_preliminary",
+        "empty": "timing_empty",
+        "notify": "timing_notify",
+    },
     "workspace-performances": {
         "create": "new_concert",
         "update": "concert_settings",

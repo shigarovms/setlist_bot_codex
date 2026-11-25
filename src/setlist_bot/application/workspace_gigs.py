@@ -213,6 +213,8 @@ class WorkspaceGigs:
             "language": self.user.language,
             "band": group.name,
             "invitation": {
+                "performance": str(scope.event.id),
+                "band_id": str(scope.group.id),
                 "id": str(row.id),
                 "version": row.version,
                 "title": event.title,

@@ -3,6 +3,7 @@ import { clock, numbered } from "./model.js";
 import { repertoireImport } from "./repertoire-import.js";
 import { repertoireMusic } from "./repertoire-music.js";
 import { mountSharedSetlist } from "./shared-setlist.js";
+import { showTiming, timingLabel } from "./workspace-timing.js";
 import { performanceAction, performanceLabel } from "./workspace-performances.js";
 import { bandSettingsTitle, showBandSettings } from "./workspace-band-settings.js";
 import { bandDeleteButton, bandTrashTitle, showBandTrash } from "./workspace-band-trash.js";
@@ -140,8 +141,9 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
     ? workspaceParams.get("section") : "schedule";
   const scheduleSettings = gigs && !gigInvitation && ["busy", "calendar"].includes(gigSection);
   const managedPage = workspaceParams.get("from") === "managed" ? workspaceParams.get("managed_page") || "0" : null;
-  const performance = band && ["performance", "lineup"].includes(view) && workspaceParams.get("performance");
+  const performance = band && ["performance", "lineup", "timing"].includes(view) && workspaceParams.get("performance");
   const roster = performance && view === "lineup";
+  const timing = performance && view === "timing";
   const trash = band && workspaceParams.get("view") === "performance-trash";
   const repertoire = band && workspaceParams.get("view") === "repertoire";
   const team = band && workspaceParams.get("view") === "team";
@@ -170,6 +172,11 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
     if (setlist) target.set("setlist", "1");
     return `${bandUrl(null, "0", index)}&${target}${scheduleOrigin}`;
   }
+  const timingBack = () => workspaceParams.get("invitation")
+    ? gigsUrl("schedule", 0, workspaceParams.get("invitation"))
+    : workspaceParams.get("from") === "notification" ? bandUrl()
+      : workspaceParams.has("assigned") ? bandUrl(band, past, page)
+      : withManagedOrigin(performanceUrl(band, performance, past, page));
   function performanceParent() {
     return managedPage === null ? bandUrl(band, past, page) : gigsUrl("managed", managedPage);
   }
@@ -238,6 +245,7 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
     onBack?.(() => {
       if (gigs) location.assign(gigSetlist ? gigsUrl(gigSection, page, gigInvitation)
         : gigInvitation ? gigsUrl(gigSection, page) : scheduleSettings ? gigsUrl() : scheduleParent());
+      else if (timing) location.assign(timingBack());
       else if (roster) location.assign(withManagedOrigin(performanceUrl(band, performance, past, page)));
       else if (performance) location.assign(performanceParent());
       else if (bandSettings) location.assign(bandUrl(band, past, page));
@@ -259,6 +267,7 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
       else if (scheduleSettings) data = await openAccount();
       else if (gigs) data = gigInvitation ? await api(gigSetlist ? "gig_setlist" : "gig_card", { invitation: gigInvitation })
         : await api("my_gigs", { section: gigSection, page });
+      else if (timing) data = await api("timing", { band, performance });
       else if (roster) data = await api("performance_roster", { band, performance });
       else if (performance) data = await api("performance", { band, performance });
       else if (bandSettings) data = await api("band_settings", { band });
@@ -307,6 +316,10 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
         });
         showPages(data.has_next, bandTrashUrl);
       }
+      else if (timing) showTiming({ root: content, data, performance, back: timingBack(),
+        request: catalogApi, readHistory: index => api("performance_history", { band, performance, page: index }),
+        refresh: async message => { await load(); status.textContent = message; },
+      });
       else if (roster) showPerformanceRoster(data);
       else if (performance) showPerformance(data);
       else if (bandSettings) {
@@ -476,7 +489,9 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
     showGigs({
       root: content, data, language, dateText, refresh: load,
       invitationUrl: gigSection === "history" ? null : id => gigsUrl(gigSection, page, id),
-      setlistUrl: gigsUrl(gigSection, page, gigInvitation, true), historyUrl: gigsUrl("history"),
+      setlistUrl: gigsUrl(gigSection, page, gigInvitation, true),
+      timingUrl: row => `${bandUrl(row.band_id)}&view=timing&performance=${row.performance}&invitation=${row.id}`,
+      historyUrl: gigsUrl("history"),
       request: gigApi, options: () => api("export_options", { invitation: gigInvitation }),
       requestFor: invitation => (operation, payload, method) => gigApi(operation, payload, method, invitation),
       managedUrl: row => `${performanceUrl(row.band_id, row.id, "0", 0)}&from=managed&managed_page=${page}${scheduleOrigin}`,
@@ -516,6 +531,13 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
       actions.append(managePerformance("create"), element("a", performanceLabel(language, "trash"),
         { href: `${bandUrl(band, past)}&view=performance-trash` }));
       content.append(actions);
+    }
+    if (data.timing_assignments?.length) {
+      content.append(element("h3", timingLabel(language)));
+      const assigned = element("nav", "", { class: "workspace-nav" });
+      for (const event of data.timing_assignments)
+        assigned.append(element("a", event.label, { href: `${bandUrl(band)}&view=timing&performance=${event.id}&assigned=1` }));
+      content.append(assigned);
     }
     if (!data.performances.length) status.textContent = t("noPerformances");
     const list = element("ul", "", { class: "workspace-list" });
@@ -620,6 +642,7 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
     return performanceAction({
       action, performance: info, language, dateText, request: catalogApi,
       readOptions: () => api("performance_options", { band }),
+      readHistory: page => api("performance_history", { band, page }),
       onDone: result => {
         const tab = result.past ? "1" : "0";
         if (action === "delete") location.assign(managedPage === null ? bandUrl(band, past) : performanceParent());
@@ -655,9 +678,12 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
     content.append(nav, element("h2", info.title || t("performance")),
       element("p", [dateText(info.date), info.city, info.type].filter(Boolean).join(" · ")));
     if (info.info) content.append(element("p", info.info, { class: "performance-info" }));
-    if (data.admin) {
-      content.append(managePerformance("update", info));
-    }
+    const details = element("nav", "", { class: "workspace-nav performance-details-nav" });
+    if (data.admin) details.append(managePerformance("update", info));
+    if (data.can_view_timing) details.append(element("a", timingLabel(language), {
+      href: withManagedOrigin(`${bandUrl(band, past, page)}&view=timing&performance=${info.id}`),
+    }));
+    if (details.childElementCount) content.append(details);
     content.append(element("h3", t("shared")),
       element("p", `${t(list.approved ? "approvedVersion" : "workingVersion")} · ${t("version")} ${list.version}`));
     const timing = [`${t("total")} ${clock(list.seconds)}`];

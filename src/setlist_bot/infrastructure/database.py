@@ -268,6 +268,8 @@ table(
     col("city", String(200), server_default=""),
     col("extra_info", Text, server_default=""),
     col("lineup_name", String(100), server_default=""),
+    col("timing", JSONB, server_default=text("'{}'::jsonb")),
+    col("template_source_id", Uuid, nullable=True),
     col("lineup_version", Integer, server_default="0"),
     col("metadata_version", Integer, server_default="0"),
     CheckConstraint(

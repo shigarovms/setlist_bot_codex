@@ -8,7 +8,8 @@ from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.application.workspace_setlists import revision_token
-from setlist_bot.domain.concerts import today
+from setlist_bot.application.workspace_timing import participants
+from setlist_bot.domain.concerts import concert_label, today
 from setlist_bot.domain.entities import (
     CatalogProposal,
     Concert,
@@ -62,12 +63,24 @@ class Workspace:
             group_id=group_id,
         )
         member = (await self.store.find(Membership, group_id=group_id, user_id=self.user.id))[0]
+        assigned = []
+        if member.role != "admin" and not past and page == 0:
+            assigned = [
+                event
+                for event in await self.store.find(Concert, group_id=group.id, deleted_at=None)
+                if event.date >= today() and event.timing.get("responsible") == str(self.user.id)
+            ]
+            assigned.sort(key=lambda event: (event.date, event.id))
         return {
             "language": self.user.language,
             "band": group.name,
             "can_edit_draft": can_edit,
             "admin": member.role == "admin",
             "has_next": len(rows) > PAGE_SIZE,
+            "timing_assignments": [
+                {"id": str(event.id), "label": concert_label(event, self.user.language)}
+                for event in assigned
+            ],
             "performances": [
                 {
                     "id": str(row.id),
@@ -106,6 +119,11 @@ class Workspace:
                 "version": concert.metadata_version,
                 "epoch": concert.lifecycle_version,
             },
+            "can_view_timing": (
+                member.role == "admin"
+                or concert.timing.get("responsible") == str(self.user.id)
+                or self.user.id in await participants(self.store, group, concert)
+            ),
             "can_edit_draft": await can_open_draft(groups, group_id),
             "admin": member.role == "admin",
             "setlist": {
