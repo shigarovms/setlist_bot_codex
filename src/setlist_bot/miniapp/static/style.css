@@ -715,3 +715,8 @@ pre {
 }
 .timing-end-label { display: block; font-size: .8rem; color: var(--hint); margin-block: 4px; }
 .timing-edit-table button { min-inline-size: 44px; }
+
+.performance-readiness .workspace-list {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 225px), 1fr));
+}
+.performance-readiness .workspace-list li { padding-block: 4px; }

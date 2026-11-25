@@ -7,6 +7,8 @@ from setlist_bot.application.catalog import SONG_FIELDS, Catalog, song_data
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
+from setlist_bot.application.workspace_replacements import active_replacements
+from setlist_bot.application.workspace_roster import WorkspaceRoster
 from setlist_bot.application.workspace_setlists import revision_token
 from setlist_bot.application.workspace_timing import participants
 from setlist_bot.domain.concerts import concert_label, today
@@ -105,6 +107,43 @@ class Workspace:
             )
         )[0]
         items = flat_content(snapshot)["blocks"][0]["items"]
+        readiness = None
+        if member.role == "admin":
+            roster = WorkspaceRoster(self.store, self.user)
+            all_slots = await roster.slots(concert)
+            slots = [slot for slot in all_slots if slot.required]
+            confirmed = {
+                invite.slot_id: invite.id
+                for invite in await roster.active(concert, group)
+                if invite.status == "confirmed"
+            }
+            pending = [
+                row
+                for row in await active_replacements(self.store, concert)
+                if row.source_id in confirmed.values()
+            ]
+            filled = sum(slot.id in confirmed for slot in slots)
+            timing_ready = bool(concert.timing.get("rows")) and not concert.timing.get(
+                "preliminary"
+            )
+            lineup_ready = concert.lineup_optional or (bool(all_slots) and filled == len(slots))
+            readiness = {
+                "ready": lineup_ready and not pending and approved and timing_ready,
+                "slots": len(slots),
+                "configured": bool(all_slots),
+                "confirmed": filled,
+                "optional": concert.lineup_optional,
+                "missing_slot": next(
+                    (str(slot.id) for slot in slots if slot.id not in confirmed), None
+                ),
+                "replacements": len(pending),
+                "replacement": str(pending[0].id) if pending else None,
+                "timing": "ready"
+                if timing_ready
+                else "preliminary"
+                if concert.timing.get("rows")
+                else "empty",
+            }
         return {
             "language": self.user.language,
             "band": group.name,
@@ -119,6 +158,7 @@ class Workspace:
                 "version": concert.metadata_version,
                 "epoch": concert.lifecycle_version,
             },
+            "readiness": readiness,
             "can_view_timing": (
                 member.role == "admin"
                 or concert.timing.get("responsible") == str(self.user.id)

@@ -16,6 +16,9 @@ const words = withBotLabels("workspace-roster", {
     force: "Подтверждаю действие при конфликте занятости",
     pick: "Проверить", myself: "Назначить себя",
     outside: "Найти по @username", none: "Подходящих знакомых исполнителей пока нет.",
+    optionalTeam: "Состав не требуется", requireTeam: "Состав требуется",
+    nominated: "Предложенный кандидат", checkCandidate: "Проверить кандидата",
+    link: "Создать ссылку-приглашение", copyLink: "Скопировать ссылку",
     waitingReplacement: "Ищем подмену", substituted: "Подмена утверждена",
     candidateInvited: "Кандидат на подмену", sendReplacement: "Пригласить на подмену",
     assignReplacement: "Встать на подмену", cancelReplacementHint: "Приглашения кандидатам будут отозваны.",
@@ -36,6 +39,9 @@ const words = withBotLabels("workspace-roster", {
     force: "Continue despite the availability conflict",
     pick: "Check", myself: "Assign myself",
     outside: "Find by @username", none: "No matching performers in your directory yet.",
+    optionalTeam: "Lineup not required", requireTeam: "Lineup required",
+    nominated: "Suggested candidate", checkCandidate: "Check candidate",
+    link: "Create invitation link", copyLink: "Copy link",
     waitingReplacement: "Looking for a substitute", substituted: "Substitution approved",
     candidateInvited: "Substitute candidate", sendReplacement: "Invite substitute",
     assignReplacement: "Take over the role", cancelReplacementHint: "Invitations to candidates will be withdrawn.",
@@ -196,9 +202,50 @@ export function showRoster({ root, data, language, dateText, request, preview, r
     candidates(loading);
   }
 
+  function checkSuggested(slot, replacement) {
+    const panel = modal(t.nominated);
+    const lookup = button(t.checkCandidate, async () => {
+      lookup.disabled = true;
+      try {
+        const person = await recipient(replacement.candidate);
+        if (!panel.dialog.open) return;
+        panel.send(lookup, payload("review", {
+          ...target(slot), replacement: replacement.id, person: person.id,
+          reference: replacement.candidate,
+        }), request, result => showReview(panel, result));
+      } catch (error) {
+        if (!panel.dialog.open) return;
+        if (error.data?.error !== "admin_user_unknown") {
+          panel.message.textContent = error.message;
+          lookup.disabled = false;
+          return;
+        }
+        const link = button(t.link, event => panel.send(
+          event.currentTarget, payload("replacement_link", target(replacement)), request,
+          result => {
+            const href = `https://t.me/${data.bot_username}?start=${result.replacement_link}`;
+            const value = el("input", "", { type: "url", value: href, readonly: "",
+              "aria-label": t.link });
+            const copy = button(t.copyLink, () => {
+              value.select();
+              navigator.clipboard?.writeText(href).catch(() => {});
+            }, true);
+            panel.body.replaceChildren(el("p", replacement.candidate), value, copy);
+          },
+        ), true);
+        panel.body.replaceChildren(el("p", replacement.candidate), link);
+      }
+    }, true);
+    panel.body.append(el("p", replacement.candidate), lookup);
+    lookup.click();
+  }
+
   root.append(el("h2", t.title), el("p", [data.title, dateText(data.date), data.name].filter(Boolean).join(" · ")));
   if (data.admin) {
     const menu = el("div", "", { class: "toolbar" });
+    const teamMode = data.lineup_optional ? "requireTeam" : "optionalTeam";
+    menu.append(button(t[teamMode], () => confirm(teamMode,
+      payload("lineup_optional", { required: data.lineup_optional }), data.title)));
     if (data.can_prepare) menu.append(button(t.prepare, () => edit("prepare"), true));
     if (data.slots.length < 40) menu.append(button(t.add, () => edit("add")));
     if (data.templates.length) menu.append(button(t.apply, applyTemplate));
@@ -208,7 +255,7 @@ export function showRoster({ root, data, language, dateText, request, preview, r
   if (!data.slots.length) root.append(el("p", t[data.admin ? "empty" : "noSlots"]));
   const list = el("ul", "", { class: "workspace-list" });
   for (const slot of data.slots) {
-    const card = el("li");
+    const card = el("li", "", { id: `role-${slot.id}` });
     card.append(el("h3", slot.role));
     if (!slot.required) card.append(el("p", t.optional));
     else if (!slot.invitations.length) {
@@ -228,6 +275,12 @@ export function showRoster({ root, data, language, dateText, request, preview, r
         const controls = el("div", "", { class: "toolbar" });
         if (data.upcoming && row.status === "confirmed") {
           if (row.request) {
+            line.id = `replacement-${row.request.id}`;
+            if (row.request.candidate) {
+              line.append(` · ${t.nominated} ${row.request.candidate}`);
+              if (!slot.invitations.some(invitation => invitation.replacement))
+                controls.append(button(t.checkCandidate, () => checkSuggested(slot, row.request), true));
+            }
             controls.append(button(t.findReplacement, () => choose(slot, row.request)),
               button(t.cancelReplacement, () => confirm(
                 "cancelReplacement", payload("cancel_replacement", target(row.request)), row.name,

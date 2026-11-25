@@ -462,6 +462,8 @@ async def invitation_view(
         # EN: Keep notification actions contextual, even when actor and invitee coincide.
         buttons = [(c.t("staff_open_lineup"), f"sf_lineup {event.id.hex}")]
         for request in await c.store.find(StaffReplacement, source_id=row.id, status="pending"):
+            if request.candidate_ref:
+                text += "\n" + c.t("staff_proposed_candidate", name=f"@{request.candidate_ref}")
             buttons.insert(
                 0,
                 (
@@ -480,6 +482,13 @@ async def invitation_view(
                 ),
             )
     response = Response(text, buttons)
+    if admin_notice and c.miniapp_public_base_url:
+        key = "miniapp_admin_roster"
+        response.buttons.insert(0, (c.t("staff_open_in_app"), key))
+        response.web_apps[key] = (
+            c.miniapp_public_base_url.rstrip("/")
+            + f"/miniapp/?workspace=1&band={group.id}&view=lineup&performance={event.id}"
+        )
     if (
         own
         and not admin_notice

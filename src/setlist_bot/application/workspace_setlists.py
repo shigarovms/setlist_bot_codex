@@ -181,11 +181,16 @@ class WorkspaceSetlists:
                 and item["approved"] == approved
                 and (approved or item["snapshot"] == snapshot)
             ):
+                requester = UUID(item["requester_id"])
+                if not await self.store.find(
+                    Membership, group_id=group_id, user_id=requester, status="active"
+                ) or concert_id not in await self.store.visible_concert_ids(requester, group_id):
+                    continue
                 requests.append(
                     {
                         "id": str(row.id),
                         "operation": item["operation"],
-                        "requester": await self.groups.name(group_id, UUID(item["requester_id"])),
+                        "requester": await self.groups.name(group_id, requester),
                     }
                 )
         proposals = await self.store.find(

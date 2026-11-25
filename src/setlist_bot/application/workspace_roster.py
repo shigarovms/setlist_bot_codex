@@ -2,12 +2,12 @@
 
 import json
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.ports import Store
 from setlist_bot.application.staffing import OPEN, Staffing
-from setlist_bot.application.user_lookup import checked_target
+from setlist_bot.application.user_lookup import checked_target, known_user
 from setlist_bot.application.workspace_replacements import (
     active_replacements,
     replacement_data,
@@ -30,7 +30,7 @@ from setlist_bot.domain.entities import (
     User,
     now,
 )
-from setlist_bot.domain.rules import require
+from setlist_bot.domain.rules import AppError, require
 from setlist_bot.domain.telegram_identity import fallback_profile, person_caption
 
 ROSTER_KIND = "miniapp_roster"
@@ -126,6 +126,7 @@ class WorkspaceRoster:
             "version": event.lineup_version,
             "admin": admin,
             "upcoming": event.date >= today(),
+            "lineup_optional": event.lineup_optional,
             "can_prepare": admin
             and all(slot.required for slot in rows)
             and not any(r.status in OPEN | {"confirmed"} for r in invitations),
@@ -180,6 +181,8 @@ class WorkspaceRoster:
                 "prepare",
                 "add",
                 "apply_template",
+                "lineup_optional",
+                "replacement_link",
                 "review",
                 "send",
                 *SLOT_ACTIONS,
@@ -199,13 +202,14 @@ class WorkspaceRoster:
         version = body.get("version")
         require(type(version) is int, "input")
         command: dict[str, Any] = {"action": action, "version": version}
-        if action in SLOT_ACTIONS | INVITE_ACTIONS | REPLACEMENT_ACTIONS | {"apply_template"} or (
-            action == "review" and body.get("target")
-        ):
+        if action in SLOT_ACTIONS | INVITE_ACTIONS | REPLACEMENT_ACTIONS | {
+            "apply_template",
+            "replacement_link",
+        } or (action == "review" and body.get("target")):
             command["target"] = str(UUID(text_field(body, "target", 36)))
             require(type(body.get("expected")) is int, "input")
             command["expected"] = body["expected"]
-        if action == "needed":
+        if action in ("needed", "lineup_optional"):
             require(type(body.get("required")) is bool, "input")
             command["required"] = body["required"]
         if action in ("prepare", "add"):
@@ -336,6 +340,7 @@ class WorkspaceRoster:
                     for slot, person in targets
                 ],
                 "availability": {str(person): status(*conflicts[person]) for person in people},
+                **({"reference": command["reference"]} if "reference" in command else {}),
                 **(
                     {"replacement": str(replacement.id), "source": str(source.user_id)}
                     if replacement is not None and source is not None
@@ -374,6 +379,8 @@ class WorkspaceRoster:
         require("busy" not in availability.values() or command["force"], "staff_busy")
         replacement = UUID(plan["replacement"]) if plan.get("replacement") else None
         for target in plan["targets"]:
+            if reference := plan.get("reference"):
+                await checked_target(self.store, UUID(target["person"]), reference)
             invite = await self.staffing.invite(
                 UUID(target["slot"]),
                 UUID(target["person"]),
@@ -442,6 +449,35 @@ class WorkspaceRoster:
         if action == "send":
             return await self.send(event, command, await self.send_plan(request))
         require(event.lineup_version == command["version"], "input_expired")
+        if action == "lineup_optional":
+            optional = not command["required"]
+            if event.lineup_optional != optional:
+                event.lineup_optional = optional
+                event.lineup_version += 1
+            return {}
+        if action == "replacement_link":
+            pending, source = await self.open_replacement(event, group, UUID(command["target"]))
+            slot = await self.store.get(GigSlot, source.slot_id)
+            require(
+                pending.version == command["expected"]
+                and bool(pending.candidate_ref)
+                and slot.required
+                and not slot.removed
+                and not any(
+                    row.replacement_id == pending.id for row in await self.active(event, group)
+                ),
+                "input_expired",
+            )
+            try:
+                await known_user(self.store, f"@{pending.candidate_ref}")
+            except AppError as exc:
+                if exc.code != "admin_user_unknown":
+                    raise
+            else:
+                raise AppError("conflict")
+            pending.candidate_link_by = self.user.id
+            pending.candidate_link_token = pending.candidate_link_token or uuid4()
+            return {"replacement_link": f"swap_{pending.candidate_link_token.hex}"}
         if action == "review":
             return await self.review(event, group, command)
         if action == "candidates":

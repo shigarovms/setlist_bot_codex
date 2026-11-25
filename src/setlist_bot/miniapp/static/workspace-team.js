@@ -169,7 +169,7 @@ export function teamView({ root, language, requests, refresh, status, dateText, 
     root.append(menu);
     const list = el("ul", "", { class: "workspace-list" });
     for (const row of data.members) {
-      const item = el("li");
+      const item = el("li", "", { id: `team-${row.id}` });
       const heading = el("h3");
       heading.append(performerCaption(row));
       item.append(heading, el("p", `${t[row.right]} · ${t[row.status]}`));
@@ -238,7 +238,7 @@ export function teamView({ root, language, requests, refresh, status, dateText, 
     const list = el("ul", "", { class: "workspace-list" });
     if (!rows.length) root.append(el("p", t.empty));
     for (const row of rows) {
-      const item = el("li");
+      const item = el("li", "", { id: `team-${row.id}` });
       item.append(el("h3", row.band), el("p", t[row.already_member ? "addIntro" : "inviteIntro"]),
         el("p", `${t.roles} · ${row.roles.join(", ")}`));
       const ops = el("div", "", { class: "toolbar" });

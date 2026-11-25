@@ -69,8 +69,7 @@ class WorkspaceTeam:
             if member.invitation is None:
                 continue
             try:
-                member, group = await self.own_membership(member.id)
-                await self.team.validate(member)
+                group = await self.team.validate(member, lock=False)
             except AppError as exc:
                 if exc.code not in ("input_expired", "in_trash"):
                     raise

@@ -70,8 +70,8 @@ class Team:
         record_activity(self.store, self.user, "team_invited", member.id)
         return member
 
-    async def validate(self, member: Membership) -> Group:
-        group = await self.store.get(Group, member.group_id, lock=True)
+    async def validate(self, member: Membership, *, lock: bool = True) -> Group:
+        group = await self.store.get(Group, member.group_id, lock=lock)
         data = member.invitation
         require(data is not None, "input_expired")
         assert data is not None

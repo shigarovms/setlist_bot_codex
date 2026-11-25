@@ -123,6 +123,7 @@ class Concert(Entity):
     timing: dict[str, Any] = field(default_factory=dict)
     template_source_id: UUID | None = None
     lineup_name: str = ""
+    lineup_optional: bool = False
     lineup_version: int = 0
     metadata_version: int = 0
     deleted_at: datetime | None = None
@@ -453,6 +454,9 @@ class GigInvitation(Entity):
 
 @dataclass(kw_only=True)
 class StaffReplacement(Entity):
+    candidate_ref: str = ""
+    candidate_link_by: UUID | None = None
+    candidate_link_token: UUID | None = None
     group_id: UUID
     concert_id: UUID
     source_id: UUID

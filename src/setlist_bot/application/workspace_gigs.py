@@ -27,6 +27,7 @@ from setlist_bot.domain.entities import (
     now,
 )
 from setlist_bot.domain.rules import flat_content, is_pause, require, totals
+from setlist_bot.domain.telegram_identity import normalized_username
 
 GIG_SESSION = "miniapp_gig"
 GIG_REPLY = "miniapp_gig_reply"
@@ -339,6 +340,10 @@ class WorkspaceGigs:
             require(target is None or isinstance(target, str), "input")
             if target is not None:
                 result["target"] = str(UUID(target))
+            candidate = body.get("candidate")
+            if candidate:
+                require(isinstance(candidate, str) and candidate.startswith("@"), "input")
+                result["candidate"] = normalized_username(candidate)
         else:
             replacement, expected = body.get("replacement"), body.get("expected")
             require(isinstance(replacement, str) and type(expected) is int, "input")
@@ -364,6 +369,8 @@ class WorkspaceGigs:
             # Keep the conditional booking read-only here, including across bands.
             require(target.date == source.date, "input_expired")
             target_id = target.id
-        pending = await self.staffing.request_replacement(source.id, target_id)
+        pending = await self.staffing.request_replacement(
+            source.id, target_id, candidate_ref=command.get("candidate", "")
+        )
         require(pending.target_id == target_id, "input_expired")
         return {"replacement_status": "pending", "replacement": replacement_data(pending)}

@@ -52,7 +52,7 @@ function button(title, action, attrs = {}) {
   return node;
 }
 
-export function mountSharedSetlist({ root, data, language, editorButton, read, request, refresh, status }) {
+export function mountSharedSetlist({ root, data, language, editorButton, decision, read, request, refresh, status }) {
   const t = copy[language];
   const shared = data.setlist;
   const actions = el("div", "", { class: "toolbar" });
@@ -130,7 +130,9 @@ export function mountSharedSetlist({ root, data, language, editorButton, read, r
     } catch (error) { if (current()) message.textContent = error.message; }
   }
 
-  async function openRequests() {
+  if (data.admin && decision) void openRequests(decision);
+
+  async function openRequests(focus = null) {
     if (attempt) return;
     const current = open(t.requests);
     message.textContent = t.working;
@@ -140,7 +142,7 @@ export function mountSharedSetlist({ root, data, language, editorButton, read, r
       message.textContent = result.requests.length || result.proposals.length ? "" : t.noRequests;
       const list = el("ul", "", { class: "workspace-list" });
       for (const row of result.requests) {
-        const item = el("li", "");
+        const item = el("li", "", { id: `shared-request-${row.id}` });
         const acceptLabel = row.operation === "approve" ? t.approve : t.reopen;
         item.append(el("p", `${row.requester} · ${row.operation === "approve" ? t.askApprove : t.askReopen}`),
           button(acceptLabel, () => {
@@ -150,12 +152,13 @@ export function mountSharedSetlist({ root, data, language, editorButton, read, r
         list.append(item);
       }
       for (const row of result.proposals) {
-        const item = el("li", "");
+        const item = el("li", "", { id: `shared-request-${row.id}` });
         item.append(el("p", `${t.setlistProposal} · ${row.author} · ${clock(row.seconds)}`),
           button(t.preview, () => openVariant({ ...row, kind: "submission" }, 0, false, true)));
         list.append(item);
       }
       content.append(list);
+      if (focus) document.getElementById(`shared-request-${focus}`)?.scrollIntoView({ block: "center" });
     } catch (error) { if (current()) message.textContent = error.message; }
   }
 

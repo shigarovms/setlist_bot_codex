@@ -346,6 +346,18 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             )
             if launch_mode == "workspace":
                 await browser.wait("document.querySelectorAll('.workspace-list a').length === 2")
+                await browser.wait(
+                    "document.querySelector('a[href*=\"view=inbox\"]')"
+                    "?.textContent.includes(' · 1')"
+                )
+                await browser.js("document.querySelector('a[href*=\"view=inbox\"]').click()")
+                await browser.click_named("#workspace-content a", "Предложение сет-листа")
+                await browser.click_named(".shared-tools button", "Показать вариант")
+                await browser.wait("!!document.querySelector('dialog[open] .shared-setlist')")
+                await browser.js("window.nativeBack()")
+                await browser.click_named("#workspace-content a", "К входящим запросам")
+                await browser.click_named("#workspace-content a", "Мои коллективы")
+                await browser.wait("document.querySelectorAll('.workspace-list a').length === 2")
                 await browser.tap(".workspace-list a")
                 await browser.wait(
                     "document.querySelectorAll('.workspace-list button').length === 2"
@@ -354,6 +366,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.wait(
                     "document.querySelector('.shared-setlist')?.innerText.includes('Комета')"
                 )
+                await browser.wait("!!document.getElementById('readiness-title')")
                 assert await browser.js("""
                     const editor = document.querySelector('#workspace-content button.primary');
                     !!(editor.compareDocumentPosition(document.querySelector('.shared-setlist'))
@@ -1312,7 +1325,10 @@ async def browser_guest_gig(browser, engine, world, origin):
         )
         await browser.click_named(".workspace-list a", "Коллектив А · Второй концерт")
         await browser.click_named("#workspace-content button", "Запросить подмену")
-        await browser.click_named("dialog[open] button", "Подтвердить")
+        await browser.js(
+            "document.getElementById('replacement-candidate').value = '@StageCandidate'"
+        )
+        await browser.click_named("dialog[open] button", "Предложить кандидата")
         await process_catalog_request(engine)
         await browser.wait(
             "document.querySelector('#workspace-content')?.innerText"
@@ -1330,6 +1346,16 @@ async def browser_approve_self_substitution(browser, engine, world, origin):
             f"&view=lineup&performance={world.concert2.id}",
         },
     )
+    await browser.wait(
+        "document.getElementById('workspace-content')?.textContent.includes('@stagecandidate')"
+    )
+    await browser.click_named("#workspace-content button", "Проверить кандидата")
+    await browser.click_named("dialog[open] button", "Создать ссылку-приглашение")
+    await process_catalog_request(engine)
+    await browser.wait(
+        "document.querySelector('dialog[open] input[readonly]')?.value.includes('?start=swap_')"
+    )
+    await browser.click_named("dialog[open] button", "Закрыть")
     await browser.click_named("#workspace-content button", "Подобрать подмену")
     await process_catalog_request(engine)
     await browser.click_named("dialog[open] button", "Назначить себя")

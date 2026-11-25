@@ -6,6 +6,7 @@ import { requestDialog } from "./workspace-request-dialog.js";
 
 const words = withBotLabels("workspace-gigs", {
   ru: {
+    proposeCandidate: "Предложить кандидата", findSomeone: "Попросить подобрать",
     schedule: "Предстоящие",
     invitation: "Приглашение на выступление", back: "К приглашению",
     empty: "В этом разделе пока нет выступлений.", pending: "Ожидает ответа",
@@ -21,6 +22,7 @@ const words = withBotLabels("workspace-gigs", {
     requested: "Запрос сохранён.", withdrawn: "Запрос на подмену отменён.",
   },
   en: {
+    proposeCandidate: "Suggest a candidate", findSomeone: "Ask the admin to find someone",
     schedule: "Upcoming",
     invitation: "Performance invitation", back: "Back to invitation",
     empty: "There are no performances here yet.", pending: "Awaiting your response",
@@ -87,12 +89,26 @@ export function showGigs({ root, data, language, dateText, invitationUrl, setlis
     if (existing) Object.assign(command, { replacement: existing.id, expected: existing.version });
     else if (target) command.target = target;
     panel.body.append(el("p", [source.band || data.band, source.title].filter(Boolean).join(" · ")));
-    panel.body.append(button(t.confirm, event => panel.send(event.currentTarget, command, scopedRequest,
-      async result => {
-        panel.dialog.close();
-        await refresh();
-        status(t[result.replacement_status === "cancelled" ? "withdrawn" : "requested"]);
-      }), true));
+    const submit = (trigger, data) => panel.send(trigger, data, scopedRequest, async result => {
+      panel.dialog.close();
+      await refresh();
+      status(t[result.replacement_status === "cancelled" ? "withdrawn" : "requested"]);
+    });
+    panel.body.append(button(existing ? t.confirm : t.findSomeone, event =>
+      submit(event.currentTarget, command), true));
+    if (!existing) {
+      const form = el("form", "", { class: "workspace-search" });
+      const input = el("input", "", { id: "replacement-candidate", type: "text", maxlength: 33,
+        placeholder: "@username", required: "", autocomplete: "off", autocapitalize: "none",
+        pattern: "@[A-Za-z0-9_]{1,32}" });
+      const propose = el("button", t.proposeCandidate, { type: "submit" });
+      form.append(el("label", t.proposeCandidate, { for: input.id }), input, propose);
+      form.addEventListener("submit", event => {
+        event.preventDefault();
+        submit(propose, { ...command, candidate: input.value });
+      });
+      panel.body.append(form);
+    }
   }
 
   async function pdf() {

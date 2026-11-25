@@ -297,6 +297,15 @@ class Controller:
             return await self.execute("my_gigs")
         if command == "start" and args.startswith("gig_"):
             return await self.execute("sf_view " + args.removeprefix("gig_"))
+        if command == "start" and args.startswith("swap_"):
+            require(self.private, "private_only")
+            from setlist_bot.application.staffing import Staffing
+            from setlist_bot.transport.staffing import invitation_view
+
+            invite = await Staffing(self.store, self.user).claim_replacement(
+                UUID(args.removeprefix("swap_"))
+            )
+            return await invitation_view(self, invite.id)
         if command == "start" and args.startswith("performance_"):
             return await self.execute("my_concert " + args.removeprefix("performance_"))
         if command == "start" and args.startswith("draft_"):

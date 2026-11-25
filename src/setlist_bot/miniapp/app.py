@@ -20,6 +20,7 @@ from setlist_bot.application.workspace_band_settings import WorkspaceBandSetting
 from setlist_bot.application.workspace_band_trash import WorkspaceBandTrash
 from setlist_bot.application.workspace_exports import WorkspaceExports
 from setlist_bot.application.workspace_gigs import WorkspaceGigs
+from setlist_bot.application.workspace_inbox import WorkspaceInbox
 from setlist_bot.application.workspace_music import WorkspaceMusic
 from setlist_bot.application.workspace_performances import WorkspacePerformances
 from setlist_bot.application.workspace_profile import WorkspaceProfile
@@ -131,6 +132,7 @@ async def asset(request: web.Request) -> web.Response:
         "workspace-team.js": "text/javascript",
         "workspace-staffing.js": "text/javascript",
         "workspace-roster.js": "text/javascript",
+        "workspace-inbox.js": "text/javascript",
         "workspace-gigs.js": "text/javascript",
         "workspace-schedule.js": "text/javascript",
         "workspace-profile.js": "text/javascript",
@@ -358,6 +360,8 @@ async def api(request: web.Request) -> web.Response:
                 return web.json_response(
                     await WorkspaceBandTrash(uow.store, user).view(page, PAGE_SIZE)
                 )
+            if operation == "inbox" and request.method == "GET":
+                return web.json_response(await WorkspaceInbox(uow.store, user).view())
             if operation == "team_inbox" and request.method == "GET":
                 return web.json_response(await WorkspaceTeam(uow.store, user).inbox())
             if operation == "team" and request.method == "GET":
@@ -443,11 +447,11 @@ async def api(request: web.Request) -> web.Response:
                     )
                 )
             if operation == "performance_roster" and request.method == "GET":
-                return web.json_response(
-                    await WorkspaceRoster(uow.store, user).view(
-                        UUID(payload["band"]), UUID(payload["performance"])
-                    )
+                roster = await WorkspaceRoster(uow.store, user).view(
+                    UUID(payload["band"]), UUID(payload["performance"])
                 )
+                roster["bot_username"] = settings.bot_username
+                return web.json_response(roster)
             if operation == "performance_trash" and request.method == "GET":
                 page = int(payload.get("page", "0"))
                 if not 0 <= page <= 10000:

@@ -100,7 +100,7 @@ class WorkspaceTiming:
             "epoch": event.lifecycle_version,
             "zone": zone(event),
             "zones": ZONES if editor else [],
-            "preliminary": event.timing.get("preliminary", False),
+            "preliminary": event.timing.get("preliminary", not event.timing.get("rows")),
             "responsible": event.timing.get("responsible", "") if admin else "",
             "members": await self.members(group) if admin else [],
             "admin": admin,

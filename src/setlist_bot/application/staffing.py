@@ -546,6 +546,7 @@ class Staffing:
         *,
         force: bool = False,
         replacement_id: UUID | None = None,
+        require_response: bool = False,
     ) -> GigInvitation:
         people = {user_id}
         if replacement_id:
@@ -595,15 +596,20 @@ class Staffing:
                 and old.date == event.date
                 and old.concert_epoch == event.lifecycle_version
             ):
-                if user_id == self.user.id and old.status in (
-                    "pending",
-                    "reconfirm",
-                    "conditional",
+                if (
+                    not require_response
+                    and user_id == self.user.id
+                    and old.status
+                    in (
+                        "pending",
+                        "reconfirm",
+                        "conditional",
+                    )
                 ):
                     old = await self.respond(
                         old.id, old.version, "yes", force=force, notify_admins=False
                     )
-                if user_id == self.user.id and old.status == "accepted":
+                if not require_response and user_id == self.user.id and old.status == "accepted":
                     return await self.approve_replacement(old.id, old.version, force=force)
                 return old
         busy, _ = await self.conflicts(user_id, event.date, exclude=event.id)
@@ -625,7 +631,7 @@ class Staffing:
         event.lineup_version += 1
         await self.contact(event.group_id, slot.role_id, person.id)
         record_activity(self.store, self.user, "staff_invited", row.id)
-        if user_id == self.user.id:
+        if not require_response and user_id == self.user.id:
             # RU: Назначая себя, администратор уже выразил согласие. Проверки занятости
             # и процедура подмены остаются теми же, повторное личное приглашение не нужно.
             # EN: Self-assignment is consent; reuse transitions without another DM.
@@ -634,7 +640,8 @@ class Staffing:
             if row.status == "accepted":
                 return await self.approve_replacement(row.id, row.version, force=force)
             return row
-        await self.notify(person.id, "invitation", row)
+        if not require_response:
+            await self.notify(person.id, "invitation", row)
         return row
 
     async def invite_defaults(
@@ -731,7 +738,12 @@ class Staffing:
         return row
 
     async def request_replacement(
-        self, source_id: UUID, target_id: UUID | None = None, *, by_admin: bool = False
+        self,
+        source_id: UUID,
+        target_id: UUID | None = None,
+        *,
+        by_admin: bool = False,
+        candidate_ref: str = "",
     ) -> StaffReplacement:
         source = await self.store.get(GigInvitation, source_id)
         await self.store.lock_people({source.user_id})
@@ -745,6 +757,11 @@ class Staffing:
             "forbidden",
         )
         require(self.valid(source, event, group) and event.date >= today(), "input_expired")
+        if candidate_ref:
+            from setlist_bot.domain.telegram_identity import normalized_username
+
+            candidate_ref = normalized_username(candidate_ref)
+            require(candidate_ref != self.user.username and not by_admin, "input")
         if target_id:
             require(not by_admin, "forbidden")
             target = await self.store.get(GigInvitation, target_id)
@@ -759,6 +776,7 @@ class Staffing:
             )
         existing = await self.store.find(StaffReplacement, source_id=source.id, status="pending")
         if existing and existing[0].expires_at > now():
+            require(not candidate_ref or existing[0].candidate_ref == candidate_ref, "conflict")
             return existing[0]
         for expired in existing:
             expired.status = "cancelled"
@@ -768,6 +786,7 @@ class Staffing:
             concert_id=source.concert_id,
             source_id=source.id,
             target_id=target_id,
+            candidate_ref=candidate_ref,
             expires_at=min(
                 now() + timedelta(days=7),
                 datetime.combine(event.date + timedelta(days=1), time(), UTC),
@@ -776,6 +795,49 @@ class Staffing:
         self.store.add(row)
         await self.admin_notice(source, "replacement", replacement=row)
         return row
+
+    async def claim_replacement(self, token: UUID) -> GigInvitation:
+        requests = await self.store.find(StaffReplacement, candidate_link_token=token)
+        require(bool(requests), "input_expired")
+        request = requests[0]
+        issuer_id = request.candidate_link_by
+        require(issuer_id is not None and bool(self.user.username), "input_expired")
+        assert issuer_id is not None
+        source = await self.store.get(GigInvitation, request.source_id)
+        await self.store.lock_people({self.user.id, source.user_id})
+        issuer = await self.store.get(User, issuer_id)
+        staff = Staffing(self.store, issuer)
+        group = await staff.groups.access(request.group_id, admin=True)
+        request = await self.store.get(StaffReplacement, request.id, lock=True)
+        event = await self.store.get(Concert, request.concert_id)
+        source = await self.store.get(GigInvitation, request.source_id, lock=True)
+        require(
+            request.candidate_link_token == token
+            and request.candidate_link_by == issuer_id
+            and request.candidate_ref == self.user.username
+            and request.status == "pending"
+            and request.expires_at > now()
+            and source.status == "confirmed"
+            and self.valid(source, event, group),
+            "input_expired",
+        )
+        slot = await self.store.get(GigSlot, source.slot_id)
+        existing = await self.store.find(GigInvitation, replacement_id=request.id)
+        require(
+            not any(row.status in OPEN and row.user_id != self.user.id for row in existing),
+            "staff_filled",
+        )
+        # The candidate must still confirm, including any conflict, in the standard reply flow.
+        invite = await staff.invite(
+            slot.id,
+            self.user.id,
+            slot.version,
+            force=True,
+            replacement_id=request.id,
+            require_response=True,
+        )
+        request.candidate_link_by = request.candidate_link_token = None
+        return invite
 
     async def approve_replacement(
         self, invitation_id: UUID, expected: int, *, force: bool = False

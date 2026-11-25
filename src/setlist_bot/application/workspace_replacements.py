@@ -9,7 +9,11 @@ from setlist_bot.domain.rules import require
 
 
 def replacement_data(row: StaffReplacement) -> dict[str, Any]:
-    return {"id": str(row.id), "version": row.version}
+    return {
+        "id": str(row.id),
+        "version": row.version,
+        **({"candidate": f"@{row.candidate_ref}"} if row.candidate_ref else {}),
+    }
 
 
 async def active_replacements(
