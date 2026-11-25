@@ -52,7 +52,7 @@ function button(title, action, attrs = {}) {
   return node;
 }
 
-export function mountSharedSetlist({ root, data, language, read, request, refresh, status }) {
+export function mountSharedSetlist({ root, data, language, editorButton, read, request, refresh, status }) {
   const t = copy[language];
   const shared = data.setlist;
   const actions = el("div", "", { class: "toolbar" });
@@ -64,11 +64,13 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
   const check = button(t.check, () => process(), { hidden: "" });
   const dialogCheck = button(t.check, () => process(), { hidden: "" });
   let attempt = null, working = false;
+  let view = 0;
   const close = button(t.close, closeDialog);
   dialog.append(heading, message, content, toolbar, dialogCheck, close);
   root.append(actions, check, dialog);
 
-  if (shared.approved) actions.append(button(pdfTitle(language), () => openExport(shared.version)));
+  if (shared.approved) actions.append(button(t.downloadPdf, () => openExport(shared.version), { class: "primary" }));
+  if (editorButton) actions.append(editorButton);
   actions.append(button(t.variants, () => openVariants()));
   actions.append(button(t.history, () => openVariants(0, true)));
   if (data.admin) actions.append(button(t.requests, () => openRequests()));
@@ -81,8 +83,11 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
   }
 
   function closeDialog() {
-    if (attempt || working) return;
     dialog.close();
+    if (attempt) {
+      status(message.textContent || t.working);
+      check.hidden = working;
+    }
   }
   dialog.addEventListener("cancel", event => { event.preventDefault(); closeDialog(); });
 
@@ -92,15 +97,17 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
     content.replaceChildren();
     toolbar.replaceChildren();
     if (!dialog.open) dialog.showModal();
+    const serial = ++view;
+    return () => dialog.open && view === serial;
   }
 
   async function openVariants(page = 0, history = false) {
     if (attempt) return;
-    open(history ? t.history : t.variants);
+    const current = open(history ? t.history : t.variants);
     message.textContent = t.working;
     try {
       const result = await read(history ? "shared_history" : "shared_variants", { page });
-      if (!dialog.open) return;
+      if (!current()) return;
       message.textContent = result.variants.length ? "" : t.noVariants;
       const list = el("ul", "", { class: "workspace-list" });
       for (const row of result.variants) {
@@ -120,16 +127,16 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
       content.append(list);
       if (page > 0) toolbar.append(button(t.previous, () => openVariants(page - 1, history)));
       if (result.has_next) toolbar.append(button(t.next, () => openVariants(page + 1, history)));
-    } catch (error) { message.textContent = error.message; }
+    } catch (error) { if (current()) message.textContent = error.message; }
   }
 
   async function openRequests() {
     if (attempt) return;
-    open(t.requests);
+    const current = open(t.requests);
     message.textContent = t.working;
     try {
       const result = await read("shared_requests");
-      if (!dialog.open) return;
+      if (!current()) return;
       message.textContent = result.requests.length || result.proposals.length ? "" : t.noRequests;
       const list = el("ul", "", { class: "workspace-list" });
       for (const row of result.requests) {
@@ -149,15 +156,15 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
         list.append(item);
       }
       content.append(list);
-    } catch (error) { message.textContent = error.message; }
+    } catch (error) { if (current()) message.textContent = error.message; }
   }
 
   async function openVariant(row, page, history, inbox = false) {
-    open(row.kind === "submission" ? `${t[inbox ? "setlistProposal" : "submitted"]} · ${row.author}` : `${t.version} ${row.number}`);
+    const current = open(row.kind === "submission" ? `${t[inbox ? "setlistProposal" : "submitted"]} · ${row.author}` : `${t.version} ${row.number}`);
     message.textContent = t.working;
     try {
       const result = await read("shared_variant", { kind: row.kind, variant: row.id });
-      if (!dialog.open) return;
+      if (!current()) return;
       message.textContent = row.applied ? t.applied : row.declined ? t.declined
         : row.stale ? t.stale : inbox && shared.approved ? t.approvedProposal : "";
       const list = el("ol", "", { class: "workspace-list shared-setlist" });
@@ -179,19 +186,19 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
         }, { class: "primary" }));
       }
       if (inbox) toolbar.append(button(t.reject, () => submit("decline_proposal", shared, { variant: row.id })));
-    } catch (error) { message.textContent = error.message; }
+    } catch (error) { if (current()) message.textContent = error.message; }
   }
 
   async function openExport(version, revision = null) {
     if (attempt) return;
-    open(pdfTitle(language));
+    const current = open(pdfTitle(language));
     message.textContent = t.working;
     try {
       const options = await read("export_options");
-      if (!dialog.open) return;
+      if (!current()) return;
       message.textContent = "";
       mountPdfExport({ root: content, dialog, message, options, language, version, revision, request });
-    } catch (error) { message.textContent = error.message; }
+    } catch (error) { if (current()) message.textContent = error.message; }
   }
 
   async function submit(action, base, values = {}) {
@@ -203,7 +210,7 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
   async function process() {
     if (!attempt || working) return;
     working = true;
-    actions.inert = content.inert = toolbar.inert = close.disabled = true;
+    actions.inert = content.inert = toolbar.inert = true;
     check.hidden = dialogCheck.hidden = true;
     const tell = text => { if (dialog.open) message.textContent = text; else status(text); };
     tell(t.working);
@@ -218,7 +225,7 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
       if (result.status === "pending") return;
       attempt = null;
       if (result.status === "failed") { tell(result.message); return; }
-        dialog.close();
+      dialog.close();
       await refresh();
       status(result.proposal_decision === "applied" ? t.proposalApplied
         : result.proposal_decision === "declined" ? t.proposalDeclined
@@ -229,7 +236,7 @@ export function mountSharedSetlist({ root, data, language, read, request, refres
       tell(error.message);
     } finally {
       working = false;
-      actions.inert = content.inert = toolbar.inert = close.disabled = !!attempt;
+      actions.inert = content.inert = toolbar.inert = !!attempt;
       check.hidden = !attempt || dialog.open;
       dialogCheck.hidden = !attempt || !dialog.open;
     }

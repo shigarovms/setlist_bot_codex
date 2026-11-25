@@ -127,6 +127,7 @@ async def test_requests_role_removal_admin_rights_and_leave_keep_booking(engine,
         team = await get(client, 1, "team", **band)
         target = next(row for row in team["members"] if not row["self"])
         card = await get(client, 1, "team_contact", **band, contact=target["roles"][0]["id"])
+        assert (card["band"], card["language"]) == (team["band"], team["language"])
         await act(
             client, engine, 1, admin, "role_visibility", target=card["id"], version=card["version"]
         )

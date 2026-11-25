@@ -168,6 +168,37 @@ class Browser:
         )
 
 
+async def browser_editor_layout(browser):
+    for width, height in ((320, 568), (375, 667), (390, 844), (430, 932), (844, 390), (1200, 800)):
+        await browser.call(
+            "Emulation.setDeviceMetricsOverride",
+            {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": width < 1000},
+        )
+        assert await browser.js("document.documentElement.scrollWidth <= innerWidth")
+        assert await browser.js("""
+            [...document.querySelectorAll('.catalog-entry button')].every(button => {
+                const box = button.getBoundingClientRect();
+                return box.width >= 44 && box.height >= 44;
+            })
+        """)
+        assert await browser.js("document.getElementById('jump-catalog').offsetHeight > 0") == (
+            width < 1000
+        )
+        if height < 500:
+            assert await browser.js(
+                "getComputedStyle(document.querySelector('footer')).position"
+            ) == ("static")
+        await browser.assert_button_text_fits()
+    await browser.call(
+        "Emulation.setDeviceMetricsOverride",
+        {"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True},
+    )
+    await browser.js("document.getElementById('jump-catalog').click()")
+    assert await browser.js("document.activeElement.id") == "catalog-heading"
+    await browser.js("document.getElementById('jump-setlist').click()")
+    assert await browser.js("document.activeElement.id") == "setlist-heading"
+
+
 async def browser_music_search(browser, engine, band):
     from test_repertoire_workspace_music import ready_worker
 
@@ -292,6 +323,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             )
             stub = """
                 window.Telegram={WebApp:{initData:INIT_DATA,colorScheme:'light',themeParams:{},
+                BackButton:{show:()=>{},onClick:fn=>{window.nativeBack=fn}},
                 onEvent:(name,fn)=>{window.themeChange=fn},ready:()=>{},expand:()=>{},
                 close:()=>{window.testClosed=true},
                 enableClosingConfirmation:()=>{},disableClosingConfirmation:()=>{}}};
@@ -322,7 +354,26 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.wait(
                     "document.querySelector('.shared-setlist')?.innerText.includes('Комета')"
                 )
+                assert await browser.js("""
+                    const editor = document.querySelector('#workspace-content button.primary');
+                    !!(editor.compareDocumentPosition(document.querySelector('.shared-setlist'))
+                       & Node.DOCUMENT_POSITION_FOLLOWING)
+                """)
+                # An older response must not populate a newly opened dialog.
+                await browser.js("""
+                    const fetchNormally = window.fetch;
+                    window.fetch = async (...args) => {
+                        const response = await fetchNormally(...args);
+                        if (new URL(args[0], location.href).pathname.endsWith('/shared_history'))
+                            await new Promise(resolve => { window.releaseHistory = resolve; });
+                        return response;
+                    };
+                """)
+                await browser.click_named("#workspace-content button", "История")
+                await browser.wait("typeof window.releaseHistory === 'function'")
+                await browser.js("window.nativeBack()")
                 await browser.click_named("#workspace-content button", "Входящие запросы")
+                await browser.js("window.releaseHistory(); window.fetch = fetchNormally")
                 await browser.click_named(".shared-tools button", "Показать вариант")
                 await browser.wait(
                     "document.querySelector('dialog[open] .shared-setlist')?.innerText"
@@ -339,7 +390,11 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     "document.querySelector('dialog[open]')?.innerText"
                     ".includes('Нет запросов на рассмотрении.')"
                 )
-                await browser.click_named(".shared-tools button", "Закрыть")
+                await browser.js("window.nativeBack()")
+                await browser.wait("!document.querySelector('dialog[open]')")
+                assert await browser.js("new URLSearchParams(location.search).get('view')") == (
+                    "performance"
+                )
                 assert not await browser.js(
                     "[...document.querySelectorAll('#workspace-content button')].some("
                     "button => button.textContent === 'Редактировать общий сет-лист')"
@@ -371,7 +426,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.wait(
                     "document.querySelector('#workspace-content').innerText.includes('Утверждён')"
                 )
-                await browser.click_named("#workspace-content button", "Экспорт")
+                await browser.click_named("#workspace-content button", "📄 Скачать PDF")
                 downloads = tmp_path / "downloads"
                 await browser.call(
                     "Browser.setDownloadBehavior",
@@ -435,6 +490,12 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     "document.querySelectorAll('.workspace-list button').length === 2"
                 )
                 assert await browser.js("document.getElementById('editor').hidden")
+                await browser.js("document.querySelector('.workspace-list button').click()")
+                await browser.wait("document.querySelectorAll('.catalog-entry').length === 2")
+                await browser.js("window.nativeBack()")
+                await browser.wait(
+                    "document.querySelectorAll('.workspace-list button').length === 2"
+                )
                 await browser.js("document.querySelector('a[href*=repertoire]').click()")
                 await browser.wait("document.querySelectorAll('.workspace-list a').length === 2")
                 await browser.js("""
@@ -531,6 +592,17 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 "(()=>{const s=getComputedStyle(document.getElementById('add-pause-bottom'));"
                 "return s.borderTopStyle==='dashed' && s.backgroundColor==='rgba(0, 0, 0, 0)'})()"
             )
+            if launch_mode == "session":
+                await browser_editor_layout(browser)
+            assert await browser.js("document.getElementById('catalog-pages').hidden")
+            await browser.js("""
+                const search = document.getElementById('search');
+                search.value = 'no such song';
+                search.dispatchEvent(new Event('input'));
+            """)
+            assert await browser.js("document.getElementById('catalog-empty').innerText") == (
+                "Песни не найдены."
+            )
             # A real desktop mouse sequence must keep focus despite scrolling on pointerdown.
             await browser.call(
                 "Emulation.setDeviceMetricsOverride",
@@ -585,8 +657,12 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 },
             )
             await browser.wait(search_at_top)
+            await browser.js("window.originalAdd = document.querySelector('.catalog-entry .add')")
             await browser.tap(".catalog-entry .add")
             await browser.wait("document.querySelectorAll('#setlist li').length===1")
+            assert await browser.js(
+                "window.originalAdd === document.querySelector('.catalog-entry .add')"
+            )
             assert await browser.js("document.activeElement.id!=='search'")
             assert await browser.js("document.getElementById('search').value") == "Ком"
             await browser.js("document.getElementById('search').focus()")
@@ -937,7 +1013,26 @@ async def browser_manage_performance(browser, engine, group_id, origin):
     for theme in ("light", "dark"):
         await browser.js(f"document.documentElement.dataset.theme = '{theme}'")
         await browser.assert_button_text_fits()
+        assert await browser.js("""(() => {
+            const box = document.getElementById('workspace-quick-performance');
+            return box.offsetWidth === 20 && box.closest('label').offsetHeight >= 44;
+        })()""")
         assert await browser.js("document.documentElement.scrollWidth <= innerWidth")
+    assert await browser.js("""(() => {
+        const dialog = document.querySelector('dialog[open]');
+        const style = document.documentElement.style;
+        style.setProperty('--tg-safe-area-inset-top', '24px');
+        style.setProperty('--tg-content-safe-area-inset-top', '12px');
+        const respectsInset = dialog.getBoundingClientRect().top >= 36;
+        dialog.scrollTop = dialog.scrollHeight;
+        const close = dialog.querySelector('.sheet-heading button').getBoundingClientRect();
+        const visible = close.top >= dialog.getBoundingClientRect().top
+            && close.bottom <= innerHeight;
+        dialog.scrollTop = 0;
+        style.removeProperty('--tg-safe-area-inset-top');
+        style.removeProperty('--tg-content-safe-area-inset-top');
+        return respectsInset && visible;
+    })()""")
     await browser.js("document.documentElement.dataset.theme = 'light'")
     await browser.call(
         "Emulation.setDeviceMetricsOverride",
@@ -1244,6 +1339,15 @@ async def browser_schedule(browser, engine, origin):
 async def browser_profile(browser, engine, origin):
     await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1"})
     await browser.click_named("#workspace-content a", "👤 Мой профиль")
+    await browser.wait("!!document.querySelector('.profile-nav')")
+    assert await browser.js("""
+        const links = document.querySelectorAll('#workspace-content > :last-child a');
+        links.length === 2 && links[0].textContent.includes('расписание')
+            && links[1].textContent.includes('Назад')
+    """)
+    await browser.js("document.querySelector('.profile-nav a').click()")
+    await browser.wait("!!document.querySelector('a[aria-current]')")
+    await browser.js("window.nativeBack()")
     await browser.click_named("#workspace-content button", "✏️ Изменить")
     await browser.js("document.getElementById('profile-name').value = 'Имя на сцене'")
     await browser.js(

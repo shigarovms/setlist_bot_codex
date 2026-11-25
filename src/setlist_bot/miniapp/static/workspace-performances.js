@@ -63,7 +63,12 @@ export function performanceAction({ language, action, request, readOptions, perf
     const close = el("button", t.cancel, { type: "button" });
     controls.append(check, close);
     close.addEventListener("click", () => dialog.close());
-    dialog.append(el("h2", label), body, message, controls);
+    const heading = el("h2", label, { tabindex: "-1" });
+    const header = el("div", "", { class: "sheet-heading" });
+    const dismiss = el("button", "×", { type: "button", "aria-label": t.cancel });
+    dismiss.addEventListener("click", () => dialog.close());
+    header.append(heading, dismiss);
+    dialog.append(header, body, message, controls);
     document.body.append(dialog);
     dialog.addEventListener("close", () => dialog.remove(), { once: true });
     let attempt, busy = false;
@@ -141,7 +146,7 @@ export function performanceAction({ language, action, request, readOptions, perf
         control.value = initial[name] || "";
         if (name === "date") control.required = true;
         if (name === "duration") {
-          control.placeholder = t.durationHint;
+          control.placeholder = "45";
           control.setAttribute("aria-describedby", "workspace-duration-hint");
         }
         inputFields.append(el("label", t[name], { for: id }), control);
@@ -196,7 +201,8 @@ export function performanceAction({ language, action, request, readOptions, perf
         begin({ action, ...target, ...values });
       });
       body.replaceChildren(form);
-      fields.querySelector("input[type=date]")?.focus();
+      if (matchMedia("(max-width: 640px)").matches) heading.focus({ preventScroll: true });
+      else fields.querySelector("input[type=date]")?.focus();
     }
 
     function enableBody(enabled) {

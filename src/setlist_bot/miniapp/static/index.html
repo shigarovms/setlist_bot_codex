@@ -26,6 +26,7 @@
         <div class="eyebrow">setListBot</div>
         <h1 id="heading">Ваш черновик</h1>
         <p id="event"></p>
+        <p id="private-note">Сохраняется только личный черновик.</p>
         <div class="timing">
           <strong id="total">00:00</strong><span aria-hidden="true">/</span><span id="planned"></span>
           <button id="planned-edit" type="button" hidden aria-haspopup="dialog"></button>
@@ -45,18 +46,25 @@
         <button id="save-shared" type="button" hidden>Сохранить сет-лист как общий</button>
       </div>
       <div class="toolbar">
-        <button id="undo" aria-label="Отменить последнее действие" disabled>↶ Undo</button>
+        <button id="undo" aria-label="Отменить последнее действие" disabled>↶ Отменить</button>
         <button id="average-pause" disabled>Сред. пауза</button>
         <button id="add-pause">＋ Пауза</button>
       </div>
       <div class="workspace">
-        <section aria-label="Ваш сет-лист">
+        <section aria-labelledby="setlist-heading">
+          <div class="section-heading">
+            <h2 id="setlist-heading" tabindex="-1">Сет-лист</h2>
+            <button id="jump-catalog" type="button">К репертуару ↓</button>
+          </div>
           <ol id="setlist"></ol>
           <p id="empty" hidden></p>
           <button id="add-pause-bottom" type="button" disabled>+ пауза</button>
         </section>
         <section id="catalog">
-          <h2 id="catalog-heading">Репертуар</h2>
+          <div class="section-heading">
+            <h2 id="catalog-heading" tabindex="-1">Репертуар</h2>
+            <button id="jump-setlist" type="button">К сет-листу ↑</button>
+          </div>
           <label id="search-label" for="search">Поиск песни</label
           ><input
             id="search"
@@ -66,8 +74,9 @@
             placeholder="Название песни"
           />
           <div id="catalog-list"></div>
+          <p id="catalog-empty" role="status"></p>
           <button id="add-song" type="button">＋ Добавить песню</button>
-          <nav class="pages">
+          <nav id="catalog-pages" class="pages">
             <button id="page-prev" aria-label="Предыдущая страница">◀</button
             ><span id="page-label"></span
             ><button id="page-next" aria-label="Следующая страница">▶</button>
@@ -75,12 +84,11 @@
         </section>
       </div>
       <footer>
-        <p id="private-note">Сохраняется только личный черновик.</p>
+        <p id="save-status" role="status"></p>
+        <button id="save" hidden disabled>Повторить сохранение</button>
         <button id="publish" class="primary" disabled>
           📤 Предложить группе
         </button>
-        <p id="save-status" role="status"></p>
-        <button id="save" hidden disabled>Повторить сохранение</button>
         <button id="back-bot">Вернуться к боту</button>
       </footer>
     </main>
@@ -126,7 +134,7 @@
         </div>
       </form>
     </dialog>
-    <dialog id="pause-dialog">
+    <dialog id="pause-dialog" aria-labelledby="pause-title">
       <form id="pause-form">
         <h2 id="pause-title">Длительность паузы</h2>
         <label id="pause-text-label" for="pause-text">Текст паузы — можно оставить пустым</label>
@@ -148,7 +156,7 @@
         <p id="pause-error" role="alert"></p>
       </form>
     </dialog>
-    <dialog id="average-dialog">
+    <dialog id="average-dialog" aria-labelledby="average-title">
       <form id="average-form">
         <h2 id="average-title">Средняя пауза между песнями</h2>
         <label id="average-label" for="average-value">В секундах. 0 — без пауз. Отдельные паузы сохраняются.</label>
@@ -159,7 +167,7 @@
         </div>
       </form>
     </dialog>
-    <dialog id="conflict-dialog">
+    <dialog id="conflict-dialog" aria-labelledby="conflict-title">
       <h2 id="conflict-title">Черновик изменён</h2>
       <p id="conflict-note"></p>
       <pre id="latest-list"></pre>

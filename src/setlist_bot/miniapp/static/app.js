@@ -7,7 +7,7 @@ const tg = telegram?.initData ? telegram : null,
   $ = (id) => document.getElementById(id);
 const words = withBotLabels("app", {
   ru: {
-    heading: "Ваш черновик",
+    heading: "Ваш черновик", setlist: "Сет-лист", toCatalog: "К репертуару ↓", toSetlist: "К сет-листу ↑",
     loadShared: "Взять общий сет-лист за основу", saveShared: "Сохранить сет-лист как общий",
     loadSharedConfirm: "Заменить содержимое личного черновика текущим общим сет-листом?",
     saveSharedConfirm: "Заменить общий сет-лист выступления этим вариантом?",
@@ -38,7 +38,7 @@ const words = withBotLabels("app", {
     back: "Вернуться к боту",
     pause: "пауза",
     older: "История",
-    undo: "↶ Undo",
+    undo: "↶ Отменить",
     empty:
       "Добавьте песни из репертуара ниже или возьмите прошлый сет-лист за основу.",
     use: "Взять за основу",
@@ -92,7 +92,7 @@ const words = withBotLabels("app", {
     songReload: "Загрузить актуальную",
   },
   en: {
-    heading: "Private draft",
+    heading: "Private draft", setlist: "Setlist", toCatalog: "Go to repertoire ↓", toSetlist: "Back to setlist ↑",
     loadShared: "Start from the shared setlist", saveShared: "Save as shared setlist",
     loadSharedConfirm: "Replace your private draft with the current shared setlist?",
     saveSharedConfirm: "Replace the shared setlist for this performance with this version?",
@@ -199,7 +199,8 @@ function draftParentUrl() {
   const url = performanceUrl(workspaceBand, parentPerformance, past, page);
   if (workspaceParams.get("from") !== "managed") return url;
   const managed = encodeURIComponent(workspaceParams.get("managed_page") || "0");
-  return `${url}&from=managed&managed_page=${managed}`;
+  const origin = workspaceParams.get("schedule_from") === "profile" ? "&schedule_from=profile" : "";
+  return `${url}&from=managed&managed_page=${managed}${origin}`;
 }
 function status(text, error = false) {
   $("status").textContent = text;
@@ -208,12 +209,13 @@ function status(text, error = false) {
 function dirty() {
   return saver?.dirty() ?? false;
 }
+const systemTheme = matchMedia("(prefers-color-scheme: dark)");
 function theme() {
   // RU: Данные темы приходят из Telegram; список песен при смене темы не пересоздаём.
   // EN: Apply native theme colors without resetting the in-progress draft.
   const dark =
     tg?.colorScheme === "dark" ||
-    (!tg?.colorScheme && matchMedia("(prefers-color-scheme: dark)").matches);
+    (!tg?.colorScheme && systemTheme.matches);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
   const map = {
     bg_color: "--bg",
@@ -232,6 +234,7 @@ function theme() {
 }
 theme();
 tg?.onEvent?.("themeChanged", theme);
+systemTheme.addEventListener("change", theme);
 tg?.ready?.();
 tg?.expand?.();
 async function api(operation, payload = {}, method = "GET") {
@@ -317,6 +320,16 @@ function button(text, label, handler, className) {
   b.addEventListener("click", handler);
   return b;
 }
+let indexedCatalog;
+let songsById;
+function catalogIndex() {
+  if (indexedCatalog !== state.catalog) {
+    indexedCatalog = state.catalog;
+    songsById = new Map(indexedCatalog.map(song => [song.id, song]));
+  }
+  return songsById;
+}
+
 function render() {
   if (!state) return;
   $("event").textContent = [state.group, state.date, state.title]
@@ -331,7 +344,8 @@ function render() {
   $("use-history").disabled = busy;
   const items = preview?.entries ?? current,
     numbers = numbered(items);
-  $("setlist").replaceChildren();
+  const catalog = catalogIndex();
+  const rows = document.createDocumentFragment();
   items.forEach((item, index) => {
     const row = node(
       "li",
@@ -376,13 +390,13 @@ function render() {
       row.append(edit);
     } else {
       row.append(node("span", item.title, "song-name"));
-      if (!preview && state.catalog.some(song => song.id === item.song_id))
+      if (!preview && catalog.has(item.song_id))
         row.append(button("✎", `${t("editSong")}: ${item.title}`, () => openSong(item.song_id), "song-edit"));
     }
     row.append(node("span", clock(item.duration_seconds), "song-time"));
     if (
       item.kind === "song" &&
-      !state.catalog.some((song) => song.id === item.song_id)
+      !catalog.has(item.song_id)
     ) {
       row.classList.add("unavailable");
       row.title = t("missing");
@@ -395,8 +409,9 @@ function render() {
     );
     remove.disabled = !!preview;
     row.append(remove);
-    $("setlist").append(row);
+    rows.append(row);
   });
+  $("setlist").replaceChildren(rows);
   const seconds = preview ? preview.seconds : total(current, defaultPause);
   const target = state.planned_seconds;
   const delta = target - seconds;
@@ -420,6 +435,7 @@ function render() {
   $("newer").disabled = busy;
   $("use-history").hidden = !preview;
   $("catalog").hidden = !!preview;
+  $("jump-catalog").hidden = !!preview;
   $("undo").disabled = !undos.length || !!preview || busy;
   $("add-pause").disabled = !!preview || busy;
   $("add-pause-bottom").disabled = !!preview || busy;
@@ -446,17 +462,18 @@ function songLabels() {
     "song-cancel": catalogAttempt ? "close" : "cancel", "song-reload": "songReload",
   })) $(id).textContent = t(word);
 }
+let visibleCatalog;
 function renderCatalog() {
-  if (!state) return;
-  $("add-song").textContent = t("addSong");
-  songLabels();
+  if (!state || preview) return;
   const query = $("search").value.toLocaleLowerCase().replaceAll("ё", "е");
-  const songs = state.catalog.filter((song) =>
+  if (visibleCatalog?.source === state.catalog && visibleCatalog.query === query && visibleCatalog.page === catalogPage) return;
+  const songs = !query ? state.catalog : state.catalog.filter((song) =>
     song.title.toLocaleLowerCase().replaceAll("ё", "е").includes(query),
   );
   const pages = Math.max(1, Math.ceil(songs.length / 40));
   catalogPage = Math.min(catalogPage, pages - 1);
-  $("catalog-list").replaceChildren();
+  visibleCatalog = { source: state.catalog, query, page: catalogPage };
+  const rows = document.createDocumentFragment();
   songs.slice(catalogPage * 40, (catalogPage + 1) * 40).forEach((song) => {
     const row = node("div", undefined, "catalog-entry"),
       handle = button(
@@ -481,8 +498,11 @@ function renderCatalog() {
         "add",
       ),
     );
-    $("catalog-list").append(row);
+    rows.append(row);
   });
+  $("catalog-list").replaceChildren(rows);
+  $("catalog-empty").textContent = songs.length ? "" : workspaceText(lang, query ? "noMatches" : "noSongs");
+  $("catalog-pages").hidden = pages === 1;
   $("page-label").textContent = `${catalogPage + 1} / ${pages}`;
   $("page-prev").disabled = catalogPage === 0;
   $("page-next").disabled = catalogPage + 1 >= pages;
@@ -626,7 +646,7 @@ $("newer").addEventListener("click", () => {
 $("use-history").addEventListener("click", () => {
   if (!preview) return;
   if (dirty() && !confirm(t("replace"))) return;
-  const catalog = new Map(state.catalog.map((song) => [song.id, song]));
+  const catalog = catalogIndex();
   const replacement = preview.entries.map((item) => {
     if (item.kind === "pause") return item;
     const song = catalog.get(item.song_id);
@@ -651,9 +671,15 @@ $("undo").addEventListener("click", () => {
     publishAttempt = null;
     saver?.setDraft(current, defaultPause);
     render();
-    status(dirty() ? t("dirty") : t("ready"));
+    status(dirty() ? t("dirty") : current.length ? t("ready") : "");
   }
 });
+for (const [trigger, heading] of [["jump-catalog", "catalog-heading"], ["jump-setlist", "setlist-heading"]]) {
+  $(trigger).addEventListener("click", () => {
+    $(heading).focus({ preventScroll: true });
+    $(heading).scrollIntoView({ block: "start" });
+  });
+}
 $("search").addEventListener("input", () => {
   catalogPage = 0;
   renderCatalog();
@@ -670,7 +696,7 @@ function alignSearch() {
     // RU: iOS может сдвинуть видимую область при открытии клавиатуры.
     // EN: Re-align after keyboard/viewport changes, not just before its animation.
     const visibleTop = window.visualViewport?.offsetTop ?? 0;
-    const safeTop = Math.max(tg?.contentSafeAreaInset?.top ?? 0, tg?.safeAreaInset?.top ?? 0);
+    const safeTop = parseFloat(getComputedStyle(document.body).paddingTop) || 0;
     const offset = search.getBoundingClientRect().top - visibleTop - safeTop - 12;
     if (Math.abs(offset) > 1)
       window.scrollTo({ top: window.scrollY + offset, behavior: "instant" });
@@ -731,6 +757,16 @@ document.addEventListener("click", event => {
   leaveSearch(event);
 }, true);
 window.addEventListener("resize", alignSearch);
+function updateKeyboardInset() {
+  const viewport = window.visualViewport;
+  if (!viewport) return;
+  const covered = viewport.scale === 1
+    ? Math.max(0, Math.round(document.documentElement.clientHeight - viewport.height - viewport.offsetTop)) : 0;
+  document.documentElement.style.setProperty("--keyboard-bottom", `${covered}px`);
+}
+updateKeyboardInset();
+window.visualViewport?.addEventListener("resize", updateKeyboardInset);
+window.visualViewport?.addEventListener("scroll", updateKeyboardInset);
 window.visualViewport?.addEventListener("resize", alignSearch);
 window.visualViewport?.addEventListener("scroll", alignSearch);
 $("page-prev").addEventListener("click", () => {
@@ -807,7 +843,7 @@ $("song-reload").addEventListener("click", async () => {
 async function refreshRepertoire() {
   const updated = await api("state");
   state.catalog = updated.catalog;
-  const catalog = new Map(updated.catalog.map(song => [song.id, song]));
+  const catalog = catalogIndex();
   const refresh = items => items.map(item => {
     const song = item.kind === "song" && catalog.get(item.song_id);
     return song ? { ...item, title: song.title, duration_seconds: song.duration_seconds, version: song.version } : item;
@@ -898,6 +934,7 @@ async function submitSong(operation) {
     songSubmitting = busy = false;
     $("song-submit").disabled = false;
     $("song-cancel").disabled = false;
+    $("song-cancel").textContent = t(catalogAttempt ? "close" : "cancel");
     $("song-reload").disabled = false;
     $("song-delete").disabled = !!catalogAttempt;
     saver?.resume();
@@ -1224,7 +1261,7 @@ $("load-latest").addEventListener("click", () => {
   undos = [];
   $("conflict-dialog").close();
   render();
-  status(t("ready"));
+  status(current.length ? t("ready") : "");
 });
 $("copy-own").addEventListener("click", async () => {
   try {
@@ -1262,6 +1299,10 @@ function labels() {
   for (const [id, key] of Object.entries({
     heading: "heading",
     "catalog-heading": "catalog",
+    "setlist-heading": "setlist",
+    "jump-catalog": "toCatalog",
+    "jump-setlist": "toSetlist",
+    "add-song": "addSong",
     "search-label": "search",
     "private-note": "private",
     save: "save",
@@ -1301,17 +1342,27 @@ function labels() {
   $("search").placeholder = t("search");
   document.documentElement.lang = lang;
 }
+function onTelegramBack(navigate) {
+  tg?.BackButton?.show?.();
+  tg?.BackButton?.onClick?.(() => {
+    const dialogs = document.querySelectorAll("dialog[open]");
+    const dialog = dialogs[dialogs.length - 1];
+    if (!dialog) return navigate();
+    if (dialog.requestClose) dialog.requestClose();
+    else if (dialog.dispatchEvent(new Event("cancel", { cancelable: true }))) dialog.close();
+  });
+}
+
 async function boot() {
   // Dispatch only. The API checks the signature before trusting the launch target.
   const launch = new URLSearchParams(tg?.initData ?? "").get("start_param");
   if (!session && (workspaceParams.has("workspace") || !launch?.startsWith("sl_"))) {
-    await showWorkspace({ api, openSong, authenticated: Boolean(tg?.initData), backButton: tg?.BackButton });
+    await showWorkspace({ api, openSong, authenticated: Boolean(tg?.initData), onBack: onTelegramBack });
     return;
   }
   $("editor").hidden = false;
   if (workspaceDraft) {
-    tg?.BackButton?.show?.();
-    tg?.BackButton?.onClick?.(() => {
+    onTelegramBack(() => {
       if (saver) $("back-bot").click();
       else location.assign(draftParentUrl());
     });
@@ -1332,7 +1383,7 @@ async function boot() {
       catch (error) { status(error.message, true); render(); return; }
     }
     render();
-    status(t("ready"));
+    status(current.length ? t("ready") : "");
   } catch (error) {
     if (!tg && error.data?.error === "miniapp_auth") {
       $("editor").hidden = true;

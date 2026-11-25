@@ -5,8 +5,10 @@ from setlist_bot.transport.i18n import MESSAGES
 BOT_BUTTONS = {
     "workspace": {
         "bands": "my_groups",
+        "back": "menu_back",
         "past": "past_concerts",
         "performances": "back_concerts",
+        "events": "help_title_events",
         "connectBand": "connect_band",
         "transferChat": "transfer_button",
         "cleanupChat": "cleanup_button",
@@ -147,6 +149,7 @@ BOT_BUTTONS = {
         "pdf": "export_settings",
     },
     "shared-setlist": {
+        "downloadPdf": "download_pdf",
         "variants": "menu_variants",
         "apply": "submission_apply",
         "restore": "revision_restore",

@@ -151,7 +151,7 @@ class WorkspaceTeam:
         }
 
     async def contact(self, group_id: UUID, identifier: UUID) -> dict[str, Any]:
-        await self.groups.access(group_id, admin=True)
+        group = await self.groups.access(group_id, admin=True)
         contact = await self.store.get(StaffContact, identifier)
         require(contact.group_id == group_id and contact.permanent, "not_found")
         role = await self.store.get(StaffRole, contact.role_id)
@@ -162,6 +162,8 @@ class WorkspaceTeam:
         visible = [row for row in ordered if row.preference != "hidden"]
         position = visible.index(contact) if contact in visible else None
         return {
+            "language": self.user.language,
+            "band": group.name,
             "id": str(contact.id),
             "version": contact.version,
             "name": role.name,

@@ -119,7 +119,7 @@ export function workspaceText(language, key) {
   return copy[language === "en" ? "en" : "ru"][key];
 }
 
-export async function showWorkspace({ api, openSong, authenticated, backButton }) {
+export async function showWorkspace({ api, openSong, authenticated, onBack }) {
   const main = document.getElementById("workspace-home");
   const title = document.getElementById("workspace-title");
   const content = document.getElementById("workspace-content");
@@ -161,17 +161,20 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   const profileUrl = () => `${bandUrl()}&view=profile`;
   const helpUrl = () => `${bandUrl()}&view=help`;
   const bandTrashUrl = (index = 0) => `${bandUrl(null, "0", index)}&view=band-trash`;
+  const fromProfile = profile || workspaceParams.get("schedule_from") === "profile";
+  const scheduleOrigin = fromProfile ? "&schedule_from=profile" : "";
+  const scheduleParent = () => fromProfile ? profileUrl() : bandUrl();
   function gigsUrl(section = "schedule", index = 0, invitation = null, setlist = false) {
     const target = new URLSearchParams({ view: "my-gigs", section });
     if (invitation) target.set("invitation", invitation);
     if (setlist) target.set("setlist", "1");
-    return `${bandUrl(null, "0", index)}&${target}`;
+    return `${bandUrl(null, "0", index)}&${target}${scheduleOrigin}`;
   }
   function performanceParent() {
     return managedPage === null ? bandUrl(band, past, page) : gigsUrl("managed", managedPage);
   }
   function withManagedOrigin(url) {
-    return managedPage === null ? url : `${url}&from=managed&managed_page=${encodeURIComponent(managedPage)}`;
+    return managedPage === null ? url : `${url}&from=managed&managed_page=${encodeURIComponent(managedPage)}${scheduleOrigin}`;
   }
   function staffingUrl(section, index = 0, search = "", record = null) {
     const target = new URLSearchParams({ view: `staff-${section}` });
@@ -194,7 +197,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       if (config.ok) login = await config.json();
     } catch {
       status.textContent = t("loginFailed");
-      const retry = element("a", t("retry"), { href: bandUrl(band, past, page) });
+      const retry = element("a", t("retry"), { href: location.href });
       content.append(retry);
       return;
     }
@@ -232,10 +235,9 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     return button;
   }
   if (band || inbox || gigs || profile || help || bandTrash) {
-    backButton?.show?.();
-    backButton?.onClick?.(() => {
+    onBack?.(() => {
       if (gigs) location.assign(gigSetlist ? gigsUrl(gigSection, page, gigInvitation)
-        : gigInvitation ? gigsUrl(gigSection, page) : scheduleSettings ? gigsUrl() : bandUrl());
+        : gigInvitation ? gigsUrl(gigSection, page) : scheduleSettings ? gigsUrl() : scheduleParent());
       else if (roster) location.assign(withManagedOrigin(performanceUrl(band, performance, past, page)));
       else if (performance) location.assign(performanceParent());
       else if (bandSettings) location.assign(bandUrl(band, past, page));
@@ -261,6 +263,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       else if (performance) data = await api("performance", { band, performance });
       else if (bandSettings) data = await api("band_settings", { band });
       else if (trash) data = await api("performance_trash", { band, page });
+      else if (teamContact) data = await api("team_contact", { band, contact: teamContact });
       else if (team) data = await api("team", { band, page });
       else if (staffing) data = await api("staff_directory", {
         section: staffing, band, page, query, ...(staffRecord ? { record: staffRecord } : {}),
@@ -279,10 +282,6 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       status.textContent = "";
       if (gigs) await showPersonalGigs(data);
       else if (profile) {
-        const nav = element("nav", "", { class: "workspace-nav" });
-        nav.append(element("a", t("bands"), { href: bandUrl() }),
-          element("a", gigLabel(language, "title"), { href: gigsUrl() }));
-        content.append(nav);
         showProfile({
           root: content, data, language, request: accountApi, refresh: load,
           preview: payload => api("profile_roles", payload, "POST"),
@@ -331,7 +330,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
         }));
       }
       else if (trash) showPerformanceTrash(data);
-      else if (team || inbox) await showTeam(data);
+      else if (team || inbox) showTeam(data);
       else if (staffing) showStaffing(data);
       else if (music) showMusic(data);
       else if (proposals) showProposals(data);
@@ -360,6 +359,12 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
         content.append(telegramLink(t("connectBand"), data.connect_url), join);
       }
       if (login?.enabled) content.append(signOutButton());
+      if (profile) {
+        const nav = element("nav", "", { class: "workspace-nav profile-nav" });
+        nav.append(element("a", gigLabel(language, "title"), { href: gigsUrl() }),
+          element("a", t("back"), { href: bandUrl() }));
+        content.append(nav);
+      }
     } catch (error) {
       if (login?.enabled && error.data?.error === "miniapp_auth") {
         showLogin();
@@ -446,7 +451,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       nav.append(element("a", scheduleLabel(language, gigSection === "busy" ? "calendar" : "busyTitle"),
         { href: gigsUrl(gigSection === "busy" ? "calendar" : "busy") }));
     } else {
-      nav.append(element("a", t("bands"), { href: bandUrl() }));
+      nav.append(element("a", fromProfile ? profileLabel(language, "title") : t("bands"), { href: scheduleParent() }));
       const sections = ["schedule", "invitations", "confirmed", "history"];
       if (data.can_manage || gigSection === "managed") sections.push("managed");
       for (const section of sections)
@@ -474,7 +479,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       setlistUrl: gigsUrl(gigSection, page, gigInvitation, true), historyUrl: gigsUrl("history"),
       request: gigApi, options: () => api("export_options", { invitation: gigInvitation }),
       requestFor: invitation => (operation, payload, method) => gigApi(operation, payload, method, invitation),
-      managedUrl: row => `${performanceUrl(row.band_id, row.id, "0", 0)}&from=managed&managed_page=${page}`,
+      managedUrl: row => `${performanceUrl(row.band_id, row.id, "0", 0)}&from=managed&managed_page=${page}${scheduleOrigin}`,
       status: message => { status.textContent = message; },
     });
     if (!gigInvitation) showPages(data.has_next, index => gigsUrl(gigSection, index));
@@ -499,12 +504,13 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     nav.append(element("a", bandSettingsTitle(language), {
       href: `${bandUrl(band, past, page)}&view=band-settings`,
     }));
+    const tabs = element("nav", "", { class: "workspace-nav section-tabs", "aria-label": t("events") });
     for (const [tab, key] of [["0", "upcoming"], ["1", "past"]]) {
-      nav.append(element("a", t(key), {
+      tabs.append(element("a", t(key), {
         href: bandUrl(band, tab), ...(past === tab ? { "aria-current": "page" } : {}),
       }));
     }
-    content.append(nav);
+    content.append(nav, element("h2", t("events")), tabs);
     if (data.admin) {
       const actions = element("div", "", { class: "toolbar" });
       actions.append(managePerformance("create"), element("a", performanceLabel(language, "trash"),
@@ -516,7 +522,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     for (const row of data.performances) {
       const item = element("li", "");
       const dateLabel = dateText(row.date);
-      const name = element("h2", "");
+      const name = element("h3", "");
       name.append(element("a", row.title || dateLabel, { href: performanceUrl(band, row.id, past, page) }));
       item.append(name);
       item.append(element("p", [row.title ? dateLabel : "", row.city].filter(Boolean).join(" · ")));
@@ -535,7 +541,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
   function dateText(value) {
     return new Intl.DateTimeFormat(language, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(value));
   }
-  async function showTeam(data) {
+  function showTeam(data) {
     const nav = element("nav", "", { class: "workspace-nav" });
     const label = inbox ? t("bands") : teamLabel(language, teamContact ? "title" : "back");
     nav.append(element("a", label, {
@@ -574,7 +580,7 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       },
     });
     if (inbox) view.renderInbox(data.invitations);
-    else if (teamContact) view.renderContact(await api("team_contact", { band, contact: teamContact }));
+    else if (teamContact) view.renderContact(data);
     else {
       view.renderTeam(data);
       showPages(data.has_next, teamUrl);
@@ -650,15 +656,23 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       element("p", [dateText(info.date), info.city, info.type].filter(Boolean).join(" · ")));
     if (info.info) content.append(element("p", info.info, { class: "performance-info" }));
     if (data.admin) {
-      const actions = element("div", "", { class: "toolbar" });
-      actions.append(managePerformance("update", info), managePerformance("delete", info));
-      content.append(actions);
+      content.append(managePerformance("update", info));
     }
     content.append(element("h3", t("shared")),
       element("p", `${t(list.approved ? "approvedVersion" : "workingVersion")} · ${t("version")} ${list.version}`));
     const timing = [`${t("total")} ${clock(list.seconds)}`];
     if (info.planned_seconds) timing.push(`${t("planned")} ${clock(info.planned_seconds)}`);
     content.append(element("p", timing.join(" · "), { class: "performance-timing" }));
+    let editorButton;
+    if (data.can_edit_draft) {
+      editorButton = element("button", t("draft"), { type: "button", class: list.approved ? "" : "primary" });
+      editorButton.addEventListener("click", () => openDraft(info.id, editorButton));
+    }
+    mountSharedSetlist({
+      root: content, data, language, editorButton,
+      read: (operation, params = {}) => api(operation, { band, performance, ...params }),
+      request: sharedApi, refresh: load, status: message => { status.textContent = message; },
+    });
     if (list.entries.length) {
       const rows = element("ol", "", { class: "workspace-list shared-setlist", "aria-label": t("shared") });
       const numbers = numbered(list.entries);
@@ -674,15 +688,10 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       }
       content.append(rows);
     } else content.append(element("p", t("noEntries")));
-    mountSharedSetlist({
-      root: content, data, language,
-      read: (operation, params = {}) => api(operation, { band, performance, ...params }),
-      request: sharedApi, refresh: load, status: message => { status.textContent = message; },
-    });
-    if (data.can_edit_draft) {
-      const action = element("button", t("draft"), { type: "button", class: "primary" });
-      action.addEventListener("click", () => openDraft(info.id, action));
-      content.append(action);
+    if (data.admin) {
+      const remove = managePerformance("delete", info);
+      remove.classList.add("destructive");
+      content.append(remove);
     }
   }
   function showPerformanceRoster(data) {
@@ -723,17 +732,21 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
       content.append(actions);
       return;
     }
+    const tabs = element("nav", "", { class: "workspace-nav section-tabs", "aria-label": t("repertoire") });
+    content.append(element("h2", t("repertoire")), tabs);
     for (const [tab, key] of [["0", "active"], ["1", "archive"]]) {
-      nav.append(element("a", t(key), {
+      tabs.append(element("a", t(key), {
         href: repertoireUrl(band, { archived: tab, query }),
         ...(archived === tab ? { "aria-current": "page" } : {}),
       }));
     }
-    if (data.admin) nav.append(element("a", t("proposals"), { href: repertoireUrl(band, { proposals: true }) }));
+    const actions = element("div", "", { class: "toolbar" });
+    if (archived === "0") actions.append(songButton("addSong", data.admin));
+    if (data.admin) actions.append(element("a", t("proposals"), { href: repertoireUrl(band, { proposals: true }) }));
     if (data.admin && archived === "0")
-      nav.append(element("a", t("importSongs"), { href: repertoireUrl(band, { importing: true }) }),
+      actions.append(element("a", t("importSongs"), { href: repertoireUrl(band, { importing: true }) }),
         element("a", t("music"), { href: repertoireUrl(band, { music: true }) }));
-    if (archived === "0") content.append(songButton("addSong", data.admin));
+    if (actions.childElementCount) content.append(actions);
     const form = element("form", "", { action: "./", method: "get", class: "workspace-search" });
     for (const [name, value] of Object.entries({ workspace: "1", band, view: "repertoire", archived }))
       form.append(element("input", "", { type: "hidden", name, value }));
@@ -845,13 +858,13 @@ export async function showWorkspace({ api, openSong, authenticated, backButton }
     if (pages.childElementCount) content.append(pages);
   }
   let opening = false;
-  async function openDraft(performance, button) {
+  async function openDraft(performanceId, button) {
     if (opening) return;
     opening = true;
     button.disabled = true;
     status.textContent = t("loading");
     try {
-      const { session } = await api("open_draft", { band, performance }, "POST");
+      const { session } = await api("open_draft", { band, performance: performanceId }, "POST");
       const parent = performance ? `&performance=${encodeURIComponent(performance)}` : "";
       const destination = withManagedOrigin(`${bandUrl(band, past, page)}&view=draft${parent}`);
       location.assign(`${destination}#session=${encodeURIComponent(session)}`);

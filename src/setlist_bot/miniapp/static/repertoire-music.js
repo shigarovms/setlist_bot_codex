@@ -89,9 +89,11 @@ export function repertoireMusic({ root, language, band, search, read, request })
     const filter = el("input", "", { type: "checkbox", id: "music-selected-only" });
     filter.checked = selectedOnly;
     filter.addEventListener("change", () => { selectedOnly = filter.checked; page = 0; draw(); });
+    const filterLabel = el("label", "", { for: filter.id });
+    filterLabel.append(filter, document.createTextNode(t.selectedOnly));
     controls.append(button(t.all, () => action("all", { include: true })),
       button(t.none, () => action("all", { include: false })),
-      filter, el("label", t.selectedOnly, { for: filter.id }));
+      filterLabel);
     panel.append(controls);
     showPages(visible, trackRow);
     if (!included.length) panel.append(el("p", t.empty));
