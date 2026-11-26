@@ -585,6 +585,20 @@ async def api(request: web.Request) -> web.Response:
                     miniapp_key=miniapp_key,
                     browser=actor is None,
                 )
+            elif request.method == "POST" and operation == "export_preview":
+                from setlist_bot.infrastructure.pdf import PdfDocuments
+
+                target = await MiniCatalog(service).target(identifier)
+                require(
+                    (target.shared or target.invitation_id is not None)
+                    and target.concert is not None,
+                    "miniapp_expired",
+                )
+                assert target.concert is not None and target.group_id is not None
+                command = WorkspaceExports.command({**payload, "action": "generate"})
+                result = await WorkspaceExports(
+                    uow.store, user, invitation_id=target.invitation_id
+                ).preview(target.group_id, target.concert.id, command, PdfDocuments())
             elif request.method == "GET" and operation == "export_download":
                 scoped = MiniCatalog(service)
                 target = await scoped.target(identifier)

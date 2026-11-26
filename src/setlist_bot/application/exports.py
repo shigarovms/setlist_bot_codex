@@ -42,6 +42,12 @@ class PdfRenderer(Protocol):
     ) -> bytes: ...
 
 
+class PdfPreviewer(Protocol):
+    def preview(
+        self, payload: dict[str, Any], audiences: tuple[Audience, ...], language: str
+    ) -> dict[str, Any]: ...
+
+
 class Exports:
     def __init__(
         self,
@@ -65,7 +71,7 @@ class Exports:
         await Setlists(self.store, self.user).load(group_id, concert_id)
         return group, await self.store.get(Concert, concert_id)
 
-    async def _lighting_snapshot(self, group_id: UUID, snapshot: dict[str, Any]) -> dict[str, Any]:
+    async def lighting_snapshot(self, group_id: UUID, snapshot: dict[str, Any]) -> dict[str, Any]:
         result = flat_content(snapshot)
         identifiers = {
             UUID(item["song_id"])
@@ -102,6 +108,7 @@ class Exports:
         private: bool,
         back: str,
         reuse: bool = False,
+        appearance: dict[str, Any] | None = None,
     ) -> ExportSnapshot:
         require(approved, "export_approved_only")
         require(self.invitation_id is None or private, "forbidden")
@@ -122,14 +129,16 @@ class Exports:
                 "city": concert.city,
                 "extra_info": concert.extra_info,
                 "performance_duration_seconds": concert.performance_duration_seconds,
-                "settings": settings(self.user.export_settings),
+                "settings": settings(
+                    self.user.export_settings if appearance is None else appearance
+                ),
                 "layout_version": LAYOUT_VERSION,
                 "bot_username": self.bot_username,
                 "concert_title": concert.title,
                 "version": version,
                 "approved": approved,
                 "snapshot": deepcopy(snapshot),
-                "lighting_snapshot": await self._lighting_snapshot(group_id, snapshot),
+                "lighting_snapshot": await self.lighting_snapshot(group_id, snapshot),
                 "back": back,
                 "language": group.language,
                 **({"invitation_id": str(self.invitation_id)} if self.invitation_id else {}),
@@ -162,7 +171,7 @@ class Exports:
         Reuse an equivalent snapshot when possible; never mutate printed PDF bytes.
         """
         config = settings(self.user.export_settings)
-        lighting = await self._lighting_snapshot(source.group_id, source.payload["snapshot"])
+        lighting = await self.lighting_snapshot(source.group_id, source.payload["snapshot"])
         current_concert = await self.store.get(Concert, source.concert_id)
         if (
             source.payload.get("settings") == config
@@ -238,12 +247,16 @@ class Exports:
         language: str,
         transliterate: bool,
         renderer: PdfRenderer,
+        *,
+        refresh_appearance: bool = True,
     ) -> list[tuple[str, bytes]]:
         require(audience in ("musicians", "lights", "all") and language in ("ru", "en"), "input")
         # RU: Один выбор языка управляет также алфавитом, включая старые кнопки.
         # EN: Normalize before cache lookup; preserve immutable previously generated files.
         transliterate = language == "en"
-        export = await self.configured(await self.load(export_id))
+        export = await self.load(export_id)
+        if refresh_appearance:
+            export = await self.configured(export)
         from setlist_bot.application.ux import milestone
 
         milestone("pdf_requested", export.concert_id, {"group_id": str(export.group_id)})

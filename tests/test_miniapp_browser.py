@@ -704,6 +704,37 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 assert await browser.js(
                     "document.querySelectorAll('.timing-edit-table tbody tr').length === 2"
                 )
+                await browser.call("Emulation.setTouchEmulationEnabled", {"enabled": True})
+                assert await browser.js("""
+                    (() => {
+                        const [first, second] = document.querySelectorAll('.timing-event-row');
+                        const [start, end, event] = first.cells;
+                        const remove = second.querySelector('.timing-remove');
+                        return first.cells.length === 3 && start.offsetTop === end.offsetTop
+                          && end.offsetTop === event.offsetTop
+                          && getComputedStyle(first).backgroundColor
+                            !== getComputedStyle(second).backgroundColor
+                          && getComputedStyle(remove).opacity === '0';
+                    })()
+                """)
+                await browser.js("""
+                    (() => {
+                        const row = document.querySelector('.timing-event-row:last-child');
+                        const primary = { pointerType: 'touch', pointerId: 8, isPrimary: true,
+                            clientY: 200, bubbles: true };
+                        const down = new PointerEvent('pointerdown', {...primary, clientX: 250});
+                        const up = new PointerEvent('pointerup', {...primary, clientX: 160});
+                        row.dispatchEvent(down);
+                        row.dispatchEvent(up);
+                    })()
+                """)
+                assert await browser.js("""
+                    document.querySelectorAll('.timing-event-row').length === 2
+                      && !!document.querySelector('.timing-revealed .timing-remove')
+                """)
+                await browser.tap(".timing-revealed .timing-remove")
+                await browser.wait("document.querySelectorAll('.timing-event-row').length === 1")
+                await browser.call("Emulation.setTouchEmulationEnabled", {"enabled": False})
                 await browser.click_named("#workspace-content nav a", "Назад")
                 await browser.wait("!!document.getElementById('readiness-title')")
                 await browser.click_named(".performance-details-nav a", "Тайминг выступления")
@@ -731,7 +762,10 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.click_named("#workspace-content button", "История")
                 await browser.wait("typeof window.releaseHistory === 'function'")
                 await browser.js("window.nativeBack()")
-                await browser.click_named("#workspace-content button", "Входящие запросы")
+                await browser.wait(
+                    "document.querySelector('.shared-incoming-count')?.textContent.trim() === '1'"
+                )
+                await browser.js("document.querySelector('.shared-incoming').click()")
                 await browser.js("window.releaseHistory(); window.fetch = fetchNormally")
                 await browser.click_named(".shared-tools button", "Показать вариант")
                 await browser.wait(
@@ -744,6 +778,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     "document.getElementById('workspace-status')?.textContent"
                     " === 'Предложение отклонено.'"
                 )
+                assert await browser.js("document.querySelector('.shared-incoming-count').hidden")
                 await browser.click_named("#workspace-content button", "Входящие запросы")
                 await browser.wait(
                     "document.querySelector('dialog[open]')?.innerText"
@@ -791,7 +826,27 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.wait("!!document.querySelector('a.approved-setlist.status-ready')")
                 await browser.click_named("a.approved-setlist", "✓Сет-лист утверждён")
                 await browser.wait("!!document.querySelector('#shared-list')")
+                assert await browser.js("""
+                    (() => {
+                        const action = document.querySelector('.pdf-export-action');
+                        const gap = Math.abs(action.offsetWidth - action.parentNode.clientWidth);
+                        return gap <= 1 && ![...action.parentNode.children].some(button =>
+                            button.textContent.includes('Открыть редактор'));
+                    })()
+                """)
                 await browser.click_named("#workspace-content button", "📄 Скачать PDF")
+                await browser.wait(
+                    "document.querySelector('.pdf-page-preview')?.textContent.includes('Страниц:')"
+                )
+                await browser.js("""
+                    const mode = document.getElementById('workspace-pdf-mode');
+                    mode.value = 'pages';
+                    mode.dispatchEvent(new Event('change', { bubbles: true }));
+                """)
+                await browser.wait(
+                    "document.querySelector('.pdf-page-preview')?.innerText"
+                    ".includes('Размер шрифта:')"
+                )
                 downloads = tmp_path / "downloads"
                 await browser.call(
                     "Browser.setDownloadBehavior",
@@ -810,8 +865,11 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 assert (downloads / filename).read_bytes().startswith(b"%PDF-")
                 (downloads / filename).unlink()
                 await browser.js("""
-                    document.getElementById('workspace-pdf-audience').value = 'all';
+                    const audience = document.getElementById('workspace-pdf-audience');
+                    audience.value = 'all';
+                    audience.dispatchEvent(new Event('change'));
                 """)
+                await browser.wait("document.querySelectorAll('.pdf-page-preview p').length >= 2")
                 await browser.click_named(".shared-tools button", "Скачать PDF")
                 await process_catalog_request(engine)
                 await browser.wait(
@@ -839,6 +897,10 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.wait(
                     "document.querySelector('#workspace-content').innerText.includes('В работе')"
                 )
+                assert await browser.js("""
+                    [...document.querySelectorAll('#workspace-content button')].some(button =>
+                        button.textContent.includes('Открыть редактор'))
+                """)
                 await browser.click_named("#workspace-content button", "История")
                 await browser.wait(
                     "document.querySelector('.shared-tools').innerText"

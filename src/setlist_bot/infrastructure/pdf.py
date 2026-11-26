@@ -5,7 +5,7 @@ from functools import lru_cache
 from html import escape
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
@@ -14,11 +14,13 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.platypus import (
+    BaseDocTemplate,
     Flowable,
+    Frame,
     KeepTogether,
     LongTable,
+    PageTemplate,
     Paragraph,
-    SimpleDocTemplate,
     Spacer,
     TableStyle,
 )
@@ -41,6 +43,35 @@ TYPEFACES = {
     "serif": "NotoSerif",
 }
 PDF_STYLE: ContextVar[dict[str, Any] | None] = ContextVar("pdf_style", default=None)
+MIN_FITTED_SIZE = 12
+STAGE_SIZE = 30
+VERY_SMALL_SIZE = 24
+
+
+class LayoutCanvas(Canvas):
+    """Advance the layout canvas without creating PDF pages or serializing a document."""
+
+    def showPage(self) -> None:
+        self._startPage()  # type: ignore[attr-defined]  # ReportLab's normal canvas reset.
+
+    def save(self) -> None:
+        pass
+
+
+class LayoutFrame(Frame):
+    """Keep ReportLab's frame fitting rules and skip drawing each accepted flowable."""
+
+    def add(self, flowable: Flowable, canv: Canvas, trySplit: int = 0) -> Literal[0, 1]:
+        attributes = vars(flowable)
+        original = attributes.get("drawOn")
+        attributes["drawOn"] = lambda *_args, **_kwargs: None
+        try:
+            return super().add(flowable, canv, trySplit)
+        finally:
+            if original is None:
+                del attributes["drawOn"]
+            else:
+                attributes["drawOn"] = original
 
 
 def style() -> dict[str, Any]:
@@ -91,26 +122,94 @@ class PdfDocuments:
     def render(
         self, payload: dict[str, Any], audience: Audience, language: str, transliterate: bool
     ) -> bytes:
-        config = (
-            settings(payload.get("settings", {}))
-            if audience == "musicians"
-            else {"font": "noto", "size": 16, "align": "left"}
-        )
+        config = self._config(payload, audience)
+        if "pages" in config:
+            config["size"] = self._fit(payload, language, transliterate, config)["font_size"]
+        buffer = BytesIO()
+        self._layout(payload, audience, language, transliterate, config, output=buffer)
+        return buffer.getvalue()
+
+    @staticmethod
+    def _config(payload: dict[str, Any], audience: Audience) -> dict[str, Any]:
+        if audience == "lights":
+            return {"font": "noto", "size": 16, "align": "left"}
+        return settings(payload.get("settings", {}))
+
+    def preview(
+        self, payload: dict[str, Any], audiences: tuple[Audience, ...], language: str
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {"page_counts": {}}
+        for audience in audiences:
+            config = self._config(payload, audience)
+            source = (
+                {**payload, "snapshot": payload["lighting_snapshot"]}
+                if audience == "lights"
+                else payload
+            )
+            if "pages" in config:
+                fit = self._fit(source, language, language == "en", config)
+                result.update({key: value for key, value in fit.items() if key != "pages"})
+                count = fit["pages"]
+            else:
+                count = self._layout(source, audience, language, language == "en", config)
+            result["page_counts"][audience] = count
+        return result
+
+    def _fit(
+        self, payload: dict[str, Any], language: str, transliterate: bool, config: dict[str, Any]
+    ) -> dict[str, Any]:
+        counts: dict[int, int] = {}
+
+        def pages(size: int) -> int:
+            if size not in counts:
+                counts[size] = self._layout(
+                    payload, "musicians", language, transliterate, {**config, "size": size}
+                )
+            return counts[size]
+
+        low, high, best = MIN_FITTED_SIZE, 40, MIN_FITTED_SIZE
+        target = config["pages"]
+        while low <= high:
+            middle = (low + high) // 2
+            if pages(middle) <= target:
+                best, low = middle, middle + 1
+            else:
+                high = middle - 1
+        result: dict[str, Any] = {"font_size": best, "pages": pages(best)}
+        if best < STAGE_SIZE:
+            result["legibility"] = "very_small" if best < VERY_SMALL_SIZE else "small"
+            result["recommended_pages"] = pages(STAGE_SIZE)
+        return result
+
+    def _layout(
+        self,
+        payload: dict[str, Any],
+        audience: Audience,
+        language: str,
+        transliterate: bool,
+        config: dict[str, Any],
+        *,
+        output: BytesIO | None = None,
+    ) -> int:
         # RU: Экспорт работает в потоках. ContextVar не даёт настройкам одного PDF попасть в другой.
         # EN: Thread-local rendering context prevents concurrent exports leaking font settings.
         token = PDF_STYLE.set(config)
         try:
-            return self._render(payload, audience, language, transliterate)
+            return self._build(payload, audience, language, transliterate, output)
         finally:
             PDF_STYLE.reset(token)
 
-    def _render(
-        self, payload: dict[str, Any], audience: Audience, language: str, transliterate: bool
-    ) -> bytes:
-        buffer = BytesIO()
+    def _build(
+        self,
+        payload: dict[str, Any],
+        audience: Audience,
+        language: str,
+        transliterate: bool,
+        output: BytesIO | None,
+    ) -> int:
         page_size = A4 if audience == "musicians" else landscape(A4)
-        document = SimpleDocTemplate(
-            buffer,
+        document = BaseDocTemplate(
+            output if output is not None else BytesIO(),
             pagesize=page_size,
             leftMargin=28,
             rightMargin=28,
@@ -123,6 +222,8 @@ class PdfDocuments:
                 + " — "
                 + date_label(date.fromisoformat(payload["concert_date"]), language)
                 + f" — v{payload['version']}"
+                if output is not None
+                else ""
             ),
             author="",
         )
@@ -133,7 +234,7 @@ class PdfDocuments:
             else self._lights(snapshot, language, transliterate, document.width)
         )
 
-        def decorate(canvas: Canvas, doc: SimpleDocTemplate) -> None:
+        def decorate(canvas: Canvas, doc: BaseDocTemplate) -> None:
             width, height = page_size
             canvas.saveState()
             info = " · ".join(
@@ -160,8 +261,16 @@ class PdfDocuments:
             )
             canvas.restoreState()
 
-        document.build(story, onFirstPage=decorate, onLaterPages=decorate)
-        return buffer.getvalue()
+        frame_class = Frame if output is not None else LayoutFrame
+        frame = frame_class(
+            document.leftMargin, document.bottomMargin, document.width, document.height
+        )
+        template = PageTemplate(id="setlist", frames=[frame], pagesize=page_size)
+        if output is not None:
+            template.onPage = decorate
+        document.addPageTemplates(template)
+        document.build(story, canvasmaker=Canvas if output is not None else LayoutCanvas)
+        return int(document.page)
 
     @staticmethod
     def _shorten(text: str, width: float, font: str, size: int) -> str:

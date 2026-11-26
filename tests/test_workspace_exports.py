@@ -150,6 +150,62 @@ async def test_workspace_can_send_one_or_two_pdfs_to_the_authenticated_private_c
     assert all(document.media.data.startswith(b"%PDF-") for document in media)
 
 
+async def test_preview_and_delivery_use_open_form_without_saving_preset(engine, world):
+    await setup_workspace(engine, world)
+    async with PostgresUnitOfWork(engine) as uow:
+        lists = Setlists(uow.store, world.admin)
+        await lists.edit_songs(world.group.id, world.concert.id, 0, ["Комета"] * 19)
+        await lists.approve(world.group.id, world.concert.id, 1)
+    chat = SimpleNamespace(send_document=AsyncMock(), send_media_group=AsyncMock())
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        target = scope(world)
+        session = await post(client, 2, "open_shared", target)
+        stored = (await get(client, 2, "export_options", **target))["settings"]
+        appearance = {"font": "serif", "size": 24, "align": "center", "pages": 1}
+        selected = {
+            "version": 2,
+            "language": "ru",
+            "audience": "all",
+            "settings": appearance,
+        }
+        preview = await post(client, 2, "export_preview", {**session, **selected})
+        assert preview["page_counts"]["musicians"] == 1
+        assert preview["font_size"] < 24 and preview["recommended_pages"] > 1
+        async with PostgresUnitOfWork(engine) as uow:
+            assert not await uow.store.find(ExportSnapshot)
+            assert not await uow.store.find(ExportFile)
+        download = await execute(client, engine, 2, session, {**selected, "action": "generate"})
+        for audience, pages in preview["page_counts"].items():
+            file = await client.get(
+                "/miniapp/api/export_download",
+                params={**session, "request": download["request"], "audience": audience},
+                headers=headers(2),
+            )
+            assert file.status == 200
+            assert len(PdfReader(BytesIO(await file.read())).pages) == pages
+        send = {
+            **session,
+            **selected,
+            "action": "generate",
+            "delivery": "telegram",
+            "request_id": str(uuid4()),
+            "audience": "musicians",
+        }
+        queued = await post(client, 2, "export_action", send)
+        assert await deliver_request(engine, queued["request"], bot=chat)
+        chat.send_document.assert_awaited_once()
+        _, upload = chat.send_document.await_args.args
+        pdf = PdfReader(BytesIO(upload.data))
+        sizes = []
+        pdf.pages[0].extract_text(visitor_text=lambda _v, _cm, _tm, _f, size: sizes.append(size))
+        assert max(sizes) == preview["font_size"]
+        assert (await get(client, 2, "export_options", **target))["settings"] == stored
+        await execute(client, engine, 2, session, {"action": "settings", "settings": appearance})
+        assert (await get(client, 2, "export_options", **target))["settings"] == appearance
+        await post(client, 1, "export_preview", {**session, **selected}, 401)
+        await post(client, 2, "export_preview", {**session, **selected, "version": 1}, 409)
+
+
 async def test_workspace_reports_unavailable_chat_and_can_retry_with_a_download(engine, world):
     await setup_workspace(engine, world)
     async with PostgresUnitOfWork(engine) as uow:

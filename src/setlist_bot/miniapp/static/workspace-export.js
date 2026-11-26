@@ -3,6 +3,13 @@ const words = withBotLabels("workspace-export", {
   ru: {
     language: "Язык", audience: "Для кого",
     font: "Шрифт", size: "Размер, pt", align: "Выравнивание",
+    mode: "Подбор оформления", fixed: "Размер шрифта", fit: "Количество страниц",
+    invalidPages: "Укажите целое число страниц.", counting: "Считаем страницы…",
+    pageCount: count => `Страниц: ${count}`,
+    chosenSize: size => `Размер шрифта: ${size} pt`,
+    minimumPages: count => `При минимальном кегле получится ${count} стр.`,
+    small: "Текст может быть мелким на сцене.", very_small: "Текст может быть очень мелким на сцене.",
+    recommended: count => `Для чтения со сцены рекомендуем ${count} стр.`,
     left: "По левому краю", center: "По центру",
     settings: "Сохранить оформление", download: "Скачать PDF", send: "Отправить в личный чат",
     downloadMusicians: "Скачать PDF для музыкантов", downloadLights: "Скачать PDF для световика",
@@ -13,6 +20,13 @@ const words = withBotLabels("workspace-export", {
   en: {
     language: "Language", audience: "Audience",
     font: "Font", size: "Size, pt", align: "Alignment",
+    mode: "Sizing", fixed: "Font size", fit: "Page count",
+    invalidPages: "Enter a whole number of pages.", counting: "Counting pages…",
+    pageCount: count => `Pages: ${count}`,
+    chosenSize: size => `Font size: ${size} pt`,
+    minimumPages: count => `The smallest font still needs ${count} pages.`,
+    small: "Text may be small on stage.", very_small: "Text may be very small on stage.",
+    recommended: count => `Recommended for reading on stage: ${count} pages.`,
     left: "Left", center: "Center",
     settings: "Save appearance", download: "Download PDF", send: "Send to private chat",
     downloadMusicians: "Download musician PDF", downloadLights: "Download lighting PDF",
@@ -43,11 +57,31 @@ export function pdfAppearanceFields(container, options, language, prefix = "work
   const t = words[language];
   const font = select(container, `${prefix}-font`, t.font,
     Object.entries(options.fonts), options.settings.font);
+  const mode = select(container, `${prefix}-mode`, t.mode,
+    [["size", t.fixed], ["pages", t.fit]], options.settings.pages ? "pages" : "size");
+  const manual = el("div", "", { class: "import-fields" });
+  const fitted = el("div", "", { class: "import-fields" });
   const sizes = Array.from({ length: 17 }, (_, index) => [String(index + 24), String(index + 24)]);
-  const size = select(container, `${prefix}-size`, t.size, sizes, String(options.settings.size));
+  const size = select(manual, `${prefix}-size`, t.size, sizes, String(options.settings.size));
+  const pages = el("input", "", { id: `${prefix}-pages`, type: "number", inputmode: "numeric",
+    min: "1", max: String(options.max_pages ?? 200), step: "1", required: "" });
+  pages.value = options.settings.pages ?? 1;
+  fitted.append(el("label", t.fit, { for: pages.id }), pages);
+  container.append(manual, fitted);
   const align = select(container, `${prefix}-align`, t.align,
     [["left", t.left], ["center", t.center]], options.settings.align);
-  return () => ({ font: font.value, size: Number(size.value), align: align.value });
+  mode.addEventListener("change", updateMode);
+  updateMode();
+  return () => {
+    const appearance = { font: font.value, size: Number(size.value), align: align.value };
+    if (mode.value === "size") return appearance;
+    if (!pages.checkValidity()) return null;
+    return { ...appearance, pages: pages.valueAsNumber };
+  };
+  function updateMode() {
+    manual.hidden = mode.value === "pages";
+    fitted.hidden = pages.disabled = !manual.hidden;
+  }
 }
 
 export function mountPdfExport({ root, dialog, message, options, language, version, revision, request }) {
@@ -66,30 +100,83 @@ export function mountPdfExport({ root, dialog, message, options, language, versi
   const audience = select(fields, "workspace-pdf-audience", t.audience,
     [["musicians", t.musicians], ["lights", t.lights], ["all", t.all]], "musicians");
   const readAppearance = pdfAppearanceFields(appearance, options, language);
+  const pagePreview = el("div", "", { class: "pdf-page-preview", role: "status" });
+  let previewTimer, previewSerial = 0;
+  function selection() {
+    const settings = audience.value === "lights" ? options.settings : readAppearance();
+    return settings && { audience: audience.value, language: pdfLanguage.value, version, revision, settings };
+  }
   const save = el("button", t.settings, { type: "button" });
-  save.addEventListener("click", () => begin({ action: "settings", settings: readAppearance() }));
+  save.addEventListener("click", () => {
+    const settings = readAppearance();
+    if (settings) begin({ action: "settings", settings });
+    else message.textContent = t.invalidPages;
+  });
   appearance.append(save);
   const methods = window.Telegram?.WebApp?.initData ? ["telegram", "download"] : ["download", "telegram"];
   for (const [index, delivery] of methods.entries()) {
     const button = el("button", t[delivery === "telegram" ? "send" : "download"],
       { type: "button", ...(index === 0 ? { class: "primary" } : {}) });
-    button.addEventListener("click", () => begin({ action: "generate", audience: audience.value,
-      language: pdfLanguage.value, version, revision, delivery }));
+    button.addEventListener("click", () => {
+      const current = selection();
+      if (current) begin({ ...current, action: "generate", delivery });
+      else message.textContent = t.invalidPages;
+    });
     controls.append(button);
   }
-  fields.append(appearance, controls);
+  fields.append(appearance, pagePreview, controls);
   root.append(fields, check, downloads);
 
   function clearFiles() {
     for (const url of urls.splice(0)) URL.revokeObjectURL(url);
     downloads.replaceChildren();
   }
-  dialog.addEventListener("close", clearFiles, { once: true });
-  for (const node of [pdfLanguage, audience]) node.addEventListener("change", () => {
+  dialog.addEventListener("close", () => {
+    clearTimeout(previewTimer);
+    previewSerial++;
+    clearFiles();
+  }, { once: true });
+  for (const node of [pdfLanguage, audience, appearance]) node.addEventListener("change", () => {
     clearFiles();
     message.textContent = "";
+    schedulePreview();
+  });
+  appearance.addEventListener("input", event => {
+    if (event.target.type === "number") schedulePreview();
   });
   check.addEventListener("click", process);
+  schedulePreview();
+
+  function schedulePreview() {
+    clearTimeout(previewTimer);
+    const serial = ++previewSerial;
+    appearance.hidden = audience.value === "lights";
+    const current = selection();
+    pagePreview.textContent = current ? t.counting : t.invalidPages;
+    if (!current) return;
+    previewTimer = setTimeout(async () => {
+      if (!dialog.open || !pagePreview.isConnected) return;
+      try {
+        const result = await request("export_preview", current, "POST");
+        if (serial !== previewSerial || !dialog.open || !pagePreview.isConnected) return;
+        pagePreview.replaceChildren();
+        for (const [target, count] of Object.entries(result.page_counts)) {
+          const label = current.audience === "all" ? `${t[target]} · ` : "";
+          pagePreview.append(el("p", label + t.pageCount(count)));
+        }
+        if (result.font_size) pagePreview.append(el("p", t.chosenSize(result.font_size)));
+        if (result.page_counts.musicians > current.settings.pages)
+          pagePreview.append(el("p", t.minimumPages(result.page_counts.musicians)));
+        if (result.legibility) pagePreview.append(
+          el("p", t[result.legibility], { class: "pdf-stage-warning" }),
+          el("p", t.recommended(result.recommended_pages)),
+        );
+      } catch (error) {
+        if (serial === previewSerial && dialog.open && pagePreview.isConnected)
+          pagePreview.textContent = error.message;
+      }
+    }, 180);
+  }
 
   function begin(body) {
     if (pending) return;

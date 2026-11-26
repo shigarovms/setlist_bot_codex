@@ -3249,13 +3249,20 @@ class Controller:
             if values[1] in ("font", "size", "align"):
                 require(len(values) == 3, "input")
                 config[values[1]] = int(values[2]) if values[1] == "size" else values[2]
+                if values[1] == "size":
+                    config.pop("pages", None)
                 self.user.export_settings = settings(config)
             buttons = [
                 (
                     self.t("export_font", value=FONTS[config["font"]]),
                     f"slformat {identifier.hex} fonts",
                 ),
-                (self.t("export_size", value=config["size"]), f"slformat {identifier.hex} sizes"),
+                (
+                    self.t("export_pages", value=config["pages"])
+                    if "pages" in config
+                    else self.t("export_size", value=config["size"]),
+                    f"slformat {identifier.hex} sizes",
+                ),
                 (
                     self.t("export_align", value=self.t("align_" + config["align"])),
                     f"slformat {identifier.hex} alignment",

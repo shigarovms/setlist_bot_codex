@@ -97,22 +97,34 @@ function dateAt(date, offset, language) {
   return new Intl.DateTimeFormat(language, { dateStyle: "long", timeZone: "UTC" }).format(current);
 }
 
+function timingTable(t, editable = false) {
+  const table = element("table", "", { class: editable ? "timing-table timing-edit-table" : "timing-table" });
+  const headings = table.createTHead().insertRow();
+  for (const key of ["start", "end", "event"]) headings.append(element("th", t[key], { scope: "col" }));
+  return table;
+}
+
+function dateDivider(date, day, language) {
+  const row = element("tr", "", { class: "timing-date" });
+  row.append(element("td", dateAt(date, day, language), { colspan: "3" }));
+  return row;
+}
+
 function summary(rows, date, language) {
-  const table = element("table", "", { class: "timing-table" });
+  const table = timingTable(words[language] || words.ru);
   const body = table.createTBody();
   const multiDay = rows.some(row => row.day || row.next_day);
   let lastDay;
   for (const row of rows) {
     const day = row.day ?? Number(!!row.next_day);
     if (date && multiDay && day !== lastDay) {
-      const divider = body.insertRow();
-      divider.className = "timing-date";
-      divider.insertCell();
-      divider.insertCell().textContent = dateAt(date, day, language);
+      body.append(dateDivider(date, day, language));
     }
     lastDay = day;
     const tr = body.insertRow();
-    tr.insertCell().textContent = row.start + (row.end ? `–${row.end}` : "");
+    tr.className = "timing-event-row";
+    tr.insertCell().textContent = row.start;
+    tr.insertCell().textContent = row.end || "";
     tr.insertCell().textContent = row.label;
   }
   return table;
@@ -180,10 +192,9 @@ export function showTiming({ root, data, performance, back, request, readHistory
   const status = element("p", "", { role: "status" });
   const form = element("form", "", { class: "timing-form" });
   const fields = element("fieldset", "", { class: "timing-fields" });
-  const table = element("table", "", { class: "timing-table timing-edit-table" });
-  const headings = table.createTHead().insertRow();
-  headings.append(element("th", t.start, { scope: "col" }), element("th", t.event, { scope: "col" }));
+  const table = timingTable(t, true);
   const body = table.createTBody();
+  const eventRows = () => Array.from(body.querySelectorAll(".timing-event-row"));
   const zone = element("select", "", { id: "timing-zone" });
   zone.append(element("option", `${t.automatic} · ${data.auto_zone}`, { value: "" }));
   for (const choice of data.zones) zone.append(element("option", choice.label, { value: choice.id }));
@@ -203,8 +214,9 @@ export function showTiming({ root, data, performance, back, request, readHistory
   const history = historyButton({
     language: data.language, timing: true, read: readHistory,
     select: source => {
-      if (body.rows.length && !confirm(t.replace)) return false;
+      if (eventRows().length && !confirm(t.replace)) return false;
       body.replaceChildren();
+      revealed = null;
       for (const item of source.rows) addRow(item);
       updateDates();
     },
@@ -216,7 +228,7 @@ export function showTiming({ root, data, performance, back, request, readHistory
   fields.append(table, events, controls, save, notify);
   form.append(fields, status, retry);
   root.append(form);
-  let attempt, working = false;
+  let attempt, working = false, revealed = null;
   for (const row of data.rows) addRow(row);
   updateDates();
 
@@ -226,32 +238,66 @@ export function showTiming({ root, data, performance, back, request, readHistory
   }
 
   function updateDates() {
+    body.querySelectorAll(".timing-date").forEach(row => row.remove());
     let previous = "", day = 0;
-    const starts = Array.from(body.rows, row => row.querySelector('[name="start"]').value);
-    const offsets = starts.map(start => {
-      const changed = !!start && !!previous && start < previous;
+    const rows = eventRows();
+    for (const row of rows) {
+      const start = row.querySelector('[name="start"]').value;
+      if (start && previous && start < previous) {
+        day += 1;
+        body.insertBefore(dateDivider(data.date, day, data.language), row);
+      }
       if (start) previous = start;
-      if (changed) day += 1;
-      return [day, changed];
-    });
-    for (const [index, row] of Array.from(body.rows).entries()) {
-      const [offset, changed] = offsets[index];
-      row.querySelector(".timing-row-date").textContent = day && (!index || changed)
-        ? dateAt(data.date, offset, data.language) : "";
     }
+    if (day) body.insertBefore(dateDivider(data.date, 0, data.language), rows[0]);
   }
 
   function addRow(initial) {
     const row = body.insertRow();
+    row.className = "timing-event-row";
     const title = element("input", "", { type: "text", name: "label", maxlength: "200", required: "", list: "timing-events", "aria-label": t.event });
     title.value = initial.label || "";
     const start = timeControl("start", false), end = timeControl("end", true);
-    row.insertCell().append(element("span", "", { class: "timing-row-date" }), start.input,
-      start.trigger, element("span", t.end, { class: "timing-end-label" }), end.input, end.trigger);
-    const remove = button("×", () => { row.remove(); add.disabled = false; updateDates(); });
+    row.insertCell().append(start.input, start.trigger);
+    row.insertCell().append(end.input, end.trigger);
+    const remove = button("×", () => {
+      if (revealed === row) revealed = null;
+      row.remove();
+      add.disabled = false;
+      updateDates();
+    });
+    remove.className = "timing-remove";
     remove.setAttribute("aria-label", t.remove);
-    row.insertCell().append(title, remove);
-    add.disabled = body.rows.length >= 60;
+    const eventFields = element("div", "", { class: "timing-event-fields" });
+    eventFields.append(title, remove);
+    row.insertCell().append(eventFields);
+    add.disabled = eventRows().length >= 60;
+    let swipe = null, suppressClick = false;
+    row.addEventListener("pointerdown", event => {
+      suppressClick = false;
+      if (event.pointerType !== "touch" || !event.isPrimary) return;
+      if (revealed && revealed !== row) {
+        revealed.classList.remove("timing-revealed");
+        revealed = null;
+      }
+      swipe = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    });
+    row.addEventListener("pointercancel", () => { swipe = null; });
+    row.addEventListener("pointerup", event => {
+      if (event.pointerId !== swipe?.id) return;
+      const dx = event.clientX - swipe.x, dy = event.clientY - swipe.y;
+      swipe = null;
+      if (Math.abs(dx) < 45 || Math.abs(dx) <= Math.abs(dy) * 1.4) return;
+      suppressClick = true;
+      revealed = dx < 0 ? row : null;
+      row.classList.toggle("timing-revealed", revealed === row);
+    });
+    row.addEventListener("click", event => {
+      if (!suppressClick || !event.detail) return;
+      suppressClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
     return start.trigger;
 
     function timeControl(name, optional) {
@@ -261,7 +307,7 @@ export function showTiming({ root, data, performance, back, request, readHistory
       trigger.setAttribute("aria-haspopup", "dialog");
       function show(value) {
         input.value = value;
-        trigger.textContent = value || "–:–";
+        trigger.textContent = value || (optional ? "" : "–:–");
         trigger.setAttribute("aria-label", [t[name], value].filter(Boolean).join(" · "));
         if (row.cells.length) updateDates();
       }
@@ -279,10 +325,10 @@ export function showTiming({ root, data, performance, back, request, readHistory
     addNext();
   });
   function saveRows() {
-    const missing = Array.from(body.rows).find(row => !row.querySelector('[name="start"]').value);
+    const missing = eventRows().find(row => !row.querySelector('[name="start"]').value);
     if (missing) { missing.querySelector(".timing-time").click(); return; }
     if (!form.reportValidity()) return;
-    const rows = Array.from(body.rows, row => {
+    const rows = eventRows().map(row => {
       const values = Object.fromEntries(Array.from(row.querySelectorAll("input"), field =>
         [field.name, field.type === "checkbox" ? field.checked : field.value]));
       return values;

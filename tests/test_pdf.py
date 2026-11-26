@@ -81,6 +81,53 @@ def test_musicians_keep_large_type_and_omit_all_technical_song_fields():
     assert "Чистое время" not in text(pdf)
 
 
+def test_preview_matches_both_pdf_layouts_without_drawing_or_writing_pages(monkeypatch):
+    from reportlab.pdfgen.canvas import Canvas
+    from reportlab.platypus import Paragraph
+
+    payload = sample_payload()
+    payload["snapshot"]["blocks"][0]["items"] *= 5
+    payload["lighting_snapshot"] = payload["snapshot"]
+    payload["settings"] = {"font": "serif", "size": 40, "align": "center", "pages": 1}
+    documents = PdfDocuments()
+
+    def fail(*args, **kwargs):
+        pytest.fail("Page preview must not draw or write PDF pages")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Canvas, "save", fail)
+        patch.setattr(Canvas, "showPage", fail)
+        patch.setattr(Paragraph, "drawOn", fail)
+        fitted = documents.preview(payload, ("musicians", "lights"), "ru")
+    assert fitted["font_size"] == 12
+    assert fitted["legibility"] == "very_small"
+    assert fitted["recommended_pages"] > fitted["page_counts"]["musicians"] > 1
+    for audience in ("musicians", "lights"):
+        pdf = reader(documents.render(payload, audience, "ru", False))
+        assert fitted["page_counts"][audience] == len(pdf.pages)
+
+
+def test_fit_chooses_the_largest_size_that_matches_target_and_manual_preview_agrees():
+    payload = sample_payload()
+    payload["settings"] = {"font": "open", "size": 40, "align": "left"}
+    documents = PdfDocuments()
+    block = payload["snapshot"]["blocks"][0]
+    block["items"] = (block["items"] * 3)[:25]
+    fixed = documents.preview(payload, ("musicians",), "en")
+    payload["settings"]["pages"] = 2
+    fitted = documents.preview(payload, ("musicians",), "en")
+    assert fixed["page_counts"]["musicians"] > 2 == fitted["page_counts"]["musicians"]
+    assert fitted["legibility"] == "small" and fitted["recommended_pages"] == 3
+    pdf = reader(documents.render(payload, "musicians", "en", True))
+    assert len(pdf.pages) == 2
+    sizes = []
+    for page in pdf.pages:
+        page.extract_text(visitor_text=lambda value, _cm, _tm, _font, size: sizes.append(size))
+    assert max(sizes) == fitted["font_size"] < 40
+    payload["settings"] = {"font": "open", "size": fitted["font_size"] + 1, "align": "left"}
+    assert documents.preview(payload, ("musicians",), "en")["page_counts"]["musicians"] > 2
+
+
 def test_lights_include_fields_timing_blocks_encore_and_positive_lead_ins():
     payload = sample_payload()
     first = payload["snapshot"]["blocks"][0]

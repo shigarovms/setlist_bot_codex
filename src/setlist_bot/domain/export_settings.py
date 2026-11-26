@@ -10,6 +10,7 @@ FONTS = {
     "serif": "Noto Serif",
 }
 DEFAULTS: dict[str, Any] = {"font": "noto", "size": 40, "align": "left"}
+MAX_TARGET_PAGES = 200
 
 
 def settings(value: dict[str, Any]) -> dict[str, Any]:
@@ -20,13 +21,15 @@ def settings(value: dict[str, Any]) -> dict[str, Any]:
         and result["align"] in ("left", "center"),
         "input",
     )
+    if "pages" in result:
+        require(type(result["pages"]) is int and 1 <= result["pages"] <= MAX_TARGET_PAGES, "input")
     return result
 
 
 def validated_settings(value: Any) -> dict[str, Any]:
     require(
         isinstance(value, dict)
-        and set(value) == {"font", "size", "align"}
+        and set(value) in ({"font", "size", "align"}, {"font", "size", "align", "pages"})
         and isinstance(value["font"], str)
         and type(value["size"]) is int,
         "input",

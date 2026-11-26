@@ -55,7 +55,7 @@ function button(title, action, attrs = {}) {
 export function mountSharedSetlist({ root, data, language, editorButton, decision, read, request, refresh, status }) {
   const t = copy[language];
   const shared = data.setlist;
-  const actions = el("div", "", { class: "toolbar" });
+  const actions = el("div", "", { class: shared.approved ? "toolbar shared-actions-ready" : "toolbar" });
   const dialog = el("dialog", "", { "aria-labelledby": "shared-tools-title", class: "shared-tools" });
   const toolbar = el("div", "", { class: "toolbar" });
   const heading = el("h2", "", { id: "shared-tools-title" });
@@ -65,15 +65,21 @@ export function mountSharedSetlist({ root, data, language, editorButton, decisio
   const dialogCheck = button(t.check, () => process(), { hidden: "" });
   let attempt = null, working = false;
   let view = 0;
+  let requestsRead = 0;
   const close = button(t.close, closeDialog);
   dialog.append(heading, message, content, toolbar, dialogCheck, close);
   root.append(actions, check, dialog);
 
-  if (shared.approved) actions.append(button(t.downloadPdf, () => openExport(shared.version), { class: "primary" }));
+  if (shared.approved) actions.append(button(t.downloadPdf, () => openExport(shared.version), { class: "primary pdf-export-action" }));
   if (editorButton) actions.append(editorButton);
   actions.append(button(t.variants, () => openVariants()));
   actions.append(button(t.history, () => openVariants(0, true)));
-  if (data.admin) actions.append(button(t.requests, () => openRequests()));
+  const requestCount = el("span", "", { class: "shared-incoming-count", hidden: "" });
+  if (data.admin) {
+    const incoming = button(t.requests, () => openRequests(), { class: "shared-incoming" });
+    incoming.append(requestCount);
+    actions.append(incoming);
+  }
   if (shared.approved || shared.entries.length) {
     const label = shared.approved ? (data.admin ? t.reopen : t.askReopen) : (data.admin ? t.approve : t.askApprove);
     actions.append(button(label, () => {
@@ -130,14 +136,26 @@ export function mountSharedSetlist({ root, data, language, editorButton, decisio
     } catch (error) { if (current()) message.textContent = error.message; }
   }
 
+  async function fetchRequests() {
+    const serial = ++requestsRead;
+    const result = await read("shared_requests");
+    if (serial === requestsRead && actions.isConnected) {
+      const count = result.requests.length + result.proposals.length;
+      requestCount.textContent = count ? ` ${count}` : "";
+      requestCount.hidden = !count;
+    }
+    return result;
+  }
+
   if (data.admin && decision) void openRequests(decision);
+  else if (data.admin) void fetchRequests().catch(() => {});
 
   async function openRequests(focus = null) {
     if (attempt) return;
     const current = open(t.requests);
     message.textContent = t.working;
     try {
-      const result = await read("shared_requests");
+      const result = await fetchRequests();
       if (!current()) return;
       message.textContent = result.requests.length || result.proposals.length ? "" : t.noRequests;
       const list = el("ul", "", { class: "workspace-list" });

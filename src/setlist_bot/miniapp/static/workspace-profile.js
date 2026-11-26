@@ -97,9 +97,13 @@ export function showProfile({ root, data, language, request, preview, refresh, s
     const window = open(t.pdf);
     const form = el("div", "", { class: "import-fields" });
     const readAppearance = pdfAppearanceFields(form, data.pdf, language, "profile-pdf");
-    const save = button(t.confirm, () => window.send(save, {
-      action: "pdf_settings", expected: data.pdf.settings, settings: readAppearance(),
-    }));
+    const save = button(t.confirm, () => {
+      const appearance = readAppearance();
+      if (appearance) window.send(save, {
+        action: "pdf_settings", expected: data.pdf.settings, settings: appearance,
+      });
+      else form.querySelector(":invalid")?.reportValidity();
+    });
     window.body.append(el("p", t.pdfHint), form, save);
   }
 

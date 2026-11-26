@@ -774,8 +774,8 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
     if (info.planned_seconds) timing.push(`${t("planned")} ${clock(info.planned_seconds)}`);
     content.append(element("p", timing.join(" · "), { class: "performance-timing" }));
     let editorButton;
-    if (data.can_edit_draft) {
-      editorButton = element("button", t("draft"), { type: "button", class: list.approved ? "" : "primary" });
+    if (data.can_edit_draft && !list.approved) {
+      editorButton = element("button", t("draft"), { type: "button", class: "primary" });
       editorButton.addEventListener("click", () => openDraft(info.id, editorButton));
     }
     mountSharedSetlist({

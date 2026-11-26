@@ -733,7 +733,7 @@ async def handle(c: Controller, command: str, args: str) -> Response:
             from setlist_bot.infrastructure.pdf import PdfDocuments
 
             if command == "sf_pdf_l":
-                snapshot = await Exports(c.store, c.user, c.chat_id)._lighting_snapshot(
+                snapshot = await Exports(c.store, c.user, c.chat_id).lighting_snapshot(
                     group.id, snapshot
                 )
             payload = {

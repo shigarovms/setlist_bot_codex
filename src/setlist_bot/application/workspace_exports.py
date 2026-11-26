@@ -1,14 +1,15 @@
 """Create and read owner-bound copies of the bot's approved PDF exports."""
 
+import asyncio
 from typing import Any
 from uuid import UUID
 
-from setlist_bot.application.exports import Exports, PdfRenderer, export_audiences
+from setlist_bot.application.exports import Exports, PdfPreviewer, PdfRenderer, export_audiences
 from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.application.workspace_gigs import WorkspaceGigs
 from setlist_bot.domain.entities import ExportFile, Revision, User
-from setlist_bot.domain.export_settings import FONTS, settings, validated_settings
+from setlist_bot.domain.export_settings import FONTS, MAX_TARGET_PAGES, settings, validated_settings
 from setlist_bot.domain.rules import require
 
 
@@ -51,6 +52,11 @@ class WorkspaceExports:
             "delivery": delivery,
             "version": version,
             "revision": str(UUID(revision)) if revision is not None else None,
+            **(
+                {"settings": validated_settings(payload["settings"])}
+                if "settings" in payload
+                else {}
+            ),
         }
 
     async def options(self, group_id: UUID, concert_id: UUID) -> dict[str, Any]:
@@ -59,11 +65,12 @@ class WorkspaceExports:
             "settings": settings(self.user.export_settings),
             "fonts": FONTS,
             "language": group.language,
+            "max_pages": MAX_TARGET_PAGES,
         }
 
-    async def apply(
-        self, group_id: UUID, concert_id: UUID, data: dict[str, Any], renderer: PdfRenderer | None
-    ) -> dict[str, Any]:
+    async def _approved(
+        self, group_id: UUID, concert_id: UUID, data: dict[str, Any]
+    ) -> tuple[dict[str, Any], int]:
         current = None
         guest = None
         if self.invitation_id is not None:
@@ -76,9 +83,6 @@ class WorkspaceExports:
             )
         else:
             current = await self.lists.load(group_id, concert_id)
-        if data["action"] == "settings":
-            self.user.export_settings = settings(data["settings"])
-            return {"settings": self.user.export_settings}
         if guest:
             snapshot, version, approved = await self.gigs.shared(guest)
             require(approved, "export_approved_only")
@@ -94,6 +98,30 @@ class WorkspaceExports:
             snapshot, version, approved = await self.lists.read(group_id, concert_id)
             require(approved, "export_approved_only")
         require(version == data["version"], "conflict")
+        require(any(block["items"] for block in snapshot["blocks"]), "export_empty")
+        return snapshot, version
+
+    async def preview(
+        self, group_id: UUID, concert_id: UUID, data: dict[str, Any], renderer: PdfPreviewer
+    ) -> dict[str, Any]:
+        snapshot, _ = await self._approved(group_id, concert_id, data)
+        audiences = export_audiences(data["audience"])
+        payload = {
+            "snapshot": snapshot,
+            "settings": data.get("settings", self.user.export_settings),
+        }
+        if "lights" in audiences:
+            payload["lighting_snapshot"] = await self.exports.lighting_snapshot(group_id, snapshot)
+        return await asyncio.to_thread(renderer.preview, payload, audiences, data["language"])
+
+    async def apply(
+        self, group_id: UUID, concert_id: UUID, data: dict[str, Any], renderer: PdfRenderer | None
+    ) -> dict[str, Any]:
+        if data["action"] == "settings":
+            await self.exports.event(group_id, concert_id)
+            self.user.export_settings = settings(data["settings"])
+            return {"settings": self.user.export_settings}
+        snapshot, version = await self._approved(group_id, concert_id, data)
         export = await self.exports.create(
             group_id,
             concert_id,
@@ -103,11 +131,17 @@ class WorkspaceExports:
             private=True,
             back="workspace",
             reuse=True,
+            appearance=data.get("settings"),
         )
         await self.store.flush()
         assert renderer is not None
         await self.exports.files(
-            export.id, data["audience"], data["language"], data["language"] == "en", renderer
+            export.id,
+            data["audience"],
+            data["language"],
+            data["language"] == "en",
+            renderer,
+            refresh_appearance=False,
         )
         return {
             "export": str(export.id),
