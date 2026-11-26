@@ -50,6 +50,9 @@ body {
   color: var(--text);
   padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
 }
+body.keyboard-focus {
+  padding-block-end: var(--layout-height, 0px);
+}
 main {
   max-width: 940px;
   margin: auto;
@@ -606,6 +609,20 @@ dialog {
 }
 dialog::backdrop {
   background: #0008;
+}
+dialog.keyboard-focus[open]:focus-within {
+  position: fixed;
+  inset-block-start: calc(var(--keyboard-top, 0px) + var(--safe-top) + 12px);
+  inset-block-end: auto;
+  margin-block: 0;
+  max-height: calc(var(--visible-height, 100dvh) - var(--safe-top) - 24px);
+  border-radius: 18px;
+}
+dialog.keyboard-focus[open]::after {
+  content: "";
+  display: block;
+  block-size: var(--visible-height, 100dvh);
+  pointer-events: none;
 }
 dialog > button {
   display: block;

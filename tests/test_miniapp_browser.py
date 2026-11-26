@@ -292,6 +292,26 @@ async def browser_initial_background(browser, origin):
     await browser.call("Fetch.enable", {"patterns": [telegram_pattern]})
 
 
+async def emulate_keyboard(browser, *, height, offset):
+    await browser.js(f"""
+        Object.defineProperties(visualViewport, {{
+          height: {{ value: {height}, configurable: true }},
+          offsetTop: {{ value: {offset}, configurable: true }},
+        }});
+        visualViewport.dispatchEvent(new Event('resize'));
+    """)
+
+
+async def dismiss_emulated_keyboard(browser):
+    await browser.js("""
+        document.activeElement.blur();
+        delete visualViewport.height;
+        delete visualViewport.offsetTop;
+        visualViewport.dispatchEvent(new Event('resize'));
+    """)
+    await browser.wait("!document.querySelector('.keyboard-focus')")
+
+
 async def browser_music_search(browser, engine, band):
     from test_repertoire_workspace_music import ready_worker
 
@@ -425,7 +445,8 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             stub = """
                 window.Telegram={WebApp:{initData:INIT_DATA,colorScheme:'light',themeParams:{},
                 BackButton:{show:()=>{},onClick:fn=>{window.nativeBack=fn}},
-                onEvent:(name,fn)=>{window.themeChange=fn},ready:()=>{},expand:()=>{},
+                onEvent:(name,fn)=>{if(name==='themeChanged') window.themeChange=fn},
+                ready:()=>{},expand:()=>{},
                 close:()=>{window.testClosed=true},
                 isVersionAtLeast:()=>true,setBackgroundColor:color=>{window.nativeBackground=color},
                 enableClosingConfirmation:()=>{},disableClosingConfirmation:()=>{}}};
@@ -588,6 +609,13 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.click_named(".timing-wheel-dialog button", "55")
                 await browser.click_named(".timing-wheel-dialog button", "Готово")
                 assert await browser.js("document.querySelector('[name=start]').value === '12:55'")
+                await browser.js("document.querySelector('.timing-form [name=label]').focus()")
+                await emulate_keyboard(browser, height=360, offset=62)
+                await browser.wait("""
+                    Math.abs(document.activeElement.getBoundingClientRect().top
+                      - visualViewport.offsetTop - 12) < 2
+                """)
+                await dismiss_emulated_keyboard(browser)
                 await browser.js("""
                     const field = document.querySelector('.timing-form [name=label]');
                     field.value = 'Сбор'; field.focus();
@@ -1124,6 +1152,26 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             # RU/EN: Creating repertoire entries never inserts them into the current draft.
             await browser.js("document.getElementById('add-song').click()")
             await browser.wait("document.getElementById('song-dialog').open")
+            if launch_mode == "session":
+                await browser.js("document.getElementById('song-comment').focus()")
+                await emulate_keyboard(browser, height=365, offset=68)
+                await browser.wait("""
+                    (() => {
+                        const box = document.querySelector('#song-comment').getBoundingClientRect();
+                        const sheet = document.querySelector('#song-dialog');
+                        const top = visualViewport.offsetTop;
+                        return document.activeElement.id === 'song-comment'
+                          && sheet.getBoundingClientRect().top >= top
+                          && box.top - top >= 12 && box.top - top < 105
+                          && box.bottom < top + visualViewport.height;
+                    })()
+                """)
+                await emulate_keyboard(browser, height=300, offset=90)
+                await browser.wait("""
+                    Math.abs(document.getElementById('song-dialog').getBoundingClientRect().top
+                      - visualViewport.offsetTop - 12) < 2
+                """)
+                await dismiss_emulated_keyboard(browser)
             await browser.js("""
                 document.getElementById('song-title').value='Звёздный ветер';
                 document.getElementById('song-duration').value='02:30';

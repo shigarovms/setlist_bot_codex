@@ -714,24 +714,9 @@ $("search").addEventListener("input", () => {
   catalogPage = 0;
   renderCatalog();
 });
-let searchScrollFrame = 0,
-  pointerInProgress = false,
+let pointerInProgress = false,
   searchPointer = false,
   searchClick = false;
-function alignSearch() {
-  cancelAnimationFrame(searchScrollFrame);
-  searchScrollFrame = requestAnimationFrame(() => {
-    const search = $("search");
-    if (document.activeElement !== search) return;
-    // RU: iOS может сдвинуть видимую область при открытии клавиатуры.
-    // EN: Re-align after keyboard/viewport changes, not just before its animation.
-    const visibleTop = window.visualViewport?.offsetTop ?? 0;
-    const safeTop = parseFloat(getComputedStyle(document.body).paddingTop) || 0;
-    const offset = search.getBoundingClientRect().top - visibleTop - safeTop - 12;
-    if (Math.abs(offset) > 1)
-      window.scrollTo({ top: window.scrollY + offset, behavior: "instant" });
-  });
-}
 function settleSearchLayout() {
   requestAnimationFrame(() => {
     // RU: Не меняем размеры страницы посреди тапа или перетаскивания.
@@ -753,7 +738,6 @@ $("search").addEventListener("focus", () => {
   catalogPage = 0;
   renderCatalog();
   document.body.classList.add("search-active");
-  alignSearch();
 });
 $("search").addEventListener("blur", settleSearchLayout);
 $("search").addEventListener("keydown", (event) => {
@@ -777,6 +761,7 @@ for (const name of ["pointerup", "pointercancel"])
     pointerInProgress = false;
     searchPointer = false;
     settleSearchLayout();
+    if (fieldAlignmentPending) scheduleFieldAlignment();
   }, true);
 // RU/EN: Also handle keyboard activation and synthetic clicks without pointer events.
 document.addEventListener("click", event => {
@@ -786,19 +771,72 @@ document.addEventListener("click", event => {
   }
   leaveSearch(event);
 }, true);
-window.addEventListener("resize", alignSearch);
-function updateKeyboardInset() {
-  const viewport = window.visualViewport;
-  if (!viewport) return;
-  const covered = viewport.scale === 1
-    ? Math.max(0, Math.round(document.documentElement.clientHeight - viewport.height - viewport.offsetTop)) : 0;
-  document.documentElement.style.setProperty("--keyboard-bottom", `${covered}px`);
+const mobileInput = matchMedia("(max-width: 640px), (any-pointer: coarse)");
+const viewport = window.visualViewport;
+const textInputTypes = new Set(["text", "search", "number", "tel", "email", "url", "password"]);
+let fieldFrame = 0, fieldAlignmentPending = false, fieldContainer = null, lastViewportTop = 0;
+
+function alignFocusedField() {
+  const root = document.documentElement;
+  const layoutHeight = root.clientHeight;
+  const zoomed = viewport && Math.abs(viewport.scale - 1) > .01;
+  const visibleTop = zoomed ? 0 : viewport?.offsetTop ?? 0;
+  const visibleHeight = zoomed ? layoutHeight : viewport?.height ?? layoutHeight;
+  const covered = Math.max(0, layoutHeight - visibleTop - visibleHeight);
+  lastViewportTop = viewport?.offsetTop ?? 0;
+  root.style.setProperty("--keyboard-top", `${visibleTop}px`);
+  root.style.setProperty("--keyboard-bottom", `${covered}px`);
+  root.style.setProperty("--visible-height", `${visibleHeight}px`);
+  root.style.setProperty("--layout-height", `${layoutHeight}px`);
+
+  const field = document.activeElement;
+  const editable = (field instanceof HTMLInputElement && textInputTypes.has(field.type)
+    || field instanceof HTMLTextAreaElement) && !field.readOnly && !field.disabled;
+  const mobile = mobileInput.matches || covered > 48;
+  const dialog = editable ? field.closest("dialog[open]") : null;
+  const container = editable && !zoomed && mobile ? dialog ?? document.body : null;
+  if (fieldContainer !== container) {
+    fieldContainer?.classList.remove("keyboard-focus");
+    fieldContainer = container;
+    fieldContainer?.classList.add("keyboard-focus");
+  }
+  if (!editable || zoomed || (!mobile && field !== $("search"))) return;
+
+  const safeTop = parseFloat(getComputedStyle(document.body).paddingTop) || 0;
+  let target = visibleTop + safeTop + 12;
+  if (dialog) {
+    const heading = dialog.querySelector(".sheet-heading");
+    const stickyHeight = heading && getComputedStyle(heading).position === "sticky"
+      ? heading.getBoundingClientRect().height : 0;
+    target = Math.max(target, dialog.getBoundingClientRect().top + stickyHeight + 10);
+  }
+  const offset = field.getBoundingClientRect().top - target;
+  if (Math.abs(offset) <= 1) return;
+  const scroller = dialog ?? document.scrollingElement;
+  scroller?.scrollTo({ top: scroller.scrollTop + offset, behavior: "instant" });
 }
-updateKeyboardInset();
-window.visualViewport?.addEventListener("resize", updateKeyboardInset);
-window.visualViewport?.addEventListener("scroll", updateKeyboardInset);
-window.visualViewport?.addEventListener("resize", alignSearch);
-window.visualViewport?.addEventListener("scroll", alignSearch);
+
+function scheduleFieldAlignment() {
+  fieldAlignmentPending = true;
+  if (fieldFrame || pointerInProgress) return;
+  fieldFrame = requestAnimationFrame(() => {
+    fieldFrame = 0;
+    if (pointerInProgress) return;
+    fieldAlignmentPending = false;
+    alignFocusedField();
+  });
+}
+
+alignFocusedField();
+document.addEventListener("focusin", scheduleFieldAlignment);
+document.addEventListener("focusout", scheduleFieldAlignment);
+document.addEventListener("close", scheduleFieldAlignment, true);
+window.addEventListener("resize", scheduleFieldAlignment);
+viewport?.addEventListener("resize", scheduleFieldAlignment);
+viewport?.addEventListener("scroll", () => {
+  if (viewport.offsetTop !== lastViewportTop) scheduleFieldAlignment();
+});
+tg?.onEvent?.("viewportChanged", scheduleFieldAlignment);
 $("page-prev").addEventListener("click", () => {
   catalogPage--;
   renderCatalog();
