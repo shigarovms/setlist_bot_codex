@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -54,13 +55,17 @@ GATE = web.AppKey("gate", asyncio.Semaphore)
 LANGUAGE = web.RequestKey("miniapp-language", str)
 logger = logging.getLogger(__name__)
 ASSETS = Path(__file__).with_name("static")
+INITIAL_THEME = (ASSETS / "initial-theme.js").read_text(encoding="utf-8")
+INITIAL_THEME_HASH = base64.b64encode(hashlib.sha256(INITIAL_THEME.encode()).digest()).decode()
 HEADERS = {
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
     "Content-Security-Policy": (
-        "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self'; "
+        "default-src 'self'; "
+        f"script-src 'self' https://telegram.org 'sha256-{INITIAL_THEME_HASH}'; "
+        "style-src 'self'; "
         "connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; "
         "frame-ancestors https://web.telegram.org https://*.telegram.org"
     ),
@@ -110,6 +115,12 @@ async def errors(
 
 async def asset(request: web.Request) -> web.Response:
     name = request.match_info.get("asset", "index.html")
+    if name == "index.html":
+        html = (ASSETS / name).read_text(encoding="utf-8")
+        html = html.replace(
+            "<!-- initial theme -->", f'<script id="initial-theme">{INITIAL_THEME}</script>', 1
+        )
+        return web.Response(text=html, content_type="text/html", charset="utf-8")
     if name == "bot-labels-data.js":
         return web.Response(
             text=f"export const labels = {json.dumps(workspace_button_labels())};",
@@ -123,7 +134,6 @@ async def asset(request: web.Request) -> web.Response:
             body=(ASSETS / name).read_bytes(), content_type="text/plain", charset="utf-8"
         )
     types = {
-        "index.html": "text/html",
         "app.js": "text/javascript",
         "bot-labels.js": "text/javascript",
         "workspace.js": "text/javascript",

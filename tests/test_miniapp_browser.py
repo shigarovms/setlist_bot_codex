@@ -6,6 +6,7 @@ import json
 import shutil
 import socket
 import subprocess
+from urllib.parse import urlencode
 
 import aiohttp
 import pytest
@@ -231,6 +232,62 @@ async def browser_editor_layout(browser):
     assert await browser.js("document.activeElement.id") == "setlist-heading"
 
 
+async def browser_initial_background(browser, origin):
+    # Leave the first paint without the usual stylesheet, SDK, or app bundle.
+    telegram_pattern = {"urlPattern": "https://telegram.org/*"}
+    await browser.call(
+        "Fetch.enable",
+        {
+            "patterns": [
+                telegram_pattern,
+                {"urlPattern": "*/style.css"},
+                {"urlPattern": "*/app.js"},
+            ],
+        },
+    )
+    start = f"{origin}/miniapp/?workspace=1"
+    await browser.call(
+        "Emulation.setEmulatedMedia",
+        {
+            "features": [{"name": "prefers-color-scheme", "value": "dark"}],
+        },
+    )
+    await browser.call("Page.navigate", {"url": start})
+    await browser.wait("document.documentElement.dataset.theme === 'dark'")
+    assert await browser.js("getComputedStyle(document.documentElement).backgroundColor") == (
+        "rgb(28, 28, 30)"
+    )
+
+    await browser.call(
+        "Emulation.setEmulatedMedia",
+        {
+            "features": [{"name": "prefers-color-scheme", "value": "light"}],
+        },
+    )
+    fragment = urlencode({"tgWebAppThemeParams": json.dumps({"bg_color": "#232125"})})
+    await browser.call("Page.navigate", {"url": f"{start}&step=launch#{fragment}"})
+    await browser.wait("location.search.includes('step=launch')")
+    await browser.wait("document.documentElement.dataset.theme === 'dark'")
+    assert await browser.js("getComputedStyle(document.documentElement).backgroundColor") == (
+        "rgb(35, 33, 37)"
+    )
+
+    await browser.js("""
+        sessionStorage.setItem('setlistbot.start-theme', JSON.stringify({
+            scheme: 'dark', background: '#232125',
+        }));
+    """)
+    await browser.call("Page.navigate", {"url": f"{start}&step=internal"})
+    await browser.wait("location.search.includes('step=internal')")
+    await browser.wait("document.documentElement.dataset.theme === 'dark'")
+    assert await browser.js("getComputedStyle(document.documentElement).backgroundColor") == (
+        "rgb(35, 33, 37)"
+    )
+    await browser.js("sessionStorage.removeItem('setlistbot.start-theme')")
+    await browser.call("Emulation.setEmulatedMedia", {"features": []})
+    await browser.call("Fetch.enable", {"patterns": [telegram_pattern]})
+
+
 async def browser_music_search(browser, engine, band):
     from test_repertoire_workspace_music import ready_worker
 
@@ -366,6 +423,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 BackButton:{show:()=>{},onClick:fn=>{window.nativeBack=fn}},
                 onEvent:(name,fn)=>{window.themeChange=fn},ready:()=>{},expand:()=>{},
                 close:()=>{window.testClosed=true},
+                isVersionAtLeast:()=>true,setBackgroundColor:color=>{window.nativeBackground=color},
                 enableClosingConfirmation:()=>{},disableClosingConfirmation:()=>{}}};
             """.replace(
                 "INIT_DATA",
@@ -376,6 +434,8 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 ),
             )
             await browser.call("Page.addScriptToEvaluateOnNewDocument", {"source": stub})
+            if launch_mode == "session":
+                await browser_initial_background(browser, origin)
             await browser.call(
                 "Page.navigate",
                 {
@@ -904,6 +964,13 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             })()"""
             await browser.js("window.Telegram.WebApp.colorScheme='dark'; window.themeChange()")
             assert await browser.js("document.documentElement.dataset.theme") == "dark"
+            assert await browser.js("window.nativeBackground") == "#1c1c1e"
+            assert (
+                await browser.js(
+                    "JSON.parse(sessionStorage.getItem('setlistbot.start-theme')).background"
+                )
+                == "#1c1c1e"
+            )
             assert await browser.js(transparent_pause)
             assert await browser.js(matching_timing_style)
             await browser.js("window.scrollTo(0,0)")

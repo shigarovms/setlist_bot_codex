@@ -291,9 +291,15 @@ async def test_http_origin_identity_conflict_headers_and_real_restricted_databas
     try:
         async with TestClient(TestServer(app)) as client:
             response = await client.get("/miniapp/")
-            assert response.status == 200 and "telegram-web-app.js" in await response.text()
+            html = await response.text()
+            assert response.status == 200 and "telegram-web-app.js" in html
+            _, early_script = html.split('<script id="initial-theme">', maxsplit=1)
+            early_script, remaining = early_script.split("</script>", maxsplit=1)
+            assert 'href="./style.css"' in remaining and "telegram-web-app.js" in remaining
+            digest = base64.b64encode(hashlib.sha256(early_script.encode()).digest()).decode()
             assert response.headers["Cache-Control"] == "no-store"
-            assert "frame-ancestors" in response.headers["Content-Security-Policy"]
+            policy = response.headers["Content-Security-Policy"]
+            assert "frame-ancestors" in policy and f"'sha256-{digest}'" in policy
             labels = await client.get("/miniapp/bot-labels-data.js")
             assert labels.status == 200 and labels.content_type == "text/javascript"
             words = json.loads(

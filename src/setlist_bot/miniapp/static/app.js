@@ -225,7 +225,9 @@ function theme() {
   const dark =
     tg?.colorScheme === "dark" ||
     (!tg?.colorScheme && systemTheme.matches);
-  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  const root = document.documentElement;
+  const scheme = dark ? "dark" : "light";
+  root.dataset.theme = scheme;
   const map = {
     bg_color: "--bg",
     text_color: "--text",
@@ -237,9 +239,17 @@ function theme() {
   for (const [source, target] of Object.entries(map)) {
     const color = tg?.themeParams?.[source];
     if (/^#[0-9a-f]{3,8}$/i.test(color ?? ""))
-      document.documentElement.style.setProperty(target, color);
-    else document.documentElement.style.removeProperty(target);
+      root.style.setProperty(target, color);
+    else root.style.removeProperty(target);
   }
+  root.style.removeProperty("color-scheme");
+  root.style.removeProperty("background-color");
+  if (!tg) return;
+  const background = getComputedStyle(root).getPropertyValue("--bg").trim();
+  if (!/^#[0-9a-f]{6}$/i.test(background)) return;
+  try { sessionStorage.setItem("setlistbot.start-theme", JSON.stringify({ scheme, background })); }
+  catch { /* Startup can still read Telegram's launch colors. */ }
+  if (tg.isVersionAtLeast?.("6.1")) tg.setBackgroundColor?.(background);
 }
 theme();
 tg?.onEvent?.("themeChanged", theme);
