@@ -135,6 +135,7 @@ async def asset(request: web.Request) -> web.Response:
         )
     types = {
         "app.js": "text/javascript",
+        "modal-scroll.js": "text/javascript",
         "bot-labels.js": "text/javascript",
         "workspace.js": "text/javascript",
         "repertoire-import.js": "text/javascript",

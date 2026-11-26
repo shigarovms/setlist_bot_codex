@@ -1,4 +1,5 @@
 import { withBotLabels } from "./bot-labels.js";
+import "./modal-scroll.js";
 import { clone, clock, total, numbered, wire, move, asText } from "./model.js";
 import { DraftPersistence } from "./persistence.js";
 import { bandUrl, performanceUrl, showWorkspace, workspaceParams, workspaceText } from "./workspace.js";

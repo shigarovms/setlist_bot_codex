@@ -312,6 +312,85 @@ async def dismiss_emulated_keyboard(browser):
     await browser.wait("!document.querySelector('.keyboard-focus')")
 
 
+async def browser_modal_scroll(browser):
+    previous_scroll = await browser.js("window.scrollY")
+    await browser.js("""
+        (() => {
+            const reserve = document.createElement('div');
+            reserve.id = 'modal-test-background';
+            reserve.style.height = '1200px';
+            document.body.append(reserve);
+            window.scrollTo(0, 210);
+        })()
+    """)
+    await browser.wait("window.scrollY === 210")
+    await browser.js("""
+        (() => {
+            const modal = document.createElement('dialog');
+            modal.id = 'modal-scroll-test';
+            const close = document.createElement('button');
+            close.textContent = 'Закрыть';
+            const content = document.createElement('div');
+            content.style.height = '1200px';
+            modal.append(close, content);
+            document.body.append(modal);
+            modal.showModal();
+        })()
+    """)
+    point = await browser.js("""
+        (() => {
+            const box = document.getElementById('modal-scroll-test').getBoundingClientRect();
+            return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+        })()
+    """)
+    wheel = {"type": "mouseWheel", **point, "deltaX": 0, "deltaY": 240}
+    await browser.call("Input.dispatchMouseEvent", wheel)
+    await browser.wait("document.getElementById('modal-scroll-test').scrollTop > 0")
+    assert await browser.js("""
+        (() => {
+            const modal = document.getElementById('modal-scroll-test');
+            const box = modal.getBoundingClientRect();
+            const x = box.left + box.width / 2, y = box.top + box.height / 2;
+            function swipe(fromY, delta) {
+                const steps = [['touchstart', fromY], ['touchmove', fromY + delta]];
+                for (const [type, clientY] of steps) {
+                    const touch = new Touch({ identifier: 1, target: modal, clientX: x, clientY });
+                    const options = { touches: [touch], bubbles: true, cancelable: true };
+                    const event = new TouchEvent(type, options);
+                    if (!modal.dispatchEvent(event)) return true;
+                }
+                return false;
+            }
+            const middleCanScroll = !swipe(y, -20);
+            modal.scrollTop = 0;
+            const topLocked = swipe(y, 20);
+            modal.scrollTop = modal.scrollHeight;
+            const bottomLocked = swipe(y, -20);
+            return middleCanScroll && topLocked && bottomLocked && swipe(box.top - 2, 20);
+        })()
+    """)
+    await browser.call("Input.dispatchMouseEvent", wheel)
+    await browser.call("Input.dispatchMouseEvent", {**wheel, "x": 195, "y": 2})
+    await browser.js(
+        "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
+    )
+    assert await browser.js("window.scrollY === 210")
+    await browser.js("""
+        (() => {
+            const modal = document.getElementById('modal-scroll-test');
+            modal.close();
+            modal.remove();
+        })()
+    """)
+    assert await browser.js("window.scrollY === 210")
+    await browser.call("Input.dispatchMouseEvent", wheel)
+    await browser.wait("window.scrollY > 210")
+    await browser.js(f"""
+        document.getElementById('modal-test-background').remove();
+        window.scrollTo(0, {previous_scroll});
+    """)
+
+
 async def browser_music_search(browser, engine, band):
     from test_repertoire_workspace_music import ready_worker
 
@@ -882,6 +961,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             )
             if launch_mode == "session":
                 await browser_editor_layout(browser)
+                await browser_modal_scroll(browser)
             assert await browser.js("document.getElementById('catalog-pages').hidden")
             await browser.js("""
                 const search = document.getElementById('search');
