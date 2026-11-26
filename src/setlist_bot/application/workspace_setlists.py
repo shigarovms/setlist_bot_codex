@@ -4,7 +4,7 @@ import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid5
 
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.message_refresh import queue_card_refreshes
@@ -26,6 +26,7 @@ from setlist_bot.domain.entities import (
 from setlist_bot.domain.rules import normalize, pause_item, require, totals
 
 SETLIST_SESSION = "workspace_setlist"
+REQUESTS_SEEN = "workspace_setlist_requests_seen"
 PAGE_SIZE = 20
 
 
@@ -175,18 +176,37 @@ class WorkspaceSetlists:
             snapshot = revision.snapshot
         return {"entries": entries(snapshot)}
 
-    async def requests(self, group_id: UUID, concert_id: UUID) -> dict[str, Any]:
+    async def requests(
+        self, group_id: UUID, concert_id: UUID, *, viewed: set[str] | None = None
+    ) -> dict[str, Any]:
+        if viewed is not None:
+            await self.store.lock_chat(self.user.telegram_id)
         group = await self.groups.access(group_id, admin=True)
         snapshot, version, approved = await self.lists.read(group_id, concert_id)
         concert = await self.store.get(Concert, concert_id)
+        receipt_id = uuid5(self.user.id, f"{REQUESTS_SEEN}:{concert.id}")
+        scope = {
+            "kind": REQUESTS_SEEN,
+            "group_id": str(group_id),
+            "concert_id": str(concert_id),
+            "group_epoch": group.lifecycle_version,
+            "concert_epoch": concert.lifecycle_version,
+        }
+        receipt = None
+        seen: set[str] = set()
         requests = []
         for row in await self.store.find(
             Confirmation, user_id=self.user.id, chat_id=self.user.telegram_id
         ):
             item = SetlistMenus.data(row)
+            if row.id == receipt_id:
+                receipt = row
+                if all(item.get(key) == value for key, value in scope.items()):
+                    seen = set(item["ids"])
+                continue
             if (
-                row.expires_at > now()
-                and item.get("kind") == REQUEST
+                item.get("kind") == REQUEST
+                and row.expires_at > now()
                 and item.get("status") == "pending"
                 and item["group_id"] == str(group_id)
                 and item["concert_id"] == str(concert_id)
@@ -218,8 +238,28 @@ class WorkspaceSetlists:
         )
         setlist = await self.lists.load(group_id, concert_id)
         base = await self.lists.proposal_base_version(setlist) if proposals else version
+        pending = {item["id"] for item in requests} | {str(row.id) for row in proposals}
+        if viewed is not None:
+            updated = pending & (seen | viewed)
+            if updated != seen:
+                command = json.dumps({**scope, "ids": sorted(updated)})
+                if receipt is None:
+                    self.store.add(
+                        Confirmation(
+                            id=receipt_id,
+                            user_id=self.user.id,
+                            chat_id=self.user.telegram_id,
+                            command=command,
+                            # Kept until the performance is purged. Use a finite DB timestamp.
+                            expires_at=datetime(9999, 1, 1, tzinfo=UTC),
+                        )
+                    )
+                else:
+                    receipt.command = command
+                seen = updated
         return {
             "requests": requests,
+            "unread": bool(pending - seen),
             "proposals": [
                 {
                     "id": str(row.id),

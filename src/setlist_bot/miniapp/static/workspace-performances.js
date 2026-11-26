@@ -212,6 +212,9 @@ export function performanceAction({ language, action, request, readOptions, read
           copyOptions[key] = checkbox;
           fields.append(label);
         }
+        lineup?.addEventListener("change", () => {
+          copyOptions.copy_lineup.disabled = !!lineup.value;
+        });
       }
       const actions = el("div", "", { class: "performance-actions" });
       actions.append(el("button", action === "create" ? t.reviewCreate : t.preview, { type: "submit", class: "primary" }));
@@ -222,7 +225,7 @@ export function performanceAction({ language, action, request, readOptions, read
         close.hidden = true;
       }
       fields.append(actions);
-      form.addEventListener("submit", event => {
+      form.onsubmit = event => {
         event.preventDefault();
         const values = quick?.required ? { quick: quick.value } : Object.fromEntries(new FormData(form));
         if (action === "create") {
@@ -234,11 +237,13 @@ export function performanceAction({ language, action, request, readOptions, read
         }
         if (source) {
           values.source = source.id;
-          for (const key of ["copy_timing", "copy_lineup", "copy_setlist"])
-            values[key] = !!copyOptions[key]?.checked;
+          for (const key of ["copy_timing", "copy_lineup", "copy_setlist"]) {
+            const option = copyOptions[key];
+            values[key] = !!option?.checked && !option.disabled;
+          }
         }
         begin({ action, ...target, ...values });
-      });
+      };
       body.replaceChildren(form);
       if (matchMedia("(max-width: 640px)").matches) heading.focus({ preventScroll: true });
       else fields.querySelector("input[type=date]")?.focus();

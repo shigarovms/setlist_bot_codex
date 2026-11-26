@@ -10,6 +10,7 @@ from test_setlist_menus import sender
 from test_telegram import FakeTelegram
 
 from setlist_bot.application.catalog import Catalog
+from setlist_bot.application.groups import Groups
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.domain.entities import (
     DeploymentIdentity,
@@ -105,6 +106,37 @@ async def test_shared_edit_conflicts_and_refreshes_without_creating_drafts(engin
             default_pause_seconds=0,
         )
         assert stale["error"] == "conflict"
+
+
+async def test_seen_requests_keep_counts_and_are_scoped_to_admin_and_performance(engine, world):
+    await setup_workspace(engine, world)
+    async with PostgresUnitOfWork(engine) as uow:
+        band, event = world.group.id, world.concert.id
+        membership = (await uow.store.find(Membership, group_id=band, user_id=world.member.id))[0]
+        await Groups(uow.store, world.admin).administrator(band, membership.id, True)
+        snapshot, _, _ = await Setlists(uow.store, world.admin).read(band, event)
+        first, recent, other = (
+            Submission(
+                group_id=band, concert_id=concert.id, author_id=world.member.id, snapshot=snapshot
+            )
+            for concert in (world.concert, world.concert, world.concert2)
+        )
+        for row in (first, recent, other):
+            uow.store.add(row)
+    query = scope(world)
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        assert (await get(client, 1, "shared_requests", **query))["unread"]
+        partial = await post(client, 1, "shared_requests_seen", {**query, "ids": [str(first.id)]})
+        assert partial["unread"] and len(partial["proposals"]) == 2
+        result = await post(
+            client, 1, "shared_requests_seen", {**query, "ids": [str(recent.id), str(other.id)]}
+        )
+        assert not result["unread"] and len(result["proposals"]) == 2
+        assert not (await get(client, 1, "shared_requests", **query))["unread"]
+        assert (await get(client, 2, "shared_requests", **query))["unread"]
+        other_event = {**query, "performance": str(world.concert2.id)}
+        assert (await get(client, 1, "shared_requests", **other_event))["unread"]
+        await post(client, 3, "shared_requests_seen", {**query, "ids": [str(first.id)]}, 403)
 
 
 async def test_variants_apply_and_requests_for_approval_and_reopening(engine, world):

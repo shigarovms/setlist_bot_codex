@@ -4,7 +4,7 @@ import { mountPdfExport, pdfTitle } from "./workspace-export.js";
 
 const copy = withBotLabels("shared-setlist", {
   ru: {
-    versions: "Варианты и история",
+    menu: "Меню общего сет-листа", unread: "Есть непросмотренные запросы",
     close: "Закрыть", pause: "Пауза",
     noVariants: "Сохранённых вариантов пока нет.", submitted: "Предложение", version: "Версия",
     history: "История", revisionActions: { created: "Создан", approved: "Утверждён", reopened: "Возвращён в работу", restored: "Восстановлен", proposal_applied: "Применён вариант" }, edited: "Изменён",
@@ -13,7 +13,7 @@ const copy = withBotLabels("shared-setlist", {
     confirmReopen: "Снять утверждение и вернуть сет-лист в работу?",
     askReopen: "Запросить возврат в работу",
     requested: "Запрос поставлен в очередь на отправку администратору в Telegram.", duplicate: "Такой запрос уже ожидает решения.",
-    requests: "Входящие запросы", noRequests: "Нет запросов на рассмотрении.",
+    requests: "Запросы участников", noRequests: "Нет запросов на рассмотрении.",
     setlistProposal: "Предложение сет-листа", declined: "Отклонено",
     proposalApplied: "Предложение применено.", proposalDeclined: "Предложение отклонено.",
     approvedProposal: "Чтобы применить вариант, сначала верните общий сет-лист в работу.",
@@ -22,7 +22,7 @@ const copy = withBotLabels("shared-setlist", {
     previous: "Назад", next: "Дальше",
   },
   en: {
-    versions: "Variants and history",
+    menu: "Shared setlist menu", unread: "There are unseen requests",
     close: "Close", pause: "Pause",
     noVariants: "There are no saved versions or proposals.", submitted: "Proposal", version: "Version",
     history: "History", revisionActions: { created: "Created", approved: "Approved", reopened: "Reopened", restored: "Restored", proposal_applied: "Proposal applied" }, edited: "Edited",
@@ -31,7 +31,7 @@ const copy = withBotLabels("shared-setlist", {
     confirmReopen: "Reopen the approved setlist for editing?",
     askReopen: "Request reopening",
     requested: "The request is queued for delivery to an admin in Telegram.", duplicate: "This request is already awaiting a decision.",
-    requests: "Incoming requests", noRequests: "There are no requests awaiting a decision.",
+    requests: "Participant requests", noRequests: "There are no requests awaiting a decision.",
     setlistProposal: "Setlist proposal", declined: "Declined",
     proposalApplied: "Proposal applied.", proposalDeclined: "Proposal declined.",
     approvedProposal: "Reopen the shared setlist before applying this proposal.",
@@ -54,29 +54,33 @@ function button(title, action, attrs = {}) {
   return node;
 }
 
-export function mountSharedSetlist({ root, data, language, editorButton, decision, read, request, refresh, status }) {
+export function mountSharedSetlist({ root, sharedHeading, data, language, editorButton, decision, read, request, refresh, status }) {
   const t = copy[language];
   const shared = data.setlist;
   const canDecide = shared.approved || shared.entries.length > 0;
-  const actions = el("div", "", { class: canDecide ? "toolbar shared-actions has-decision" : "toolbar shared-actions" });
+  const actions = el("div", "", { class: "toolbar shared-actions" });
   const dialog = el("dialog", "", { "aria-labelledby": "shared-tools-title", class: "shared-tools" });
   const toolbar = el("div", "", { class: "toolbar" });
   const heading = el("h2", "", { id: "shared-tools-title" });
   const message = el("p", "", { role: "status" });
   const content = el("div", "");
   const returnNav = el("div", "", { class: "page-back", hidden: "" });
-  const tabs = el("div", "", { class: "toolbar section-tabs", role: "group", "aria-label": t.versions, hidden: "" });
-  const variantTab = button(t.variants, () => openVariants());
-  const historyTab = button(t.history, () => openVariants(0, true));
-  tabs.append(variantTab, historyTab);
   const check = button(t.check, () => process(), { hidden: "" });
   const dialogCheck = button(t.check, () => process(), { hidden: "" });
   let attempt = null, working = false;
   let view = 0;
-  let requestsRead = 0;
+  let pendingRead, markingSeen;
   const close = button(t.close, closeDialog);
-  dialog.append(returnNav, heading, tabs, message, content, toolbar, dialogCheck, close);
+  dialog.append(returnNav, heading, message, content, toolbar, dialogCheck, close);
   root.append(actions, check, dialog);
+
+  const menu = el("details", "", { class: "action-menu shared-menu" });
+  const trigger = el("summary", "", { "aria-label": t.menu });
+  const unread = el("span", "", { class: "shared-menu-unread", "aria-hidden": "true", hidden: "" });
+  trigger.append(el("span", "", { class: "shared-menu-icon", "aria-hidden": "true" }), unread);
+  const choices = el("div", "", { class: "action-menu-list" });
+  menu.append(trigger, choices);
+  sharedHeading.append(menu);
 
   if (shared.approved) actions.append(button(t.downloadPdf, () => openExport(shared.version), { class: "primary pdf-export-action" }));
   if (editorButton) actions.append(editorButton);
@@ -84,9 +88,9 @@ export function mountSharedSetlist({ root, data, language, editorButton, decisio
   if (data.admin) {
     const incoming = button(t.requests, () => openRequests(), { class: "shared-incoming" });
     incoming.append(requestCount);
-    actions.append(incoming);
+    choices.append(incoming);
   }
-  actions.append(button(t.versions, () => openVariants(), { class: "shared-versions-action" }));
+  choices.append(button(t.variants, () => openVariants()), button(t.history, () => openVariants(0, true)));
   if (canDecide) {
     const label = shared.approved ? (data.admin ? t.reopen : t.askReopen) : (data.admin ? t.approve : t.askApprove);
     actions.append(button(label, () => {
@@ -110,7 +114,7 @@ export function mountSharedSetlist({ root, data, language, editorButton, decisio
     content.replaceChildren();
     toolbar.replaceChildren();
     returnNav.replaceChildren();
-    returnNav.hidden = tabs.hidden = true;
+    returnNav.hidden = true;
     if (!dialog.open) dialog.showModal();
     const serial = ++view;
     return () => dialog.open && view === serial;
@@ -118,10 +122,7 @@ export function mountSharedSetlist({ root, data, language, editorButton, decisio
 
   async function openVariants(page = 0, history = false) {
     if (attempt) return;
-    const current = open(t.versions);
-    tabs.hidden = false;
-    variantTab.setAttribute("aria-pressed", String(!history));
-    historyTab.setAttribute("aria-pressed", String(history));
+    const current = open(history ? t.history : t.variants);
     message.textContent = t.working;
     try {
       const result = await read(history ? "shared_history" : "shared_variants", { page });
@@ -148,19 +149,28 @@ export function mountSharedSetlist({ root, data, language, editorButton, decisio
     } catch (error) { if (current()) message.textContent = error.message; }
   }
 
+  function updateIndicators(result) {
+    const count = result.requests.length + result.proposals.length;
+    requestCount.textContent = count ? ` ${count}` : "";
+    requestCount.hidden = !count;
+    unread.hidden = !result.unread;
+    trigger.setAttribute("aria-label", result.unread ? `${t.menu}. ${t.unread}` : t.menu);
+  }
+
   async function fetchRequests() {
-    const serial = ++requestsRead;
-    const result = await read("shared_requests");
-    if (serial === requestsRead && actions.isConnected) {
-      const count = result.requests.length + result.proposals.length;
-      requestCount.textContent = count ? ` ${count}` : "";
-      requestCount.hidden = !count;
-    }
-    return result;
+    if (markingSeen) await markingSeen;
+    pendingRead ??= read("shared_requests").then(result => {
+      updateIndicators(result);
+      return result;
+    }).finally(() => { pendingRead = null; });
+    return pendingRead;
   }
 
   if (data.admin && decision) void openRequests(decision);
   else if (data.admin) void fetchRequests().catch(() => {});
+  if (data.admin) menu.addEventListener("toggle", () => {
+    if (menu.open) void fetchRequests().catch(() => {});
+  });
 
   async function openRequests(focus = null) {
     if (attempt) return;
@@ -190,6 +200,11 @@ export function mountSharedSetlist({ root, data, language, editorButton, decisio
       }
       content.append(list);
       if (focus) document.getElementById(`shared-request-${focus}`)?.scrollIntoView({ block: "center" });
+      if (result.unread) {
+        const ids = [...result.requests, ...result.proposals].map(row => row.id);
+        markingSeen = read("shared_requests_seen", { ids }, "POST").then(updateIndicators)
+          .catch(() => {}).finally(() => { markingSeen = null; });
+      }
     } catch (error) { if (current()) message.textContent = error.message; }
   }
 
@@ -247,7 +262,7 @@ export function mountSharedSetlist({ root, data, language, editorButton, decisio
   async function process() {
     if (!attempt || working) return;
     working = true;
-    actions.inert = content.inert = toolbar.inert = true;
+    menu.inert = actions.inert = content.inert = toolbar.inert = true;
     check.hidden = dialogCheck.hidden = true;
     const tell = text => { if (dialog.open) message.textContent = text; else status(text); };
     tell(t.working);
@@ -273,7 +288,7 @@ export function mountSharedSetlist({ root, data, language, editorButton, decisio
       tell(error.message);
     } finally {
       working = false;
-      actions.inert = content.inert = toolbar.inert = !!attempt;
+      menu.inert = actions.inert = content.inert = toolbar.inert = !!attempt;
       check.hidden = !attempt || dialog.open;
       dialogCheck.hidden = !attempt || !dialog.open;
     }

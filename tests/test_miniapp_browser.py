@@ -485,6 +485,8 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             )
             await queue_publication(uow.store, world.member, world.group.id, world.concert.id, 1)
         past = await lists.create(world.group.id, date(2025, 12, 1), "Прошлое выступление")
+        if launch_mode == "workspace":
+            await invite_fixture_member(uow.store, past, world.member)
         _, version, _ = await lists.read(world.group.id, past.id)
         await lists.edit_songs(world.group.id, past.id, version, ["Комета"])
         _, version, _ = await lists.read(world.group.id, past.id)
@@ -640,8 +642,27 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     "document.querySelector('a[href*=\"view=inbox\"] .shared-incoming-count')"
                     "?.textContent.trim() === '1'"
                 )
+                await browser.call(
+                    "Page.navigate",
+                    {
+                        "url": f"{origin}/miniapp/?workspace=1&band={world.group.id}"
+                        f"&view=performance&performance={world.concert.id}",
+                    },
+                )
+                await browser.wait("!!document.querySelector('.shared-menu-unread:not([hidden])')")
+                await browser.js("document.querySelector('.shared-menu summary').click()")
+                assert await browser.js("""
+                    document.querySelector('.shared-menu').open &&
+                    !document.querySelector('.shared-menu-unread').hidden
+                """)
+                await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1"})
+                await browser.wait("!!document.querySelector('a[href*=\"view=inbox\"]')")
                 await browser.js("document.querySelector('a[href*=\"view=inbox\"]').click()")
                 await browser.click_named("#workspace-content a", "Предложение сет-листа")
+                await browser.wait("""
+                    document.querySelector('.shared-menu-unread')?.hidden &&
+                    document.querySelector('.shared-incoming-count')?.textContent.trim() === '1'
+                """)
                 await browser.click_named(".shared-tools button", "Показать вариант")
                 await browser.wait("!!document.querySelector('dialog[open] .shared-setlist')")
                 await browser.js("window.nativeBack()")
@@ -666,19 +687,29 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                         "mobile": True,
                     },
                 )
-                await browser.click_named("#workspace-content .action-menu summary", "Еще")
+                await browser.click_named("#workspace-heading .action-menu summary", "Действия")
                 assert await browser.js("""
                     (() => {
                         const nav = document.querySelector('#workspace-back');
                         const menu = document.querySelector('.action-menu[open]');
                         const details = menu.querySelector('.action-menu-list');
                         const title = document.querySelector('#workspace-title');
+                        const band = document.querySelector('#workspace-band-context');
+                        const sharedHeading = document.getElementById('shared-list');
                         const [data, roster, timing, remove] = [...details.children];
                         const [a, b, c, d] = [...details.children].map(button =>
                           button.getBoundingClientRect());
                         return nav.childElementCount === 1
                           && Math.abs(nav.firstElementChild.offsetWidth - nav.clientWidth) <= 1
-                          && nav.getBoundingClientRect().bottom < title.getBoundingClientRect().top
+                          && nav.getBoundingClientRect().bottom <= band.getBoundingClientRect().top
+                          && band.getBoundingClientRect().bottom <=
+                             title.getBoundingClientRect().top
+                          && getComputedStyle(band).fontWeight === '400'
+                          && title.textContent === 'Новый год'
+                          && sharedHeading.querySelector('h2').offsetTop ===
+                             sharedHeading.querySelector('summary').offsetTop
+                          && [...document.querySelectorAll('.shared-actions > button')]
+                             .every(button => button.offsetWidth === button.parentNode.clientWidth)
                           && nav.querySelector('.page-back-arrow').textContent === '←'
                           && data.textContent === 'Данные выступления'
                           && roster.textContent === 'Состав участников'
@@ -798,12 +829,12 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                         return response;
                     };
                 """)
-                await browser.click_named("#workspace-content button", "Варианты и история")
-                await browser.click_named(".shared-tools button", "История")
+                await browser.click_menu("История")
                 await browser.wait("typeof window.releaseHistory === 'function'")
                 await browser.js("window.nativeBack()")
                 await browser.wait(
                     "document.querySelector('.shared-incoming-count')?.textContent.trim() === '1'"
+                    " && document.querySelector('.shared-menu-unread')?.hidden"
                 )
                 await browser.js("document.querySelector('.shared-incoming').click()")
                 await browser.js("window.releaseHistory(); window.fetch = fetchNormally")
@@ -819,7 +850,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     " === 'Предложение отклонено.'"
                 )
                 assert await browser.js("document.querySelector('.shared-incoming-count').hidden")
-                await browser.click_named("#workspace-content button", "Входящие запросы")
+                await browser.click_menu("Запросы участников")
                 await browser.wait(
                     "document.querySelector('dialog[open]')?.innerText"
                     ".includes('Нет запросов на рассмотрении.')"
@@ -941,8 +972,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     [...document.querySelectorAll('#workspace-content button')].some(button =>
                         button.textContent.includes('Открыть редактор'))
                 """)
-                await browser.click_named("#workspace-content button", "Варианты и история")
-                await browser.click_named(".shared-tools button", "История")
+                await browser.click_menu("История")
                 await browser.wait(
                     "document.querySelector('.shared-tools').innerText"
                     ".includes('Возвращён в работу')"
@@ -1510,8 +1540,33 @@ async def browser_manage_performance(browser, engine, group_id, origin):
     assert await browser.js("document.getElementById('workspace-performance-title').value") == (
         "Прошлое выступление"
     )
-    await browser.click_named("dialog[open] button", "Назад")
-    await browser.wait("!document.getElementById('workspace-performance-performance_type')")
+    assert await browser.js("""
+        document.querySelector('#performance-copy_lineup').checked &&
+        document.querySelector('#performance-copy_setlist').checked
+    """)
+    await browser.js("""
+        document.getElementById('workspace-performance-date').value = '2099-06-04';
+        document.getElementById('workspace-performance-title').value = 'Из истории';
+    """)
+    await browser.click_named("dialog[open] button", "Сверить и создать")
+    await process_catalog_request(engine)
+    await browser.wait("!!document.querySelector('dialog[open] dl')")
+    assert await browser.js("""
+        (() => {
+            const preview = document.querySelector('dialog[open] dl').innerText;
+            return preview.includes('Скопировать состав') &&
+                preview.includes('Скопировать общий сет-лист');
+        })()
+    """)
+    await browser.click_named("dialog[open] button", "Подтвердить")
+    await process_catalog_request(engine)
+    await browser.wait("document.querySelector('.shared-setlist')?.innerText.includes('Комета')")
+    await browser.click_menu("Состав участников")
+    await browser.wait(
+        "document.querySelector('.workspace-list')?.innerText.includes('Fixture performer')"
+    )
+    await browser.click_back("К выступлению")
+    await browser.click_back("К выступлениям")
     await browser.click_named("#workspace-content button", "Новое выступление")
     await browser.wait("!!document.getElementById('workspace-quick-performance')")
     await browser.call(
@@ -1597,7 +1652,7 @@ async def browser_manage_performance(browser, engine, group_id, origin):
     await browser.click_named("dialog[open] button", "Подтвердить")
     await process_catalog_request(engine)
     await browser.wait(
-        "document.querySelector('#workspace-content h2')?.textContent === 'Летний концерт'"
+        "document.querySelector('h1.performance-title')?.textContent === 'Летний концерт'"
     )
     await browser.click_menu("Тайминг выступления")
     await browser.wait("!!document.querySelector('.timing-form')")
@@ -1646,7 +1701,7 @@ async def browser_manage_performance(browser, engine, group_id, origin):
     await browser.click_named("dialog[open] button", "Подтвердить")
     await process_catalog_request(engine)
     await browser.wait(
-        "document.querySelector('#workspace-content h2')?.textContent === 'Летний концерт'"
+        "document.querySelector('h1.performance-title')?.textContent === 'Летний концерт'"
     )
     assert await browser.js(
         "document.querySelector('#workspace-content').innerText.includes('Казань')"
@@ -1803,7 +1858,7 @@ async def browser_roster(browser, engine, world, origin):
     )
     await browser.click_back("К выступлению")
     await browser.wait(
-        "document.querySelector('#workspace-content h2')?.textContent === 'Второй концерт'"
+        "document.querySelector('h1.performance-title')?.textContent === 'Второй концерт'"
     )
 
 

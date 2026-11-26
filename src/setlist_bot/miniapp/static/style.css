@@ -191,13 +191,33 @@ fieldset, form { min-inline-size: 0; max-inline-size: 100%; }
   > :nth-child(odd of :not([hidden])):nth-last-child(1 of :not([hidden])) {
   grid-column: 1 / -1;
 }
-.shared-actions > :is(.primary, .shared-incoming),
-.shared-actions:not(.has-decision) > .shared-versions-action {
-  grid-column: 1 / -1;
+.toolbar.shared-actions { grid-template-columns: minmax(0, 1fr); }
+.shared-setlist-heading { align-items: flex-start; }
+.shared-setlist-heading h2 { margin: 0; }
+.shared-menu > summary { position: relative; inline-size: 68px; }
+.shared-menu-icon {
+  inline-size: 16px;
+  block-size: 2px;
+  background: currentColor;
+  box-shadow: 0 -5px currentColor, 0 5px currentColor;
+}
+.shared-menu-unread {
+  position: absolute;
+  inset-block-start: 10px;
+  inset-inline-start: 32px;
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+.shared-menu .shared-incoming {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--control-gap);
 }
 .shared-incoming-count { color: var(--danger); font-weight: 750; }
 .workspace-nav .shared-incoming-count { flex: none; margin-inline-start: .35em; }
-.section-tabs button[aria-pressed="true"] { background: var(--button); color: var(--button-text); }
 .pdf-page-preview p { margin-block: 4px; }
 .pdf-stage-warning { color: var(--danger); }
 :is(.workspace-nav, .toolbar):not(:has(> :not([hidden]))) {
@@ -288,6 +308,9 @@ fieldset, form { min-inline-size: 0; max-inline-size: 100%; }
 .performance-actions, .performance-actions button { width: 100%; }
 .performance-actions { display: grid; gap: var(--control-gap); }
 .performance-form .import-fields, .performance-form select { width: 100%; }
+.performance-band { margin: 0 0 4px; color: var(--hint); font-size: 14px; font-weight: 400; }
+header h1.performance-title { font-size: clamp(23px, 6vw, 28px); }
+.performance-meta { color: var(--hint); margin-block: 4px var(--control-gap); }
 .music-track { display: flex; gap: 8px; align-items: center; min-height: 44px; }
 .music-track .workspace-duration { flex-shrink: 0; }
 .performance-info { white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -2,6 +2,7 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 
 from aiohttp.test_utils import TestClient, TestServer
+from conftest import invite_fixture_member
 from test_miniapp import settings
 from test_repertoire_workspace_actions import get, post
 from test_repertoire_workspace_music import deliver_request
@@ -70,6 +71,63 @@ async def test_creation_options_only_count_past_active_performances(engine, worl
         admin = await post(client, 1, "open_repertoire", {"band": str(group)})
         preview = await step(client, engine, admin, "create", lineup="none", **form())
         assert not preview["lineup"]
+
+
+async def test_copy_from_history_preserves_choices_and_creates_no_invitations(engine, world):
+    await setup_workspace(engine, world)
+    band = {"band": str(world.group.id)}
+    current = today()
+    async with PostgresUnitOfWork(engine) as uow:
+        lists = Setlists(uow.store, world.admin)
+        source = await lists.create(world.group.id, current - timedelta(days=1), "Исходное")
+        booking = await invite_fixture_member(uow.store, source, world.member)
+        origin = await uow.store.get(GigSlot, booking.slot_id)
+        await lists.edit_songs(world.group.id, source.id, 0, ["Комета", "2 мин", "Комета"])
+        await lists.approve(world.group.id, source.id, 1)
+        staffing = Staffing(uow.store, world.admin)
+        role = await staffing.role(world.group.id, "Световик")
+        saved = await staffing.template(world.group.id, "Свет", [{"role_id": str(role.id)}])
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        admin = await post(client, 1, "open_repertoire", band)
+        cases = [
+            (True, True, "none", ["copy_lineup", "copy_setlist"], origin.role_id),
+            (True, False, "none", ["copy_lineup"], origin.role_id),
+            (False, True, "none", ["copy_setlist"], None),
+            (False, False, "none", [], None),
+            (True, True, str(saved.id), ["copy_setlist"], role.id),
+        ]
+        for offset, (copy_lineup, copy_setlist, lineup, copied, expected_role) in enumerate(cases):
+            fields = form(date=(current + timedelta(days=offset + 1)).isoformat())
+            review = await step(
+                client,
+                engine,
+                admin,
+                "create",
+                **fields,
+                lineup=lineup,
+                source=str(source.id),
+                copy_timing=False,
+                copy_lineup=copy_lineup,
+                copy_setlist=copy_setlist,
+            )
+            assert review["copied"] == copied
+            result = await step(client, engine, admin, "confirm", preview=review["request"])
+            query = {**band, "performance": result["performance"]}
+            card = await get(client, 1, "performance", **query)
+            assert not card["setlist"]["approved"]
+            titles = [(row["kind"], row.get("title")) for row in card["setlist"]["entries"]]
+            assert titles == (
+                [("song", "Комета"), ("pause", None), ("song", "Комета")] if copy_setlist else []
+            )
+            async with PostgresUnitOfWork(engine) as uow:
+                concert_id = UUID(result["performance"])
+                slots = await uow.store.find(GigSlot, concert_id=concert_id)
+                assert [slot.role_id for slot in slots] == (
+                    [expected_role] if expected_role else []
+                )
+                if "copy_lineup" in copied:
+                    assert slots[0].preferred_user_id == world.member.id
+                assert not await uow.store.find(GigInvitation, concert_id=concert_id)
 
 
 async def test_create_previews_lineups_and_is_idempotent(engine, world):

@@ -316,6 +316,21 @@ async def api(request: web.Request) -> web.Response:
                     UUID(payload["band"]), UUID(payload["performance"])
                 )
                 return web.json_response({"session": str(shared.id)})
+            if operation == "shared_requests_seen" and request.method == "POST":
+                identifiers = payload.get("ids")
+                require(
+                    isinstance(identifiers, list)
+                    and all(isinstance(identifier, str) for identifier in identifiers),
+                    "input",
+                )
+                assert isinstance(identifiers, list)
+                return web.json_response(
+                    await WorkspaceSetlists(uow.store, user).requests(
+                        UUID(payload["band"]),
+                        UUID(payload["performance"]),
+                        viewed={str(UUID(identifier)) for identifier in identifiers},
+                    )
+                )
             if (
                 operation
                 in (

@@ -210,6 +210,11 @@ class WorkspacePerformances:
             stamp["setlist"] = lists[0].version
         return stamp
 
+    async def source_slots(self, source: Concert) -> list[GigSlot]:
+        return await self.store.find(
+            GigSlot, group_id=source.group_id, concert_id=source.id, removed=False, required=True
+        )
+
     async def copy_template(
         self, source: Concert, target: Concert, command: dict[str, Any], *, saved_lineup: bool
     ) -> None:
@@ -223,9 +228,7 @@ class WorkspacePerformances:
             if source.city == target.city and "zone" in source.timing:
                 target.timing["zone"] = source.timing["zone"]
         if command["copy_lineup"] and not saved_lineup:
-            slots = await self.store.find(
-                GigSlot, concert_id=source.id, removed=False, required=True
-            )
+            slots = await self.source_slots(source)
             candidates = {
                 row.slot_id: row.user_id
                 for row in await self.store.roster_invitations(source.group_id, source.id)
@@ -246,6 +249,8 @@ class WorkspacePerformances:
         if command["copy_setlist"]:
             lists = Setlists(self.store, self.user)
             snapshot, _, _ = await lists.read(source.group_id, source.id)
+            if not any(block["items"] for block in snapshot["blocks"]):
+                return
             song_ids = {
                 UUID(item["song_id"])
                 for block in snapshot["blocks"]
@@ -338,13 +343,16 @@ class WorkspacePerformances:
                     change[key] = command[key]
                 change["stamp"] = await self.source_stamp(source, change)
                 result["source"] = concert_label(source, self.user.language)
-                result["copied"] = [
-                    key
-                    for key in ("copy_timing", "copy_lineup", "copy_setlist")
-                    if change[key]
-                    and (key != "copy_lineup" or lineup is None)
-                    and (key != "copy_timing" or source.timing.get("rows"))
-                ]
+                copied = []
+                if change["copy_timing"] and source.timing.get("rows"):
+                    copied.append("copy_timing")
+                if change["copy_lineup"] and lineup is None and await self.source_slots(source):
+                    copied.append("copy_lineup")
+                if change["copy_setlist"]:
+                    snapshot, _, _ = await Setlists(self.store, self.user).read(group_id, source.id)
+                    if any(block["items"] for block in snapshot["blocks"]):
+                        copied.append("copy_setlist")
+                result["copied"] = copied
             return result, change
         concert = await self.concert(group_id, command, deleted=action == "restore")
         fields = performance_input(concert).payload()

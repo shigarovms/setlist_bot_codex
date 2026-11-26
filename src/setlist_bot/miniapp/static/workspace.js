@@ -19,7 +19,7 @@ import { helpTitle, showHelp } from "./workspace-help.js";
 const copy = withBotLabels("workspace", {
   ru: {
     upcoming: "Предстоящие",
-    menu: "Меню", more: "Еще", scheduleOptions: "Настройки", addInBulk: "Добавить списком", close: "Закрыть",
+    menu: "Меню", performanceActions: "Действия", scheduleOptions: "Настройки", addInBulk: "Добавить списком", close: "Закрыть",
     participants: "Состав участников",
     noBands: "У вас пока нет коллективов.",
     noPerformances: "В этом разделе пока нет доступных выступлений.",
@@ -50,7 +50,7 @@ const copy = withBotLabels("workspace", {
   },
   en: {
     upcoming: "Upcoming", approvedSetlist: "Setlist approved",
-    menu: "Menu", more: "More", scheduleOptions: "Settings", addInBulk: "Add in bulk", close: "Close",
+    menu: "Menu", performanceActions: "Actions", scheduleOptions: "Settings", addInBulk: "Add in bulk", close: "Close",
     participants: "Participants",
     published: "Your version was sent to the band chat. An admin will see it in Incoming Requests.",
     noBands: "You have no bands yet.",
@@ -167,6 +167,7 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
   const main = document.getElementById("workspace-home");
   const title = document.getElementById("workspace-title");
   const header = document.getElementById("workspace-heading");
+  const bandContext = document.getElementById("workspace-band-context");
   const back = document.getElementById("workspace-back");
   const content = document.getElementById("workspace-content");
   const status = document.getElementById("workspace-status");
@@ -361,7 +362,9 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
       }
       language = data.language === "en" ? "en" : "ru";
       document.documentElement.lang = language;
-      title.textContent = band || gigInvitation ? data.band : gigs ? gigLabel(language, "title")
+      title.textContent = data.performance && view === "performance"
+        ? data.performance.title || t("performance")
+        : band || gigInvitation ? data.band : gigs ? gigLabel(language, "title")
         : allInbox ? inboxLabel(language) : inbox ? teamLabel(language, "inbox") : profile ? profileLabel(language, "title")
           : help ? helpTitle(language) : bandTrash ? bandTrashTitle(language) : t("bands");
       status.textContent = "";
@@ -777,10 +780,9 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
     const info = data.performance, list = data.setlist;
     const rosterUrl = withManagedOrigin(`${bandUrl(band, past, page)}&view=lineup&performance=${encodeURIComponent(performance)}`);
     const timingUrl = withManagedOrigin(`${bandUrl(band, past, page)}&view=timing&performance=${info.id}`);
-    const heading = element("div", "", { class: "workspace-heading" });
-    const eventTitle = element("div", "");
-    eventTitle.append(element("h2", info.title || t("performance")),
-      element("p", [dateText(info.date), info.city, info.type].filter(Boolean).join(" · ")));
+    bandContext.textContent = data.band;
+    bandContext.hidden = false;
+    title.classList.add("performance-title");
     const details = [];
     if (data.admin) details.push(managePerformance("update", info));
     details.push(element("a", t("participants"), { href: rosterUrl }));
@@ -792,13 +794,16 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
       remove.classList.add("destructive");
       details.push(remove);
     }
-    heading.append(eventTitle, actionsMenu(t("more"), ...details));
-    content.append(heading);
+    header.append(actionsMenu(t("performanceActions"), ...details));
+    content.append(element("p", [dateText(info.date), info.city, info.type].filter(Boolean).join(" · "),
+      { class: "performance-meta" }));
     if (info.info) content.append(element("p", info.info, { class: "performance-info" }));
     if (data.readiness) showReadiness({
       root: content, readiness: data.readiness, approved: list.approved, language, roster: rosterUrl, timing: timingUrl,
     });
-    content.append(element("h3", t("shared"), { id: "shared-list" }),
+    const sharedHeading = element("div", "", { id: "shared-list", class: "workspace-heading shared-setlist-heading" });
+    sharedHeading.append(element("h2", t("shared")));
+    content.append(sharedHeading,
       element("p", `${t(list.approved ? "approvedVersion" : "workingVersion")} · ${t("version")} ${list.version}`));
     const timing = [`${t("total")} ${clock(list.seconds)}`];
     if (info.planned_seconds) timing.push(`${t("planned")} ${clock(info.planned_seconds)}`);
@@ -809,8 +814,8 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
       editorButton.addEventListener("click", () => openDraft(info.id, editorButton));
     }
     mountSharedSetlist({
-      root: content, data, language, editorButton, decision: initialDecision,
-      read: (operation, params = {}) => api(operation, { band, performance, ...params }),
+      root: content, sharedHeading, data, language, editorButton, decision: initialDecision,
+      read: (operation, params = {}, method) => api(operation, { band, performance, ...params }, method),
       request: sharedApi, refresh: load, status: message => { status.textContent = message; },
     });
     initialDecision = null;
