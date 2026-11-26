@@ -53,6 +53,7 @@ async def process_catalog_request(engine, *, calendar=None):
 class Browser:
     def __init__(self, ws):
         self.ws, self.sequence, self.pending = ws, 0, {}
+        self.font_request = None
         self.reader = asyncio.create_task(self.read())
 
     async def read(self):
@@ -67,6 +68,9 @@ class Browser:
                 else:
                     future.set_result(data.get("result", {}))
             elif data.get("method") == "Fetch.requestPaused":
+                if data["params"]["request"]["url"].endswith("/unbounded.ttf"):
+                    self.font_request = data["params"]["requestId"]
+                    continue
                 asyncio.create_task(
                     self.call(
                         "Fetch.fulfillRequest",
@@ -436,6 +440,16 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             await browser.call("Page.addScriptToEvaluateOnNewDocument", {"source": stub})
             if launch_mode == "session":
                 await browser_initial_background(browser, origin)
+            if launch_mode == "workspace":
+                await browser.call(
+                    "Fetch.enable",
+                    {
+                        "patterns": [
+                            {"urlPattern": "https://telegram.org/*"},
+                            {"urlPattern": "*/unbounded.ttf"},
+                        ]
+                    },
+                )
             await browser.call(
                 "Page.navigate",
                 {
@@ -447,16 +461,53 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             if launch_mode == "workspace":
                 await browser.wait("document.querySelectorAll('.workspace-list a').length === 2")
                 assert await browser.js("""
+                    const placeholder = document.querySelector('.band-name');
+                    document.querySelector('.band-list').dataset.nameFont === 'loading'
+                    && getComputedStyle(placeholder).visibility === 'hidden'
+                    && document.querySelector('.band-list a').getBoundingClientRect().height >= 68
+                    && !!document.querySelector('#workspace-content nav a')
+                """)
+                await browser.wait(
+                    "document.querySelector('.band-list').dataset.nameFont === 'fallback'"
+                )
+                assert browser.font_request
+                async with client.get(f"{origin}/miniapp/unbounded.ttf") as response:
+                    assert response.status == 200 and response.content_type == "font/ttf"
+                    font = await response.read()
+                await browser.call(
+                    "Fetch.fulfillRequest",
+                    {
+                        "requestId": browser.font_request,
+                        "responseCode": 200,
+                        "responseHeaders": [{"name": "Content-Type", "value": "font/ttf"}],
+                        "body": base64.b64encode(font).decode(),
+                    },
+                )
+                await browser.wait("[...document.fonts].some(font => font.status === 'loaded')")
+                assert await browser.js("""
+                    const name = document.querySelector('.band-name');
+                    getComputedStyle(name).visibility === 'visible'
+                      && !getComputedStyle(name).fontFamily.includes('Unbounded')
+                """)
+                await browser.call(
+                    "Fetch.enable", {"patterns": [{"urlPattern": "https://telegram.org/*"}]}
+                )
+                await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1"})
+                await browser.wait(
+                    "document.querySelector('.band-list')?.dataset.nameFont === 'ready'"
+                )
+                assert await browser.js("""
                     (async () => {
                         const link = document.querySelector('.band-list a');
-                        const original = link.textContent;
-                        link.textContent = 'Очень длинное название коллектива Midnight Avenue';
+                        const name = link.querySelector('.band-name');
+                        const original = name.textContent;
+                        name.textContent = 'Очень длинное название коллектива Midnight Avenue';
                         await document.fonts.ready;
                         const style = getComputedStyle(link);
                         const fits = style.fontFamily.includes('Unbounded')
                           && style.textDecorationLine === 'none'
                           && link.clientHeight > 68 && link.scrollWidth <= link.clientWidth;
-                        link.textContent = original;
+                        name.textContent = original;
                         return fits;
                     })()
                 """)
@@ -481,6 +532,45 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     "document.querySelector('.shared-setlist')?.innerText.includes('Комета')"
                 )
                 await browser.wait("!!document.getElementById('readiness-title')")
+                await browser.call(
+                    "Emulation.setDeviceMetricsOverride",
+                    {
+                        "width": 320,
+                        "height": 640,
+                        "deviceScaleFactor": 1,
+                        "mobile": True,
+                    },
+                )
+                assert await browser.js("""
+                    (() => {
+                        const nav = document.querySelector('#workspace-content > nav');
+                        const details = document.querySelector('.performance-details-nav');
+                        const [data, roster, timing, remove] = [...details.children];
+                        const [a, b, c, d] = [...details.children].map(button =>
+                          button.getBoundingClientRect());
+                        return nav.childElementCount === 1
+                          && Math.abs(nav.firstElementChild.offsetWidth - nav.clientWidth) <= 1
+                          && data.textContent === 'Данные выступления'
+                          && roster.textContent.includes('Состав выступления')
+                          && timing.textContent === 'Тайминг выступления'
+                          && remove.textContent === 'Удалить выступление'
+                          && remove.classList.contains('destructive')
+                          && a.top === b.top && c.top === d.top && c.top > a.top
+                          && a.left === c.left && b.left === d.left && a.left < b.left
+                          && Math.abs(a.width - b.width) <= 1 && a.height === c.height
+                          && details.nextElementSibling.classList.contains('performance-readiness');
+                    })()
+                """)
+                await browser.assert_button_text_fits()
+                await browser.call(
+                    "Emulation.setDeviceMetricsOverride",
+                    {
+                        "width": 390,
+                        "height": 900,
+                        "deviceScaleFactor": 1,
+                        "mobile": True,
+                    },
+                )
                 assert await browser.js("""
                     !!document.querySelector('.performance-readiness .status-ready')
                     && !!document.querySelector('.performance-readiness .status-pending')

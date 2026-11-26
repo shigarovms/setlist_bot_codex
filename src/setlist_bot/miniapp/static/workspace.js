@@ -109,6 +109,17 @@ function element(tag, label, attributes = {}) {
   return node;
 }
 
+function loadBandFont() {
+  if (!document.fonts) return Promise.resolve("fallback");
+  let timeout;
+  const font = document.fonts.load('650 22px "Unbounded"').then(
+    faces => faces.length ? "ready" : "fallback",
+    () => "fallback",
+  );
+  const limit = new Promise(resolve => { timeout = setTimeout(resolve, 2500, "fallback"); });
+  return Promise.race([font, limit]).finally(() => clearTimeout(timeout));
+}
+
 function telegramLink(label, href) {
   const link = element("a", label, { href, target: "_blank", rel: "noopener noreferrer" });
   link.addEventListener("click", event => {
@@ -133,6 +144,7 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
   const past = workspaceParams.get("past") === "1" ? "1" : "0";
   const page = Number(workspaceParams.get("page")) || 0;
   const view = workspaceParams.get("view");
+  let bandFont = !band && !view ? loadBandFont() : null;
   const profile = !band && view === "profile";
   const help = !band && view === "help";
   const bandSettings = band && view === "band-settings";
@@ -293,7 +305,10 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
       else if (proposals) data = await api("repertoire_proposals", { band, page });
       else if (repertoire) data = await api("repertoire", { band, archived, page, query, song });
       else if (band) data = await api("performances", { band, past, page });
-      else data = await api("bands");
+      else {
+        bandFont ??= loadBandFont();
+        data = await api("bands");
+      }
       language = data.language === "en" ? "en" : "ru";
       document.documentElement.lang = language;
       title.textContent = band || gigInvitation ? data.band : gigs ? gigLabel(language, "title")
@@ -387,13 +402,16 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
           element("a", bandTrashTitle(language), { href: bandTrashUrl() }));
         content.append(nav);
         if (data.bands.length === 0) status.textContent = t("noBands");
-        const list = element("ul", "", { class: "workspace-list band-list" });
+        const list = element("ul", "", { class: "workspace-list band-list", "data-name-font": "loading" });
         for (const row of data.bands) {
           const item = element("li", "");
-          item.append(element("a", row.name, { href: bandUrl(row.id) }));
+          const link = element("a", "", { href: bandUrl(row.id), "aria-label": row.name });
+          link.append(element("span", row.name, { class: "band-name" }));
+          item.append(link);
           list.append(item);
         }
         content.append(list);
+        void bandFont.then(font => { list.dataset.nameFont = font; });
         const join = element("details", "");
         join.append(element("summary", t("joinBand")), element("p", t("joinBandHelp")),
           element("a", teamLabel(language, "inbox"), { href: inboxUrl() }));
@@ -732,16 +750,21 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
     nav.append(element("a", t("performances"), { href: performanceParent() }));
     const rosterUrl = withManagedOrigin(`${bandUrl(band, past, page)}&view=lineup&performance=${encodeURIComponent(performance)}`);
     const timingUrl = withManagedOrigin(`${bandUrl(band, past, page)}&view=timing&performance=${info.id}`);
-    nav.append(element("a", rosterLabel(language, "title"), { href: rosterUrl }));
     content.append(nav, element("h2", info.title || t("performance")),
       element("p", [dateText(info.date), info.city, info.type].filter(Boolean).join(" · ")));
     if (info.info) content.append(element("p", info.info, { class: "performance-info" }));
     const details = element("nav", "", { class: "workspace-nav performance-details-nav" });
     if (data.admin) details.append(managePerformance("update", info));
+    details.append(element("a", rosterLabel(language, "title"), { href: rosterUrl }));
     if (data.can_view_timing) details.append(element("a", timingLabel(language), {
       href: timingUrl,
     }));
-    if (details.childElementCount) content.append(details);
+    if (data.admin) {
+      const remove = managePerformance("delete", info);
+      remove.classList.add("destructive");
+      details.append(remove);
+    }
+    content.append(details);
     if (data.readiness) showReadiness({
       root: content, readiness: data.readiness, approved: list.approved, language, roster: rosterUrl, timing: timingUrl,
     });
@@ -776,11 +799,6 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
       }
       content.append(rows);
     } else content.append(element("p", t("noEntries")));
-    if (data.admin) {
-      const remove = managePerformance("delete", info);
-      remove.classList.add("destructive");
-      content.append(remove);
-    }
   }
   function showPerformanceRoster(data) {
     const nav = element("nav", "", { class: "workspace-nav" });
