@@ -12,7 +12,6 @@ from setlist_bot.domain.entities import (
     Membership,
     Outbox,
     StaffContact,
-    StaffRole,
     User,
     now,
 )
@@ -37,12 +36,7 @@ class Team:
         )
         if not rows:
             self.store.add(member)
-        contacts = await self.store.find(
-            StaffContact, group_id=group_id, user_id=target, permanent=True
-        )
-        current = {
-            r.name for r in await self.store.get_many(StaffRole, {c.role_id for c in contacts})
-        }
+        current = set(await self.groups.permanent_roles(group_id, target))
         names = [name for name in names if name not in current]
         if not names:
             return member

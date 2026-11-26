@@ -17,7 +17,10 @@
     <main id="workspace-home" hidden>
       <header>
         <div class="eyebrow">setListBot</div>
-        <h1 id="workspace-title">Мои коллективы</h1>
+        <nav id="workspace-back" class="workspace-nav workspace-back page-back" hidden></nav>
+        <div id="workspace-heading" class="workspace-heading">
+          <h1 id="workspace-title">Мои коллективы</h1>
+        </div>
       </header>
       <div id="workspace-content"></div>
       <p id="workspace-status" role="status" aria-live="polite"></p>
@@ -25,7 +28,18 @@
     <main id="editor" hidden>
       <header>
         <div class="eyebrow">setListBot</div>
-        <h1 id="heading">Ваш черновик</h1>
+        <div class="page-back"><button id="back-bot" type="button">← Вернуться к боту</button></div>
+        <div class="workspace-heading">
+          <h1 id="heading">Ваш черновик</h1>
+          <details class="action-menu">
+            <summary id="editor-options">Опции</summary>
+            <div class="action-menu-list">
+              <button id="older" type="button" aria-haspopup="dialog">История</button>
+              <button id="load-shared" type="button" hidden>Взять общий сет-лист за основу</button>
+              <button id="average-pause" type="button" disabled>Средняя пауза</button>
+            </div>
+          </details>
+        </div>
         <p id="event"></p>
         <p id="private-note">Сохраняется только личный черновик.</p>
         <div class="timing">
@@ -36,20 +50,21 @@
       </header>
       <p id="status" role="status" aria-live="polite">Загрузка…</p>
       <button id="access-request" hidden>Запросить права у владельца</button>
-      <nav id="history" aria-label="Версии и прошлые выступления">
-        <button id="older" aria-haspopup="dialog">История</button>
-        <span id="history-label"></span>
+      <button id="empty-history" type="button" aria-haspopup="dialog" hidden>
+        <strong id="empty-history-title">История</strong>
+        <em id="empty-history-hint">(взять из прошлого выступления)</em>
+      </button>
+      <nav id="history" class="page-back" aria-label="Версии и прошлые выступления" hidden>
         <button id="newer" hidden>К черновику</button>
+        <span id="history-label"></span>
       </nav>
       <button id="use-history" hidden>Взять за основу</button>
       <div class="toolbar" id="shared-editor-actions" hidden>
         <button id="load-personal" type="button" hidden>Мой черновик</button>
-        <button id="load-shared" type="button" hidden>Взять общий сет-лист за основу</button>
         <button id="save-shared" type="button" hidden>Сохранить сет-лист как общий</button>
       </div>
       <div class="toolbar editor-tools">
         <button id="undo" aria-label="Отменить последнее действие" disabled>↶ Отменить</button>
-        <button id="average-pause" disabled>Сред. пауза</button>
         <button id="add-pause">＋ Пауза</button>
       </div>
       <div class="workspace">
@@ -91,7 +106,6 @@
         <button id="publish" class="primary" disabled>
           📤 Предложить группе
         </button>
-        <button id="back-bot">Вернуться к боту</button>
       </footer>
     </main>
     <dialog id="planned-dialog" aria-labelledby="planned-title">

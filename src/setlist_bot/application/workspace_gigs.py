@@ -120,21 +120,25 @@ class WorkspaceGigs:
             for row in await self.store.get_many(Group, {row.group_id for row in invitations})
         }
         selected = []
+        pending_invitations = 0
         for row in invitations:
             event, group = events.get(row.concert_id), groups.get(row.group_id)
             if not event or not group or event.group_id != group.id:
                 continue
             active = row.status in OPEN | {"confirmed"} and self.staffing.valid(row, event, group)
+            past_booking = active and row.status == "confirmed" and row.date < current
+            if active and row.status in REPLYABLE and row.date >= current:
+                pending_invitations += 1
             if section == "schedule":
                 matching = active and row.status == "confirmed" and row.date >= current
+            elif section == "history":
+                matching = not active or past_booking
             else:
-                matching = (
-                    section == ("confirmed" if row.status == "confirmed" else "invitations")
-                    if active
-                    else section == "history"
+                matching = active and section == (
+                    "confirmed" if row.status == "confirmed" else "invitations"
                 )
             if matching:
-                selected.append((row, event, group))
+                selected.append((row, event, group, past_booking))
         selected.sort(
             key=lambda item: (
                 item[0].date < current,
@@ -145,11 +149,11 @@ class WorkspaceGigs:
         extra_roles: dict[UUID, list[GigInvitation]] = {}
         if section == "schedule":
             unique = {}
-            for row, event, group in selected:
+            for row, event, group, past_booking in selected:
                 if event.id in unique:
                     extra_roles.setdefault(event.id, []).append(row)
                 else:
-                    unique[event.id] = (row, event, group)
+                    unique[event.id] = (row, event, group, past_booking)
             selected = list(unique.values())
         shown = selected[page * size : (page + 1) * size]
         slots = {
@@ -158,7 +162,7 @@ class WorkspaceGigs:
                 GigSlot,
                 {
                     r.slot_id
-                    for row, event, _ in shown
+                    for row, event, _, _ in shown
                     for r in (row, *extra_roles.get(event.id, []))
                 },
             )
@@ -169,17 +173,20 @@ class WorkspaceGigs:
         }
         return {
             **context,
+            "pending_invitations": pending_invitations,
             "has_next": len(selected) > (page + 1) * size,
             "invitations": [
                 {
                     "id": str(row.id),
                     "date": row.date.isoformat(),
                     "band": group.name,
-                    "title": event.title if section != "history" else "",
-                    "city": event.city if section != "history" else "",
+                    "title": event.title if section != "history" or past_booking else "",
+                    "city": event.city if section != "history" or past_booking else "",
                     "role": roles[slots[row.slot_id].role_id],
                     "status": "inactive"
-                    if section == "history" and row.status in OPEN | {"confirmed"}
+                    if section == "history"
+                    and row.status in OPEN | {"confirmed"}
+                    and not past_booking
                     else row.status,
                     "other_roles": [
                         {"id": str(other.id), "role": roles[slots[other.slot_id].role_id]}
@@ -187,7 +194,7 @@ class WorkspaceGigs:
                         if other.slot_id in slots
                     ],
                 }
-                for row, event, group in shown
+                for row, event, group, past_booking in shown
                 if row.slot_id in slots
             ],
         }

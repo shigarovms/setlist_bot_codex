@@ -87,10 +87,12 @@ class WorkspaceTeam:
         invitations.sort(key=lambda row: row["band"].casefold())
         return {"language": self.user.language, "invitations": invitations}
 
-    async def view(self, group_id: UUID, page: int, limit: int) -> dict[str, Any]:
+    async def view(
+        self, group_id: UUID, page: int, limit: int, *, own_only: bool = False
+    ) -> dict[str, Any]:
         group = await self.groups.access(group_id)
         own = (await self.store.find(Membership, group_id=group_id, user_id=self.user.id))[0]
-        admin = own.role == "admin"
+        admin = own.role == "admin" and not own_only
         owner = group.owner_id == self.user.id
         roles = {role.id: role.name for role in await self.store.find(StaffRole, group_id=group_id)}
         rows = (

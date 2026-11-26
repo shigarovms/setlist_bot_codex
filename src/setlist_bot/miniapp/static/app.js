@@ -2,7 +2,7 @@ import { withBotLabels } from "./bot-labels.js";
 import "./modal-scroll.js";
 import { clone, clock, total, numbered, wire, move, asText } from "./model.js";
 import { DraftPersistence } from "./persistence.js";
-import { bandUrl, performanceUrl, showWorkspace, workspaceParams, workspaceText } from "./workspace.js";
+import { bandUrl, pageBackText, performanceUrl, showWorkspace, workspaceParams, workspaceText } from "./workspace.js";
 const telegram = window.Telegram?.WebApp;
 const tg = telegram?.initData ? telegram : null,
   $ = (id) => document.getElementById(id);
@@ -42,7 +42,7 @@ const words = withBotLabels("app", {
     repertoireSong: "Песня в репертуаре",
     back: "Вернуться к боту",
     pause: "пауза",
-    older: "История",
+    older: "История", editorOptions: "Опции", emptyHistoryHint: "(взять из прошлого выступления)",
     undo: "↶ Отменить",
     empty:
       "Добавьте песни из репертуара ниже или возьмите прошлый сет-лист за основу.",
@@ -72,7 +72,6 @@ const words = withBotLabels("app", {
     pauseChanged: "Пауза изменилась. Закройте окно и откройте её заново.",
     pauseHint: "Без единиц — минуты",
     average: "Средняя пауза",
-    averageShort: "Сред. пауза",
     seconds: "сек",
     averageTitle: "Средняя пауза между песнями",
     averageHint: "В секундах. 0 — без пауз. Отдельные паузы сохраняются.",
@@ -130,7 +129,7 @@ const words = withBotLabels("app", {
     repertoireSong: "Song in repertoire",
     back: "Back to bot",
     pause: "pause",
-    older: "History",
+    older: "History", editorOptions: "Options", emptyHistoryHint: "(use a past performance)",
     undo: "↶ Undo",
     empty: "Add songs below or use a previous performance as a starting point.",
     use: "Use as starting point",
@@ -158,7 +157,6 @@ const words = withBotLabels("app", {
     pauseChanged: "This pause changed. Close the dialog and reopen it.",
     pauseHint: "Numbers without units mean minutes",
     average: "Average pause",
-    averageShort: "Avg. pause",
     seconds: "s",
     averageTitle: "Average pause between songs",
     averageHint: "In seconds. 0 means no pause. Individual pauses are kept.",
@@ -366,8 +364,11 @@ function render() {
   $("catalog").inert = busy;
   $("setlist").inert = busy;
   $("older").disabled = busy;
+  $("older").hidden = !preview && !current.length;
+  $("empty-history").hidden = !!preview || !!current.length;
+  $("empty-history").disabled = busy;
   $("average-pause").disabled = busy || !!preview;
-  $("average-pause").textContent = t("averageShort");
+  $("average-pause").textContent = t("average");
   $("average-pause").setAttribute("aria-label", `${t("average")}: ${preview?.default_pause_seconds ?? defaultPause}${t("seconds")}`);
   $("use-history").disabled = busy;
   const items = preview?.entries ?? current,
@@ -459,6 +460,7 @@ function render() {
   $("history-label").textContent = preview
     ? `${preview.label} · ${clock(preview.seconds)}`
     : t(showingShared ? "currentShared" : "current");
+  $("history").hidden = !preview;
   $("newer").hidden = !preview;
   $("newer").disabled = busy;
   $("use-history").hidden = !preview;
@@ -471,13 +473,13 @@ function render() {
   renderSaveStatus();
   $("publish").disabled =
     !!preview || !current.length || busy || !!saver?.blocked;
-  $("load-shared").hidden = !state.can_set_group_default || !!preview;
+  $("load-shared").hidden = !state.can_set_group_default || !!preview || !current.length;
   $("load-shared").disabled = busy || !!sharedAttempt || !!saver?.blocked;
   $("load-personal").hidden = !showingShared || !!preview;
   $("load-personal").disabled = busy;
   $("load-personal").textContent = t("personalDraft");
   $("save-shared").hidden = !!preview || ((!sharedBase || sharedBase.approved) && !sharedAttempt);
-  $("shared-editor-actions").hidden = ["load-shared", "save-shared", "load-personal"].every(id => $(id).hidden);
+  $("shared-editor-actions").hidden = ["save-shared", "load-personal"].every(id => $(id).hidden);
   $("save-shared").disabled = busy || !!saver?.blocked;
   $("save-shared").textContent = t(sharedAttempt ? "sharedCheck" : "saveShared");
   dirty()
@@ -640,7 +642,7 @@ function startDrag(event, source) {
   handle.addEventListener("pointercancel", cancel);
   scrollFrame = requestAnimationFrame(auto);
 }
-$("older").addEventListener("click", async () => {
+async function openHistory() {
   if (busy || !state) return;
   const dialog = $("history-dialog"), list = $("history-sources");
   list.textContent = t("loading");
@@ -669,7 +671,8 @@ $("older").addEventListener("click", async () => {
   } catch (error) {
     list.textContent = error.message;
   }
-});
+}
+for (const id of ["older", "empty-history"]) $(id).addEventListener("click", openHistory);
 $("newer").addEventListener("click", () => {
   preview = null;
   render();
@@ -742,7 +745,7 @@ $("search").addEventListener("focus", () => {
 });
 $("search").addEventListener("blur", settleSearchLayout);
 $("search").addEventListener("keydown", (event) => {
-  if (!event.isComposing && ["Enter", "Escape"].includes(event.key)) {
+  if (!event.isComposing && event.key === "Escape") {
     event.preventDefault();
     $("search").blur();
   }
@@ -775,6 +778,42 @@ document.addEventListener("click", event => {
 const mobileInput = matchMedia("(max-width: 640px), (any-pointer: coarse)");
 const viewport = window.visualViewport;
 const textInputTypes = new Set(["text", "search", "number", "tel", "email", "url", "password"]);
+
+function editableText(field) {
+  return (field instanceof HTMLInputElement && textInputTypes.has(field.type)
+    || field instanceof HTMLTextAreaElement) && !field.readOnly && !field.disabled;
+}
+
+function hintDone(event) {
+  if (editableText(event.target)) event.target.enterKeyHint = "done";
+}
+
+document.addEventListener("pointerdown", hintDone, true);
+document.addEventListener("focusin", hintDone);
+document.addEventListener("keydown", event => {
+  const field = event.target;
+  if (event.key !== "Enter" || event.isComposing || event.keyCode === 229) return;
+  if (!editableText(field) && !(field instanceof HTMLInputElement && field.type === "date")) return;
+  if (event.shiftKey && field instanceof HTMLTextAreaElement) return;
+  event.preventDefault();
+  field.blur();
+}, true);
+document.addEventListener("click", event => {
+  if (!(event.target instanceof Element)) return;
+  for (const menu of document.querySelectorAll(".action-menu[open]")) {
+    if (!menu.contains(event.target) || event.target.closest(".action-menu-list a, .action-menu-list button"))
+      menu.open = false;
+  }
+});
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  const menu = event.target.closest?.(".action-menu[open]");
+  if (menu) {
+    event.preventDefault();
+    menu.open = false;
+    menu.querySelector("summary").focus();
+  }
+});
 let fieldFrame = 0, fieldAlignmentPending = false, fieldContainer = null, lastViewportTop = 0;
 
 function alignFocusedField() {
@@ -791,8 +830,7 @@ function alignFocusedField() {
   root.style.setProperty("--layout-height", `${layoutHeight}px`);
 
   const field = document.activeElement;
-  const editable = (field instanceof HTMLInputElement && textInputTypes.has(field.type)
-    || field instanceof HTMLTextAreaElement) && !field.readOnly && !field.disabled;
+  const editable = editableText(field);
   const mobile = mobileInput.matches || covered > 48;
   const dialog = editable ? field.closest("dialog[open]") : null;
   const container = editable && !zoomed && mobile ? dialog ?? document.body : null;
@@ -1418,6 +1456,9 @@ function labels() {
     "add-pause": "addPause",
     "add-pause-bottom": "addPauseBottom",
     older: "older",
+    "editor-options": "editorOptions",
+    "empty-history-title": "older",
+    "empty-history-hint": "emptyHistoryHint",
     newer: "backDraft",
     "history-title": "older",
     "history-close": "close",
@@ -1444,7 +1485,12 @@ function labels() {
     $(id).textContent = t(key);
   if (workspaceDraft) $("back-bot").textContent = parentPerformance
     ? (lang === "ru" ? "К выступлению" : "Back to performance")
-    : workspaceText(lang, "performances");
+    : pageBackText(workspaceText(lang, "performances"));
+  for (const id of ["back-bot", "newer"]) {
+    const arrow = node("span", "←", "page-back-arrow");
+    arrow.setAttribute("aria-hidden", "true");
+    $(id).prepend(arrow);
+  }
   $("undo").setAttribute("aria-label", t("undoLabel"));
   $("search").placeholder = t("search");
   document.documentElement.lang = lang;
@@ -1454,7 +1500,11 @@ function onTelegramBack(navigate) {
   tg?.BackButton?.onClick?.(() => {
     const dialogs = document.querySelectorAll("dialog[open]");
     const dialog = dialogs[dialogs.length - 1];
-    if (!dialog) return navigate();
+    if (!dialog) {
+      const menu = document.querySelector(".action-menu[open]");
+      if (menu) { menu.open = false; return; }
+      return navigate();
+    }
     if (dialog.requestClose) dialog.requestClose();
     else if (dialog.dispatchEvent(new Event("cancel", { cancelable: true }))) dialog.close();
   });

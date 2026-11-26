@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from aiogram import Bot
 from aiohttp.test_utils import TestClient, TestServer
+from conftest import invite_fixture_member
 from pydantic import SecretStr
 from test_miniapp import settings
 from test_repertoire_workspace_actions import get, headers, post
@@ -16,6 +17,7 @@ from test_workspace_shared_setlist import setup_workspace
 from setlist_bot.application.concert_details import ConcertDetails
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.application.staffing import Staffing
+from setlist_bot.domain.concerts import today
 from setlist_bot.domain.entities import GigInvitation, Membership, Outbox, PersonalDraft
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.main import deliver_one_outbox
@@ -36,6 +38,31 @@ async def respond(client, engine, session, version, answer, *, ok=True, **extra)
     receipt = await get(client, 3, "catalog_status", **session, request=request["request"])
     assert await post(client, 3, "gig_reply", payload) == receipt
     return receipt
+
+
+async def test_personal_schedule_keeps_past_bookings_in_history(engine, world):
+    await setup_workspace(engine, world)
+    async with PostgresUnitOfWork(engine) as uow:
+        lists = Setlists(uow.store, world.admin)
+        date = today()
+        past = await lists.create(
+            world.group.id, date - timedelta(days=2), "Прошедший концерт", city="Тула"
+        )
+        upcoming = await lists.create(world.group.id, date + timedelta(days=2), "Ближайший концерт")
+        pending = await lists.create(world.group.id, date + timedelta(days=4), "Новое приглашение")
+        await invite_fixture_member(uow.store, past, world.stranger)
+        await invite_fixture_member(uow.store, upcoming, world.stranger)
+        await invite_fixture_member(uow.store, pending, world.stranger, status="pending")
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        schedule = await get(client, 3, "my_gigs", section="schedule")
+        assert schedule["pending_invitations"] == 1
+        assert [row["title"] for row in schedule["invitations"]] == ["Ближайший концерт"]
+        history = await get(client, 3, "my_gigs", section="history")
+        assert [(row["title"], row["city"], row["status"]) for row in history["invitations"]] == [
+            ("Прошедший концерт", "Тула", "confirmed")
+        ]
+        card = await get(client, 3, "gig_card", invitation=history["invitations"][0]["id"])
+        assert card["invitation"]["title"] == "Прошедший концерт"
 
 
 async def test_guest_has_only_own_invitation_and_can_read_and_export_approved_setlist(

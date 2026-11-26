@@ -62,8 +62,7 @@ export function showInbox({ root, data, language, dateText, href }) {
 
 export function showReadiness({ root, readiness, approved, language, roster, timing }) {
   const t = words[language];
-  const section = element("section", "", { class: "performance-readiness", "aria-labelledby": "readiness-title" });
-  const heading = element("h3", t[readiness.ready ? "ready" : "checklist"], { id: "readiness-title" });
+  const section = element("details", "", { class: "performance-readiness", "aria-labelledby": "readiness-title" });
   const list = element("ul", "", { class: "workspace-list" });
   const slot = readiness.missing_slot ? `&focus=role-${readiness.missing_slot}` : "";
   const swap = readiness.replacement ? `&focus=replacement-${readiness.replacement}` : "";
@@ -75,6 +74,9 @@ export function showReadiness({ root, readiness, approved, language, roster, tim
     [t[readiness.timing === "ready" ? "timingReady" : readiness.timing === "preliminary" ? "timingDraft" : "timingEmpty"],
       timing, readiness.timing === "ready"],
   ];
+  const count = labels.filter(([, , ready]) => ready).length;
+  const heading = element("summary", `${t[readiness.ready ? "ready" : "checklist"]} · ${count}/${labels.length}`,
+    { id: "readiness-title", class: `readiness-toggle ${readiness.ready ? "status-ready" : "status-pending"}` });
   for (const [label, href, ready] of labels) {
     const item = element("li", "");
     item.append(element("a", label, { href, class: ready ? "status-ready" : "status-pending" }));

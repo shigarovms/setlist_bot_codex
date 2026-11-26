@@ -226,8 +226,14 @@ class Workspace:
             else await catalog.list_songs(group_id, archived=archived)
         )
         start = page * PAGE_SIZE
+        pending_proposals = (
+            len(await self.store.find(CatalogProposal, group_id=group_id, status="pending"))
+            if membership.role == "admin"
+            else 0
+        )
         return {
             **context,
+            "pending_proposals": pending_proposals,
             "has_next": start + PAGE_SIZE < len(songs),
             "songs": [
                 {"id": str(song.id), "title": song.title, "duration": clock(song.duration_seconds)}

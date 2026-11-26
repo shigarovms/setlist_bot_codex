@@ -48,7 +48,7 @@ DESCRIPTIONS: dict[str, tuple[str, str]] = {
     "catalog": ("Репертуар", "Repertoire"),
     "profile": ("Мой профиль", "My profile"),
     "help": ("Помощь", "Help"),
-    "register": ("Подать заявку в коллектив", "Apply to join the band"),
+    "register": ("Вступить или посмотреть свои роли", "Join the band or see your roles"),
     "new_band": ("Подключить коллектив", "Connect a band"),
     "add_new_songs": ("Добавить песни", "Add songs"),
     "concert": ("Создать выступление", "Create a performance"),

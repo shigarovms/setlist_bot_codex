@@ -69,6 +69,7 @@ BOT_BUTTONS = {
     },
     "workspace-team": {
         "title": "permanent_title",
+        "myRoles": "register_my_roles",
         "join": "team_accept",
         "add": "team_accept_roles",
         "decline": "team_decline",

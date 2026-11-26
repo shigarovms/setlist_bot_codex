@@ -107,6 +107,9 @@ async def test_requests_role_removal_admin_rights_and_leave_keep_booking(engine,
         await act(client, engine, 2, member, "request_roles", roles="Гитара")
         admin_view = await get(client, 1, "team", **band)
         target = next(row for row in admin_view["members"] if not row["self"])
+        own = await get(client, 1, "team", **band, roles="1")
+        assert not own["admin"] and len(own["members"]) == 1 and own["members"][0]["self"]
+        await get(client, 3, "team", 403, **band, roles="1")
         assert target["requested"] == ["Гитара"]
         args = {"target": target["id"], "version": target["version"]}
         await post(

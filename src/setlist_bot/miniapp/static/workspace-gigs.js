@@ -201,11 +201,12 @@ export function showGigs({ root, data, language, dateText, invitationUrl, setlis
   for (const row of data.invitations) {
     const item = el("li");
     const heading = [row.band, row.title].filter(Boolean).join(" · ");
-    item.append(invitationUrl ? el("a", heading, { href: invitationUrl(row.id, row.status) }) : el("strong", heading),
+    const href = invitationUrl(row.id, row.status);
+    item.append(href ? el("a", heading, { href }) : el("strong", heading),
       el("p", [dateText(row.date), row.city, row.role, statusLabel(row.status)].filter(Boolean).join(" · ")));
-    if (invitationUrl && row.other_roles.length) {
+    if (href && row.other_roles.length) {
       const roles = el("div", "", { class: "toolbar" });
-      for (const role of row.other_roles) roles.append(el("a", role.role, { href: invitationUrl(role.id) }));
+      for (const role of row.other_roles) roles.append(el("a", role.role, { href: invitationUrl(role.id, row.status) }));
       item.append(roles);
     }
     list.append(item);

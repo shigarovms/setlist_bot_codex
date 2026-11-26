@@ -6,7 +6,7 @@ const words = withBotLabels("workspace-timing", {
     history: "История", template: "Взять за шаблон", frequent: "Часто выбираемые",
     past: "Прошедшие выступления", noHistory: "Подходящих выступлений пока нет.",
     previous: "Назад", next: "Дальше", close: "Закрыть", loading: "Загрузка…",
-    start: "Начало", end: "Окончание", event: "Событие",
+    start: "Начало", end: "Конец", event: "Событие", swipeHint: "(чтобы удалить, смахните влево)",
     typical: ["Сбор", "Саундчек", "Открытие дверей", "Выступление", "Окончание"],
     add: "Добавить строку", remove: "Удалить строку", save: "Сохранить",
     zone: "Часовой пояс", automatic: "Автоматически", hour: "Часы", minute: "Минуты",
@@ -21,7 +21,7 @@ const words = withBotLabels("workspace-timing", {
     history: "History", template: "Use as template", frequent: "Frequently used",
     past: "Past performances", noHistory: "No matching past performances yet.",
     previous: "Previous", next: "Next", close: "Close", loading: "Loading…",
-    start: "Start", end: "End", event: "Event",
+    start: "Start", end: "End", event: "Event", swipeHint: "(swipe left to remove)",
     typical: ["Call time", "Soundcheck", "Doors open", "Performance", "End"],
     add: "Add row", remove: "Remove row", save: "Save",
     zone: "Time zone", automatic: "Automatic", hour: "Hours", minute: "Minutes",
@@ -101,6 +101,7 @@ function timingTable(t, editable = false) {
   const table = element("table", "", { class: editable ? "timing-table timing-edit-table" : "timing-table" });
   const headings = table.createTHead().insertRow();
   for (const key of ["start", "end", "event"]) headings.append(element("th", t[key], { scope: "col" }));
+  if (editable) headings.lastElementChild.append(element("em", t.swipeHint, { class: "timing-swipe-hint" }));
   return table;
 }
 
@@ -177,11 +178,8 @@ function timeWheel(title, value, optional, t, apply) {
   }
 }
 
-export function showTiming({ root, data, performance, back, request, readHistory, refresh }) {
+export function showTiming({ root, data, performance, request, readHistory, refresh }) {
   const t = words[data.language] || words.ru;
-  const nav = element("nav", "", { class: "workspace-nav" });
-  nav.append(element("a", t.previous, { href: back }));
-  root.append(nav);
   root.append(element("h2", t.title), element("p", data.event));
   if (data.preliminary) root.append(element("strong", t.preliminary));
   if (!data.rows.length) root.append(element("p", t.empty));
@@ -280,17 +278,24 @@ export function showTiming({ root, data, performance, back, request, readHistory
         revealed.classList.remove("timing-revealed");
         revealed = null;
       }
-      swipe = { id: event.pointerId, x: event.clientX, y: event.clientY };
+      swipe = { id: event.pointerId, x: event.clientX, y: event.clientY, time: event.timeStamp };
     });
     row.addEventListener("pointercancel", () => { swipe = null; });
-    row.addEventListener("pointerup", event => {
+    function revealSwipe(event) {
       if (event.pointerId !== swipe?.id) return;
       const dx = event.clientX - swipe.x, dy = event.clientY - swipe.y;
+      const elapsed = Math.max(1, event.timeStamp - swipe.time);
+      const fast = Math.abs(dx) >= 18 && Math.abs(dx) / elapsed >= .24;
+      if ((!fast && Math.abs(dx) < 32) || Math.abs(dx) <= Math.abs(dy) * 1.35) return;
       swipe = null;
-      if (Math.abs(dx) < 45 || Math.abs(dx) <= Math.abs(dy) * 1.4) return;
       suppressClick = true;
       revealed = dx < 0 ? row : null;
       row.classList.toggle("timing-revealed", revealed === row);
+    }
+    row.addEventListener("pointermove", revealSwipe);
+    row.addEventListener("pointerup", event => {
+      revealSwipe(event);
+      swipe = null;
     });
     row.addEventListener("click", event => {
       if (!suppressClick || !event.detail) return;
@@ -315,15 +320,7 @@ export function showTiming({ root, data, performance, back, request, readHistory
       return { input, trigger };
     }
   }
-  body.addEventListener("keydown", event => {
-    if (event.key !== "Enter" || event.isComposing || event.target?.name !== "label") return;
-    event.preventDefault();
-    addNext();
-  });
-  form.addEventListener("submit", event => {
-    event.preventDefault();
-    addNext();
-  });
+  form.addEventListener("submit", event => event.preventDefault());
   function saveRows() {
     const missing = eventRows().find(row => !row.querySelector('[name="start"]').value);
     if (missing) { missing.querySelector(".timing-time").click(); return; }

@@ -13,6 +13,36 @@ from setlist_bot.transport.controller import Controller
 from setlist_bot.transport.staffing_lineups import event_lineup
 
 
+async def test_register_existing_members_see_roles_without_starting_an_application(engine, world):
+    async with PostgresUnitOfWork(engine) as uow:
+        band = world.group.id
+        service = Staffing(uow.store, world.admin)
+        for name in ("Световик", "Менеджер"):
+            role = await service.role(band, name)
+            await service.set_permanent(band, role.id, world.member.id)
+        member = Controller(
+            uow.store,
+            world.member,
+            -100,
+            private=False,
+            bot_username="example_bot",
+            miniapp_public_base_url="https://example.org",
+        )
+        response = await member.execute("/register")
+        assert response.text == "Вы уже в коллективе «Коллектив А».\nВаши роли: Менеджер, Световик."
+        assert response.buttons == [
+            ("Мои роли", f"https://t.me/example_bot?startapp=team_{band.hex}")
+        ]
+        assert not response.force_reply and response.command_input_id is None
+        (membership,) = await uow.store.find(Membership, group_id=band, user_id=world.member.id)
+        assert membership.requested_roles is None and membership.status == "active"
+        admin = await Controller(uow.store, world.admin, -100, private=False).execute("/register")
+        assert "Роли пока не назначены." in admin.text
+        newcomer = Controller(uow.store, world.stranger, -100, private=False)
+        application = await newcomer.execute("/register")
+        assert application.force_reply and "Какие роли" in application.text
+
+
 async def test_accept_team_invitation_grants_membership_and_all_roles_without_register(
     engine, world
 ):

@@ -13,6 +13,8 @@ from setlist_bot.domain.entities import (
     Context,
     Group,
     Membership,
+    StaffContact,
+    StaffRole,
     User,
     now,
 )
@@ -161,6 +163,13 @@ class Groups:
             restricted=group.admins_only_suggestions,
         )
         return group
+
+    async def permanent_roles(self, group_id: UUID, user_id: UUID) -> list[str]:
+        contacts = await self.store.find(
+            StaffContact, group_id=group_id, user_id=user_id, permanent=True
+        )
+        roles = await self.store.get_many(StaffRole, {contact.role_id for contact in contacts})
+        return sorted({role.name for role in roles if role.group_id == group_id}, key=str.casefold)
 
     async def register(self, group_id: UUID, musical_role: str) -> Membership:
         require(0 < len(musical_role.strip()) <= 200, "musical_role")

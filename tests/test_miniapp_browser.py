@@ -14,6 +14,7 @@ from aiohttp.test_utils import TestServer
 from cryptography.fernet import Fernet
 from test_miniapp import KEY, session, settings, signed
 
+from setlist_bot.application.groups import Groups
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.application.support import Support
 from setlist_bot.application.workspace_schedule import CalendarRuntime
@@ -116,6 +117,30 @@ class Browser:
         match += f"element => element.textContent.trim() === {json.dumps(title)})"
         await self.wait(f"!!({match})")
         await self.js(f"{match}.click()")
+
+    async def click_menu(self, title):
+        name = json.dumps(title)
+        find = (
+            "[...document.querySelectorAll('.action-menu-list > *')]"
+            f".find(element => element.textContent.trim() === {name})"
+        )
+        await self.wait(f"!!({find})")
+        await self.js(f"""
+            (() => {{
+                const action = {find};
+                const menu = action.closest('details');
+                if (!menu.open) menu.querySelector('summary').click();
+                if (!action.getClientRects().length) throw Error('Menu item is not visible');
+                action.click();
+            }})()
+        """)
+
+    async def click_back(self, title):
+        await self.wait(
+            "document.querySelector('#workspace-back a')?.lastChild.textContent"
+            f" === {json.dumps(title)}"
+        )
+        await self.js("document.querySelector('#workspace-back a').click()")
 
     async def assert_button_text_fits(self):
         overflow = await self.js("""
@@ -394,8 +419,8 @@ async def browser_modal_scroll(browser):
 async def browser_music_search(browser, engine, band):
     from test_repertoire_workspace_music import ready_worker
 
-    await browser.click_named("a", "К списку песен")
-    await browser.click_named("a", "🌐 Найти песни в интернете")
+    await browser.click_back("К списку песен")
+    await browser.click_menu("🌐 Найти песни в интернете")
     await browser.wait("!!document.querySelector('#music-query')")
     await browser.js("""
         const input = document.querySelector('#music-query');
@@ -612,16 +637,16 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     })()
                 """)
                 await browser.wait(
-                    "document.querySelector('a[href*=\"view=inbox\"]')"
-                    "?.textContent.includes(' · 1')"
+                    "document.querySelector('a[href*=\"view=inbox\"] .shared-incoming-count')"
+                    "?.textContent.trim() === '1'"
                 )
                 await browser.js("document.querySelector('a[href*=\"view=inbox\"]').click()")
                 await browser.click_named("#workspace-content a", "Предложение сет-листа")
                 await browser.click_named(".shared-tools button", "Показать вариант")
                 await browser.wait("!!document.querySelector('dialog[open] .shared-setlist')")
                 await browser.js("window.nativeBack()")
-                await browser.click_named("#workspace-content a", "К входящим запросам")
-                await browser.click_named("#workspace-content a", "Мои коллективы")
+                await browser.click_back("К входящим запросам")
+                await browser.click_back("Мои коллективы")
                 await browser.wait("document.querySelectorAll('.workspace-list a').length === 2")
                 await browser.tap(".workspace-list a")
                 await browser.wait(
@@ -641,24 +666,29 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                         "mobile": True,
                     },
                 )
+                await browser.click_named("#workspace-content .action-menu summary", "Еще")
                 assert await browser.js("""
                     (() => {
-                        const nav = document.querySelector('#workspace-content > nav');
-                        const details = document.querySelector('.performance-details-nav');
+                        const nav = document.querySelector('#workspace-back');
+                        const menu = document.querySelector('.action-menu[open]');
+                        const details = menu.querySelector('.action-menu-list');
+                        const title = document.querySelector('#workspace-title');
                         const [data, roster, timing, remove] = [...details.children];
                         const [a, b, c, d] = [...details.children].map(button =>
                           button.getBoundingClientRect());
                         return nav.childElementCount === 1
                           && Math.abs(nav.firstElementChild.offsetWidth - nav.clientWidth) <= 1
+                          && nav.getBoundingClientRect().bottom < title.getBoundingClientRect().top
+                          && nav.querySelector('.page-back-arrow').textContent === '←'
                           && data.textContent === 'Данные выступления'
-                          && roster.textContent.includes('Состав выступления')
+                          && roster.textContent === 'Состав участников'
                           && timing.textContent === 'Тайминг выступления'
                           && remove.textContent === 'Удалить выступление'
                           && remove.classList.contains('destructive')
-                          && a.top === b.top && c.top === d.top && c.top > a.top
-                          && a.left === c.left && b.left === d.left && a.left < b.left
-                          && Math.abs(a.width - b.width) <= 1 && a.height === c.height
-                          && details.nextElementSibling.classList.contains('performance-readiness');
+                          && a.top < b.top && b.top < c.top && c.top < d.top
+                          && a.left === c.left && b.left === d.left && a.width === d.width
+                          && a.height >= 44 && a.right <= innerWidth
+                          && !document.querySelector('.performance-readiness').open;
                     })()
                 """)
                 await browser.assert_button_text_fits()
@@ -675,7 +705,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     !!document.querySelector('.performance-readiness .status-ready')
                     && !!document.querySelector('.performance-readiness .status-pending')
                 """)
-                await browser.click_named(".performance-details-nav a", "Тайминг выступления")
+                await browser.click_menu("Тайминг выступления")
                 await browser.wait("!!document.querySelector('.timing-edit-table')")
                 await browser.click_named(".timing-fields button", "Добавить строку")
                 await browser.js("document.activeElement.click()")
@@ -698,12 +728,19 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.js("""
                     const field = document.querySelector('.timing-form [name=label]');
                     field.value = 'Сбор'; field.focus();
-                    const enter = new KeyboardEvent('keydown', {key: 'Enter', bubbles: true});
+                    const enter = new KeyboardEvent(
+                        'keydown', {key: 'Enter', bubbles: true, cancelable: true}
+                    );
                     field.dispatchEvent(enter);
                 """)
-                assert await browser.js(
-                    "document.querySelectorAll('.timing-edit-table tbody tr').length === 2"
-                )
+                assert await browser.js("""
+                    document.querySelectorAll('.timing-event-row').length === 1
+                    && document.activeElement.name !== 'label'
+                    && document.querySelector('[name=label]').value === 'Сбор'
+                    && document.querySelector('th:nth-child(2)').textContent === 'Конец'
+                    && document.querySelector('th em').textContent.includes('смахните влево')
+                """)
+                await browser.click_named(".timing-fields button", "Добавить строку")
                 await browser.call("Emulation.setTouchEmulationEnabled", {"enabled": True})
                 assert await browser.js("""
                     (() => {
@@ -720,12 +757,15 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.js("""
                     (() => {
                         const row = document.querySelector('.timing-event-row:last-child');
+                        const field = row.querySelector('[name=label]');
                         const primary = { pointerType: 'touch', pointerId: 8, isPrimary: true,
                             clientY: 200, bubbles: true };
                         const down = new PointerEvent('pointerdown', {...primary, clientX: 250});
-                        const up = new PointerEvent('pointerup', {...primary, clientX: 160});
-                        row.dispatchEvent(down);
-                        row.dispatchEvent(up);
+                        const move = new PointerEvent('pointermove', {...primary, clientX: 228});
+                        const up = new PointerEvent('pointerup', {...primary, clientX: 228});
+                        field.dispatchEvent(down);
+                        field.dispatchEvent(move);
+                        field.dispatchEvent(up);
                     })()
                 """)
                 assert await browser.js("""
@@ -735,14 +775,13 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.tap(".timing-revealed .timing-remove")
                 await browser.wait("document.querySelectorAll('.timing-event-row').length === 1")
                 await browser.call("Emulation.setTouchEmulationEnabled", {"enabled": False})
-                await browser.click_named("#workspace-content nav a", "Назад")
+                await browser.click_back("Назад")
                 await browser.wait("!!document.getElementById('readiness-title')")
-                await browser.click_named(".performance-details-nav a", "Тайминг выступления")
+                await browser.click_menu("Тайминг выступления")
                 await browser.wait("!!document.querySelector('.timing-edit-table')")
                 assert await browser.js("!document.querySelector('.timing-edit-table tbody tr')")
-                await browser.click_named("#workspace-content nav a", "Назад")
+                await browser.click_back("Назад")
                 await browser.wait("!!document.getElementById('readiness-title')")
-                await browser.assert_button_rows(".performance-details-nav")
                 await browser.assert_button_rows("#workspace-content > .toolbar")
                 assert await browser.js("""
                     const editor = document.querySelector('#workspace-content button.primary');
@@ -759,7 +798,8 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                         return response;
                     };
                 """)
-                await browser.click_named("#workspace-content button", "История")
+                await browser.click_named("#workspace-content button", "Варианты и история")
+                await browser.click_named(".shared-tools button", "История")
                 await browser.wait("typeof window.releaseHistory === 'function'")
                 await browser.js("window.nativeBack()")
                 await browser.wait(
@@ -901,7 +941,8 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     [...document.querySelectorAll('#workspace-content button')].some(button =>
                         button.textContent.includes('Открыть редактор'))
                 """)
-                await browser.click_named("#workspace-content button", "История")
+                await browser.click_named("#workspace-content button", "Варианты и история")
+                await browser.click_named(".shared-tools button", "История")
                 await browser.wait(
                     "document.querySelector('.shared-tools').innerText"
                     ".includes('Возвращён в работу')"
@@ -914,7 +955,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 )
                 await browser.js("document.getElementById('back-bot').click()")
                 await browser.wait("!!document.querySelector('.shared-setlist')")
-                await browser.click_named("a", "◀️ К выступлениям")
+                await browser.click_back("К выступлениям")
                 await browser.wait(
                     "document.querySelectorAll('.workspace-list button').length === 2"
                 )
@@ -925,7 +966,7 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.wait(
                     "document.querySelectorAll('.workspace-list button').length === 2"
                 )
-                await browser.js("document.querySelector('a[href*=repertoire]').click()")
+                await browser.click_menu("Репертуар")
                 await browser.wait("document.querySelectorAll('.workspace-list a').length === 2")
                 await browser.js("""
                     document.getElementById('repertoire-query').value = 'Kometa';
@@ -953,16 +994,11 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                     " === 'Репертуар обновлён.'"
                 )
                 assert not await browser.js("document.getElementById('song-dialog').open")
-                await browser.js(
-                    "Array.from(document.links)"
-                    ".find(a => a.textContent === 'К списку песен').click()"
-                )
+                await browser.click_back("К списку песен")
                 await browser.wait(
                     "document.getElementById('repertoire-query')?.value === 'Kometa'"
                 )
-                await browser.js("""
-                    Array.from(document.links).find(a => a.textContent === 'Импорт таблицы').click()
-                """)
+                await browser.click_menu("Импорт таблицы")
                 await browser.wait("!!document.getElementById('import-source')")
                 await browser.js(r"""
                     const source = 'TRACKS\tTIME\tKEY\nИнтро\t00:05\tAm';
@@ -993,18 +1029,18 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser_profile(browser, engine, origin)
                 await browser_band_settings(browser, engine, world.group.id, origin)
                 await browser_help(browser, engine, world.admin, origin)
+                await browser_empty_states(browser, engine, world.admin, origin)
                 await browser_band_trash(browser, engine, world.other.id, origin)
                 await browser_team(browser, engine, world.group.id, origin)
                 return
             await browser.wait("document.querySelectorAll('.catalog-entry').length===2")
             assert await browser.js(
-                "Array.from(document.querySelectorAll('#average-pause')).length===1 && "
-                "document.getElementById('undo').nextElementSibling.id==='average-pause' && "
-                "document.getElementById('average-pause').nextElementSibling.id==='add-pause'"
+                "document.getElementById('undo').nextElementSibling.id==='add-pause' && "
+                "!!document.getElementById('average-pause').closest('.action-menu')"
             )
             assert (
                 await browser.js("document.getElementById('average-pause').textContent")
-                == "Сред. пауза"
+                == "Средняя пауза"
             )
             assert await browser.js("document.getElementById('older').textContent") == "История"
             assert await browser.js("document.getElementById('newer').hidden")
@@ -1490,6 +1526,17 @@ async def browser_manage_performance(browser, engine, group_id, origin):
             return box.offsetWidth === 20 && box.closest('label').offsetHeight >= 44;
         })()""")
         assert await browser.js("document.documentElement.scrollWidth <= innerWidth")
+        assert await browser.js("""
+            (() => {
+                const [date, title, city] = ['date','title','city'].map(id =>
+                    document.getElementById('workspace-performance-' + id).getBoundingClientRect()
+                );
+                const dialog = document.querySelector('dialog[open]');
+                return date.width === title.width && date.width === city.width
+                    && date.left === title.left && date.left === city.left
+                    && dialog.scrollWidth <= dialog.clientWidth;
+            })()
+        """)
     assert await browser.js("""(() => {
         const dialog = document.querySelector('dialog[open]');
         const style = document.documentElement.style;
@@ -1523,6 +1570,16 @@ async def browser_manage_performance(browser, engine, group_id, origin):
     """)
     assert await browser.js("""
         (() => {
+            const field = document.getElementById('workspace-performance-title');
+            field.focus();
+            const cancelled = !field.dispatchEvent(
+                new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
+            return cancelled && document.activeElement !== field
+                && field.value === 'Летний концерт' && !document.querySelector('dialog[open] dl');
+        })()
+    """)
+    assert await browser.js("""
+        (() => {
           const [review, back] = document.querySelectorAll('form .performance-actions button');
           const select = document.getElementById('workspace-performance-city');
           return review.offsetWidth === back.offsetWidth && back.offsetWidth === select.offsetWidth
@@ -1542,7 +1599,7 @@ async def browser_manage_performance(browser, engine, group_id, origin):
     await browser.wait(
         "document.querySelector('#workspace-content h2')?.textContent === 'Летний концерт'"
     )
-    await browser.click_named("#workspace-content a", "Тайминг выступления")
+    await browser.click_menu("Тайминг выступления")
     await browser.wait("!!document.querySelector('.timing-form')")
     await browser.click_named(".timing-form button", "Добавить строку")
     await browser.call(
@@ -1564,19 +1621,19 @@ async def browser_manage_performance(browser, engine, group_id, origin):
     assert (
         await browser.js("document.querySelector('.timing-form [name=label]').value") == "Саундчек"
     )
-    await browser.click_named("#workspace-content a", "Назад")
+    await browser.click_back("Назад")
     await browser.call(
         "Emulation.setDeviceMetricsOverride",
         {"width": 390, "height": 900, "deviceScaleFactor": 1, "mobile": True},
     )
-    await browser.click_named("#workspace-content button", "Данные выступления")
+    await browser.click_menu("Данные выступления")
     await browser.js("document.getElementById('workspace-performance-city').value = 'Казань'")
     await browser.click_named("dialog[open] button", "Предпросмотр")
     await process_catalog_request(engine)
     await browser.click_named("dialog[open] button", "Сохранить")
     await process_catalog_request(engine)
     await browser.wait("document.querySelector('#workspace-content')?.innerText.includes('Казань')")
-    await browser.click_named("#workspace-content button", "Удалить выступление")
+    await browser.click_menu("Удалить выступление")
     await process_catalog_request(engine)
     await browser.click_named("dialog[open] button", "Подтвердить")
     await process_catalog_request(engine)
@@ -1598,7 +1655,7 @@ async def browser_manage_performance(browser, engine, group_id, origin):
 
 async def browser_team(browser, engine, group_id, origin):
     await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&band={group_id}"})
-    await browser.click_named("#workspace-content a", "Постоянная команда")
+    await browser.click_menu("Постоянная команда")
     await browser.click_named("#workspace-content button", "+ Добавить участников")
     await browser.js("""
         document.getElementById('team-recipient').value = '3';
@@ -1621,7 +1678,8 @@ async def browser_team(browser, engine, group_id, origin):
     await browser.wait(
         "document.getElementById('workspace-status')?.textContent === 'У вас пока нет коллективов.'"
     )
-    await browser.click_named("#workspace-content a", "Приглашения в команду")
+    await browser.js("document.querySelector('a[href*=\"view=inbox\"]').click()")
+    await browser.click_named("#workspace-content a", "Приглашение в коллектив")
     await browser.wait(
         "document.querySelector('#workspace-content')?.innerText.includes('Световик')"
     )
@@ -1632,24 +1690,42 @@ async def browser_team(browser, engine, group_id, origin):
         "document.querySelector('#workspace-content')?.innerText"
         ".includes('Приглашений в команду пока нет.')"
     )
-    await browser.click_named("#workspace-content a", "Мои коллективы")
+    await browser.click_back("К входящим запросам")
+    await browser.click_back("Мои коллективы")
     await browser.click_named(".workspace-list a", "Коллектив А")
-    await browser.click_named("#workspace-content a", "Постоянная команда")
+    await browser.click_menu("Постоянная команда")
     await browser.wait("document.querySelector('.workspace-list')?.innerText.includes('Световик')")
     assert await browser.js(
         "!document.querySelector('#workspace-content').innerText.includes('+ Добавить участников')"
     )
-    await browser.click_named("#workspace-content a", "К коллективу")
-    await browser.click_named("#workspace-content a", "⚙️ Настройки коллектива")
+    await browser.click_back("К коллективу")
+    await browser.click_menu("⚙️ Настройки коллектива")
     await browser.wait(
         "document.querySelector('#workspace-content dl')?.innerText.includes('Таблица Article')"
     )
     assert not await browser.js("document.querySelector('#workspace-content button')")
+    await browser.call(
+        "Page.addScriptToEvaluateOnNewDocument",
+        {
+            "source": "window.Telegram.WebApp.initData = "
+            + json.dumps(signed(actor=3, start_param=f"team_{group_id.hex}")),
+        },
+    )
+    await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1"})
+    await browser.wait(
+        "document.querySelector('#workspace-content h2')?.textContent === 'Мои роли'"
+    )
+    assert await browser.js(
+        "document.querySelector('.workspace-list').innerText.includes('Световик')"
+    )
+    await browser.click_back("К коллективу")
+    await browser.click_back("Мои коллективы")
+    await browser.wait("!!document.querySelector('.band-list')")
 
 
 async def browser_staff_directory(browser, engine, group_id, origin):
     await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&band={group_id}"})
-    await browser.click_named("#workspace-content a", "Постоянная команда")
+    await browser.click_menu("Постоянная команда")
     await browser.click_named("#workspace-content a", "Знакомые исполнители")
     await browser.click_named("#workspace-content button", "＋ Добавить исполнителя")
     await browser.js("""
@@ -1669,7 +1745,7 @@ async def browser_staff_directory(browser, engine, group_id, origin):
     await browser.wait(
         "document.querySelector('#workspace-content')?.innerText.includes('Предлагать первым')"
     )
-    await browser.click_named("#workspace-content a", "Знакомые исполнители")
+    await browser.click_back("Знакомые исполнители")
     await browser.click_named("#workspace-content a", "Составы")
     await browser.click_named("#workspace-content button", "＋ Создать состав")
     await browser.js(r"""
@@ -1703,7 +1779,7 @@ async def browser_roster(browser, engine, world, origin):
             f"&view=performance&performance={world.concert2.id}",
         },
     )
-    await browser.click_named("#workspace-content a", "👥 Состав выступления")
+    await browser.click_menu("Состав участников")
     await browser.click_named("#workspace-content button", "Изменить состав выступления")
     assert not await browser.js("document.querySelector('dialog[open] [data-move]')")
     await browser.js(r"""
@@ -1725,7 +1801,7 @@ async def browser_roster(browser, engine, world, origin):
         "document.querySelector('#workspace-content')?.innerText.includes('Ждём ответа')"
         " && document.querySelector('#workspace-content')?.innerText.includes('Подтверждено')"
     )
-    await browser.click_named("#workspace-content a", "К выступлению")
+    await browser.click_back("К выступлению")
     await browser.wait(
         "document.querySelector('#workspace-content h2')?.textContent === 'Второй концерт'"
     )
@@ -1749,7 +1825,8 @@ async def browser_guest_gig(browser, engine, world, origin):
             "=== 'У вас пока нет коллективов.'"
         )
         await browser.click_named("#workspace-content a", "Моё расписание")
-        await browser.click_named("#workspace-content a", "📩 Приглашения")
+        await browser.wait("!!document.querySelector('#workspace-content [href*=invitations]')")
+        await browser.js("document.querySelector('#workspace-content [href*=invitations]').click()")
         await browser.click_named(".workspace-list a", "Коллектив А · Второй концерт")
         await browser.click_named("#workspace-content button", "✅ Подтвердить участие")
         await browser.click_named("dialog[open] button", "Подтвердить")
@@ -1763,9 +1840,10 @@ async def browser_guest_gig(browser, engine, world, origin):
         await process_catalog_request(engine)
         await browser.wait("!!document.querySelector('dialog[open] a[download]:not([hidden])')")
         await browser.click_named("dialog[open] button", "Закрыть")
-        await browser.click_named("#workspace-content a", "К приглашению")
-        await browser.click_named("#workspace-content a", "Моё расписание")
-        await browser.click_named("#workspace-content a", "✅ Подтверждённые участия")
+        await browser.click_back("К приглашению")
+        await browser.click_back("Моё расписание")
+        await browser.wait("location.search.includes('section=invitations')")
+        await browser.click_back("Моё расписание")
         await browser.wait(
             "document.querySelector('.workspace-list')?.innerText.includes('Участие подтверждено')"
         )
@@ -1822,7 +1900,7 @@ async def browser_schedule(browser, engine, origin):
     await browser.wait(
         "document.querySelector('.workspace-list li')?.innerText.includes('Второй концерт')"
     )
-    await browser.click_named("#workspace-content a", "🚫 Недоступные даты")
+    await browser.click_menu("🚫 Недоступные даты")
     await process_catalog_request(engine)
     await browser.click_named("#workspace-content button", "＋ Отметить занятость")
     await browser.js("document.getElementById('busy-starts').value = '2099-06-06'")
@@ -1830,7 +1908,8 @@ async def browser_schedule(browser, engine, origin):
     await process_catalog_request(engine)
     await process_catalog_request(engine)
     await browser.wait("document.querySelector('.workspace-list li')?.innerText.includes('2099')")
-    await browser.click_named("#workspace-content a", "📅 Подключить календарь")
+    await browser.click_back("Моё расписание")
+    await browser.click_menu("📅 Подключить календарь")
     runtime = CalendarRuntime("https://example.org", Fernet.generate_key().decode(), KEY)
     await process_catalog_request(engine, calendar=runtime)
     await browser.click_named(".workspace-list li:first-child button", "Подключить")
@@ -1850,12 +1929,12 @@ async def browser_schedule(browser, engine, origin):
 
 async def browser_profile(browser, engine, origin):
     await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1"})
-    await browser.click_named("#workspace-content a", "👤 Мой профиль")
+    await browser.click_menu("👤 Мой профиль")
     await browser.wait("!!document.querySelector('.profile-nav')")
     assert await browser.js("""
         const links = document.querySelectorAll('#workspace-content > :last-child a');
-        links.length === 2 && links[0].textContent.includes('расписание')
-            && links[1].textContent.includes('Назад')
+        links.length === 1 && links[0].textContent.includes('расписание')
+            && document.querySelector('#workspace-back a').lastChild.textContent === 'Назад'
     """)
     await browser.js("document.querySelector('.profile-nav a').click()")
     await browser.wait("!!document.querySelector('a[aria-current]')")
@@ -1902,7 +1981,7 @@ async def browser_band_settings(browser, engine, group_id, origin):
     await browser.call(
         "Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&band={group_id}&past=1"}
     )
-    await browser.click_named("#workspace-content a", "⚙️ Настройки коллектива")
+    await browser.click_menu("⚙️ Настройки коллектива")
     await browser.wait("!!document.querySelector('#workspace-content a[href*=startgroup]')")
     assert await browser.js(
         f"document.querySelector('a[href$=\"?start=transfer_{group_id.hex}\"]')"
@@ -1962,7 +2041,7 @@ async def browser_band_settings(browser, engine, group_id, origin):
             .every(value => content.innerText.includes(value))
     """)
     assert await browser.js("document.documentElement.lang === 'ru'")
-    await browser.click_named("#workspace-content a", "◀️ К выступлениям")
+    await browser.click_back("К выступлениям")
     await browser.wait("document.querySelector('[aria-current=page]')?.textContent === 'Прошедшие'")
 
 
@@ -1972,13 +2051,14 @@ async def browser_help(browser, engine, actor, origin):
     await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1"})
     await browser.wait("!!document.querySelector('a[href$=\"?startgroup=connect_band\"]')")
     await browser.js("window.Telegram.WebApp.openTelegramLink = url => { window.chatLink = url; }")
-    await browser.click_named("#workspace-content a", "🎸 Подключить коллектив")
+    await browser.click_menu("🎸 Подключить коллектив")
     assert await browser.js("window.chatLink.endsWith('?startgroup=connect_band')")
-    await browser.click_named("#workspace-content summary", "Как вступить в коллектив")
+    await browser.click_menu("Как вступить в коллектив")
     assert await browser.js(
-        "document.querySelector('details[open] p')?.textContent.includes('/register')"
+        "document.querySelector('dialog[open] p')?.textContent.includes('/register')"
     )
-    await browser.click_named("#workspace-content a", "Справка и поддержка")
+    await browser.js("document.querySelector('dialog[open]').close()")
+    await browser.click_menu("Справка и поддержка")
     await browser.click_named("#workspace-content summary", "Репертуар")
     assert await browser.js(
         "document.querySelector('details[open] > p').innerText.includes('алиасам')"
@@ -2000,9 +2080,46 @@ async def browser_help(browser, engine, actor, origin):
         assert event.chat_id == -900 and "Вопрос о репертуаре" in event.text
 
 
+async def browser_empty_states(browser, engine, actor, origin):
+    from datetime import timedelta
+
+    from setlist_bot.application.workspace import today
+
+    async with PostgresUnitOfWork(engine) as uow:
+        band = await Groups(uow.store, actor).create("Новый коллектив", -990)
+        await Setlists(uow.store, actor).create(
+            band.id, today() + timedelta(days=14), "Первое выступление"
+        )
+    await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&band={band.id}"})
+    await browser.click_menu("Репертуар")
+    await browser.wait("document.querySelectorAll('.workspace-options a').length === 2")
+    assert await browser.js("""
+        (() => {
+            const actions = document.querySelector('.workspace-options');
+            return !document.querySelector('#repertoire-query') &&
+                [...actions.children].every(link => link.offsetWidth === actions.clientWidth);
+        })()
+    """)
+    await browser.click_back("К выступлениям")
+    await browser.click_named(".workspace-list button", "🎵 Открыть редактор")
+    await browser.wait("!document.getElementById('empty-history').hidden")
+    assert await browser.js("""
+        (() => {
+            const history = document.getElementById('empty-history');
+            return history.querySelector('em').textContent === '(взять из прошлого выступления)' &&
+                history.offsetWidth === document.getElementById('back-bot').offsetWidth &&
+                document.getElementById('load-shared').hidden;
+        })()
+    """)
+    await browser.js("document.getElementById('empty-history').click()")
+    await browser.wait(
+        "document.getElementById('history-sources')?.textContent.includes('Пока нет')"
+    )
+
+
 async def browser_band_trash(browser, engine, band, origin):
     await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&band={band}"})
-    await browser.click_named("#workspace-content a", "⚙️ Настройки коллектива")
+    await browser.click_menu("⚙️ Настройки коллектива")
     await browser.click_named("#workspace-content button", "Переместить коллектив в корзину")
     await browser.click_named("dialog[open] button", "Продолжить")
     await process_catalog_request(engine)
@@ -2017,7 +2134,7 @@ async def browser_band_trash(browser, engine, band, origin):
     await browser.wait(
         "document.getElementById('workspace-status').textContent.includes('восстановлен')"
     )
-    await browser.click_named("#workspace-content a", "Мои коллективы")
+    await browser.click_back("Мои коллективы")
     await browser.wait(
         "document.querySelector('.workspace-list')?.innerText.includes('Коллектив Б')"
     )

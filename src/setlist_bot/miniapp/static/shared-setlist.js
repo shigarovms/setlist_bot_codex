@@ -4,6 +4,7 @@ import { mountPdfExport, pdfTitle } from "./workspace-export.js";
 
 const copy = withBotLabels("shared-setlist", {
   ru: {
+    versions: "Варианты и история",
     close: "Закрыть", pause: "Пауза",
     noVariants: "Сохранённых вариантов пока нет.", submitted: "Предложение", version: "Версия",
     history: "История", revisionActions: { created: "Создан", approved: "Утверждён", reopened: "Возвращён в работу", restored: "Восстановлен", proposal_applied: "Применён вариант" }, edited: "Изменён",
@@ -21,6 +22,7 @@ const copy = withBotLabels("shared-setlist", {
     previous: "Назад", next: "Дальше",
   },
   en: {
+    versions: "Variants and history",
     close: "Close", pause: "Pause",
     noVariants: "There are no saved versions or proposals.", submitted: "Proposal", version: "Version",
     history: "History", revisionActions: { created: "Created", approved: "Approved", reopened: "Reopened", restored: "Restored", proposal_applied: "Proposal applied" }, edited: "Edited",
@@ -55,32 +57,37 @@ function button(title, action, attrs = {}) {
 export function mountSharedSetlist({ root, data, language, editorButton, decision, read, request, refresh, status }) {
   const t = copy[language];
   const shared = data.setlist;
-  const actions = el("div", "", { class: shared.approved ? "toolbar shared-actions-ready" : "toolbar" });
+  const canDecide = shared.approved || shared.entries.length > 0;
+  const actions = el("div", "", { class: canDecide ? "toolbar shared-actions has-decision" : "toolbar shared-actions" });
   const dialog = el("dialog", "", { "aria-labelledby": "shared-tools-title", class: "shared-tools" });
   const toolbar = el("div", "", { class: "toolbar" });
   const heading = el("h2", "", { id: "shared-tools-title" });
   const message = el("p", "", { role: "status" });
   const content = el("div", "");
+  const returnNav = el("div", "", { class: "page-back", hidden: "" });
+  const tabs = el("div", "", { class: "toolbar section-tabs", role: "group", "aria-label": t.versions, hidden: "" });
+  const variantTab = button(t.variants, () => openVariants());
+  const historyTab = button(t.history, () => openVariants(0, true));
+  tabs.append(variantTab, historyTab);
   const check = button(t.check, () => process(), { hidden: "" });
   const dialogCheck = button(t.check, () => process(), { hidden: "" });
   let attempt = null, working = false;
   let view = 0;
   let requestsRead = 0;
   const close = button(t.close, closeDialog);
-  dialog.append(heading, message, content, toolbar, dialogCheck, close);
+  dialog.append(returnNav, heading, tabs, message, content, toolbar, dialogCheck, close);
   root.append(actions, check, dialog);
 
   if (shared.approved) actions.append(button(t.downloadPdf, () => openExport(shared.version), { class: "primary pdf-export-action" }));
   if (editorButton) actions.append(editorButton);
-  actions.append(button(t.variants, () => openVariants()));
-  actions.append(button(t.history, () => openVariants(0, true)));
   const requestCount = el("span", "", { class: "shared-incoming-count", hidden: "" });
   if (data.admin) {
     const incoming = button(t.requests, () => openRequests(), { class: "shared-incoming" });
     incoming.append(requestCount);
     actions.append(incoming);
   }
-  if (shared.approved || shared.entries.length) {
+  actions.append(button(t.versions, () => openVariants(), { class: "shared-versions-action" }));
+  if (canDecide) {
     const label = shared.approved ? (data.admin ? t.reopen : t.askReopen) : (data.admin ? t.approve : t.askApprove);
     actions.append(button(label, () => {
       if (shared.approved && data.admin && !confirm(t.confirmReopen)) return;
@@ -102,6 +109,8 @@ export function mountSharedSetlist({ root, data, language, editorButton, decisio
     message.textContent = "";
     content.replaceChildren();
     toolbar.replaceChildren();
+    returnNav.replaceChildren();
+    returnNav.hidden = tabs.hidden = true;
     if (!dialog.open) dialog.showModal();
     const serial = ++view;
     return () => dialog.open && view === serial;
@@ -109,7 +118,10 @@ export function mountSharedSetlist({ root, data, language, editorButton, decisio
 
   async function openVariants(page = 0, history = false) {
     if (attempt) return;
-    const current = open(history ? t.history : t.variants);
+    const current = open(t.versions);
+    tabs.hidden = false;
+    variantTab.setAttribute("aria-pressed", String(!history));
+    historyTab.setAttribute("aria-pressed", String(history));
     message.textContent = t.working;
     try {
       const result = await read(history ? "shared_history" : "shared_variants", { page });
@@ -183,6 +195,10 @@ export function mountSharedSetlist({ root, data, language, editorButton, decisio
 
   async function openVariant(row, page, history, inbox = false) {
     const current = open(row.kind === "submission" ? `${t[inbox ? "setlistProposal" : "submitted"]} · ${row.author}` : `${t.version} ${row.number}`);
+    const back = button("", () => inbox ? openRequests() : openVariants(page, history));
+    back.append(el("span", "←", { class: "page-back-arrow", "aria-hidden": "true" }), t.previous);
+    returnNav.append(back);
+    returnNav.hidden = false;
     message.textContent = t.working;
     try {
       const result = await read("shared_variant", { kind: row.kind, variant: row.id });
@@ -198,7 +214,6 @@ export function mountSharedSetlist({ root, data, language, editorButton, decisio
         list.append(item);
       }
       content.append(list);
-      toolbar.append(button(t.previous, () => inbox ? openRequests() : openVariants(page, history)));
       if (row.action === "approved" && result.entries.length)
         toolbar.append(button(pdfTitle(language), () => openExport(row.number, row.id)));
       const mayApply = row.kind === "submission" ? data.admin : data.can_edit_draft;

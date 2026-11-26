@@ -22,6 +22,7 @@ from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.main import deliver_one_outbox
 from setlist_bot.miniapp.app import create_app
 from setlist_bot.transport.controller import Controller
+from setlist_bot.transport.performance_timing import timing_response
 
 ROWS = [
     {"start": "17:00", "end": "17:45", "label": "Саундчек", "day": 0},
@@ -156,6 +157,10 @@ async def test_automatic_send_uses_latest_version_and_empty_timetable_only_warns
         messages = await uow.store.find(Outbox, concert_id=concert.id, support_kind=TIMING_KIND)
         (automatic,) = [m for m in messages if m.payload["kind"] == "automatic"]
         assert automatic.payload["rows"] == ROWS and not automatic.payload["preliminary"]
+        for sent in (m for m in messages if m.payload["kind"] in {"manual", "automatic"}):
+            rendered = timing_response(world.group, concert, sent, "ru", "")
+            assert "Europe/Berlin" not in rendered.text and "Берлин" not in rendered.text
+            assert "17:00" in rendered.text
         assert automatic.chat_id == world.stranger.telegram_id
         empty = await uow.store.get(Concert, world.concert2.id)
         empty.timing = {"zone": "Europe/Berlin"}
@@ -281,6 +286,7 @@ async def test_timing_uses_city_until_overridden_and_sends_article_with_day_sect
         assert await deliver_one_outbox(bot, engine)
     (sent,) = telegram.rich_sent
     article = sent.rich_message.model_dump(exclude_none=True)
+    assert "Europe/Berlin" not in str(article)
     cells = article["blocks"][1]["cells"]
     assert [[cell["text"] for cell in row] for row in cells] == [
         ["", "", "31 декабря 2026"],

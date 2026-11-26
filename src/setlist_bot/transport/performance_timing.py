@@ -9,7 +9,6 @@ from setlist_bot.application.workspace_timing import (
     WorkspaceTiming,
     responsible,
     timing_day,
-    zone_label,
 )
 from setlist_bot.domain.concerts import concert_label, confirmation_date
 from setlist_bot.domain.entities import Concert, Group, Outbox
@@ -27,7 +26,6 @@ def timing_response(
     lines = [group.name, concert_label(event, language), tr(language, "timing_title")]
     if data["preliminary"]:
         lines.append(tr(language, "timing_preliminary"))
-    lines.append(zone_label(data["zone"], language))
     rows = data["rows"]
     if not rows:
         lines.append(tr(language, "timing_empty"))

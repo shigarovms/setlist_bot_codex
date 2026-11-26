@@ -387,7 +387,7 @@ async def api(request: web.Request) -> web.Response:
                     raise ValueError("Invalid page")
                 return web.json_response(
                     await WorkspaceTeam(uow.store, user).view(
-                        UUID(payload["band"]), page, PAGE_SIZE
+                        UUID(payload["band"]), page, PAGE_SIZE, own_only=payload.get("roles") == "1"
                     )
                 )
             if operation == "team_contact" and request.method == "GET":

@@ -1038,6 +1038,31 @@ class Controller:
         if command == "register":
             require(not self.private, "group_only")
             if not args:
+                active_memberships = await self.store.find(
+                    Membership, group_id=group_id, user_id=self.user.id, status="active"
+                )
+                if active_memberships:
+                    group = await self.groups.access(group_id)
+                    roles = await self.groups.permanent_roles(group_id, self.user.id)
+                    buttons = []
+                    if self.miniapp_public_base_url and self.bot_username:
+                        buttons.append(
+                            (
+                                self.t("register_my_roles"),
+                                f"https://t.me/{self.bot_username}?startapp=team_{group.id.hex}",
+                            )
+                        )
+                    return Response(
+                        self.t("register_active", group=group.name)
+                        + "\n"
+                        + (
+                            self.t("register_current_roles", roles=", ".join(roles))
+                            if roles
+                            else self.t("register_no_roles")
+                        ),
+                        buttons=buttons,
+                        context_group=group_id,
+                    )
                 return await self._request_input("join_roles", context)
             membership = await self.groups.register(group_id, args)
             return Response(

@@ -107,6 +107,7 @@ async def test_repertoire_without_event_access_and_with_isolated_song_ids(engine
     async with PostgresUnitOfWork(engine) as uow:
         uow.store.add(DeploymentIdentity(bot_id=1110437563, environment="sandbox"))
         await Catalog(uow.store, world.admin).alias(world.group.id, world.song.id, "Вечеринки")
+        await Catalog(uow.store, world.member).alias(world.group.id, world.song.id, "Праздники")
     headers = {"Authorization": "tma " + signed(actor=2)}
     endpoint = "/miniapp/api/repertoire"
     params = {"band": str(world.group.id)}
@@ -115,7 +116,11 @@ async def test_repertoire_without_event_access_and_with_isolated_song_ids(engine
             endpoint, params=params | {"query": "Vecherinki"}, headers=headers
         )
         assert response.status == 200
-        songs = (await response.json())["songs"]
+        listing = await response.json()
+        assert listing["pending_proposals"] == 0
+        admin = await get(client, 1, "repertoire", **params)
+        assert admin["pending_proposals"] == 1
+        songs = listing["songs"]
         assert songs == [{"id": str(world.song.id), "title": "Комета", "duration": "03:38"}]
         card = await client.get(endpoint, params=params | {"song": songs[0]["id"]}, headers=headers)
         song = (await card.json())["song"]
