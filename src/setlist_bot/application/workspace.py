@@ -17,6 +17,7 @@ from setlist_bot.domain.entities import (
     Concert,
     Group,
     Membership,
+    Setlist,
     Song,
     SongAlias,
     User,
@@ -65,12 +66,24 @@ class Workspace:
             group_id=group_id,
         )
         member = (await self.store.find(Membership, group_id=group_id, user_id=self.user.id))[0]
+        event_ids = {event.id for event, _ in rows[:PAGE_SIZE]}
+        approved = {
+            row.concert_id
+            for row in await self.store.find(Setlist, group_id=group_id, approved=True)
+            if row.concert_id in event_ids
+        }
         assigned = []
-        if member.role != "admin" and not past and page == 0:
+        if (
+            member.role != "admin"
+            and group.timing_coordinator_id == self.user.id
+            and not past
+            and page == 0
+        ):
+            visible = await self.store.visible_concert_ids(self.user.id, group_id)
             assigned = [
                 event
                 for event in await self.store.find(Concert, group_id=group.id, deleted_at=None)
-                if event.date >= today() and event.timing.get("responsible") == str(self.user.id)
+                if event.date >= today() and event.id not in visible
             ]
             assigned.sort(key=lambda event: (event.date, event.id))
         return {
@@ -89,6 +102,7 @@ class Workspace:
                     "date": row.date.isoformat(),
                     "title": row.title,
                     "city": row.city,
+                    "approved": row.id in approved,
                 }
                 for row, _ in rows[:PAGE_SIZE]
             ],
@@ -161,7 +175,7 @@ class Workspace:
             "readiness": readiness,
             "can_view_timing": (
                 member.role == "admin"
-                or concert.timing.get("responsible") == str(self.user.id)
+                or group.timing_coordinator_id == self.user.id
                 or self.user.id in await participants(self.store, group, concert)
             ),
             "can_edit_draft": await can_open_draft(groups, group_id),

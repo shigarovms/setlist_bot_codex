@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -101,9 +101,15 @@ class WorkspaceSetlists:
         proposals = (
             []
             if history
-            else await self.store.find(Submission, group_id=group_id, concert_id=concert_id)
+            else await self.store.find(
+                Submission, group_id=group_id, concert_id=concert_id, pending_delivery=False
+            )
         )
-        proposals.sort(key=lambda row: (row.applied, row.id))
+        proposals.sort(
+            key=lambda row: (row.published_at or datetime.min.replace(tzinfo=UTC), row.id),
+            reverse=True,
+        )
+        base = await self.lists.proposal_base_version(setlist) if proposals else setlist.version
         revisions = await self.store.find(Revision, group_id=group_id, setlist_id=setlist.id)
         historical = sorted(
             (row for row in revisions if history or row.suggestion_number is not None),
@@ -131,10 +137,16 @@ class WorkspaceSetlists:
                     "applied": row.applied if isinstance(row, Submission) else False,
                     "declined": row.declined if isinstance(row, Submission) else False,
                     "stale": isinstance(row, Submission)
-                    and row.snapshot.get("shared_version") not in (None, setlist.version),
+                    and row.snapshot.get("shared_version", base) < base,
                     "number": row.number if isinstance(row, Revision) else None,
                     "action": row.action if isinstance(row, Revision) else None,
-                    "created_at": row.created_at.isoformat() if isinstance(row, Revision) else None,
+                    "created_at": (
+                        row.created_at.isoformat()
+                        if isinstance(row, Revision)
+                        else row.published_at.isoformat()
+                        if row.published_at
+                        else None
+                    ),
                 }
                 for kind, row in visible
             ],
@@ -147,7 +159,10 @@ class WorkspaceSetlists:
         if kind == "submission":
             submission = await self.store.get(Submission, identifier)
             require(
-                submission.group_id == group_id and submission.concert_id == concert_id, "not_found"
+                submission.group_id == group_id
+                and submission.concert_id == concert_id
+                and not submission.pending_delivery,
+                "not_found",
             )
             snapshot = submission.snapshot
         else:
@@ -194,14 +209,15 @@ class WorkspaceSetlists:
                     }
                 )
         proposals = await self.store.find(
-            Submission, group_id=group_id, concert_id=concert_id, applied=False, declined=False
+            Submission,
+            group_id=group_id,
+            concert_id=concert_id,
+            applied=False,
+            declined=False,
+            pending_delivery=False,
         )
-        admins = {
-            row.user_id
-            for row in await self.store.find(
-                Membership, group_id=group_id, status="active", role="admin"
-            )
-        }
+        setlist = await self.lists.load(group_id, concert_id)
+        base = await self.lists.proposal_base_version(setlist) if proposals else version
         return {
             "requests": requests,
             "proposals": [
@@ -209,10 +225,13 @@ class WorkspaceSetlists:
                     "id": str(row.id),
                     "author": await self.groups.name(group_id, row.author_id),
                     "seconds": totals(row.snapshot)[2],
-                    "stale": row.snapshot.get("shared_version") not in (None, version),
+                    "stale": row.snapshot.get("shared_version", base) < base,
                 }
-                for row in sorted(proposals, key=lambda row: row.id)
-                if row.snapshot.get("review_required", row.author_id not in admins)
+                for row in sorted(
+                    proposals,
+                    key=lambda row: (row.published_at or datetime.min.replace(tzinfo=UTC), row.id),
+                    reverse=True,
+                )
             ],
         }
 

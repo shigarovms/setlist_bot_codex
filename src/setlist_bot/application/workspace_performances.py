@@ -176,6 +176,7 @@ class WorkspacePerformances:
             result = {
                 "id": str(row.id),
                 "label": concert_label(row, self.user.language),
+                "date": row.date.isoformat(),
                 "fields": performance_input(row).payload(),
                 "has_timing": bool(row.timing.get("rows")),
             }

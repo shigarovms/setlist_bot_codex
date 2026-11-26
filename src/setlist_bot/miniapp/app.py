@@ -116,6 +116,12 @@ async def asset(request: web.Request) -> web.Response:
             content_type="text/javascript",
             charset="utf-8",
         )
+    if name == "unbounded.ttf":
+        return web.Response(body=(ASSETS / name).read_bytes(), content_type="font/ttf")
+    if name == "unbounded-OFL.txt":
+        return web.Response(
+            body=(ASSETS / name).read_bytes(), content_type="text/plain", charset="utf-8"
+        )
     types = {
         "index.html": "text/html",
         "app.js": "text/javascript",
@@ -608,6 +614,7 @@ async def api(request: web.Request) -> web.Response:
                         payload["entries"],
                         payload["request_id"],
                         default_pause_seconds=payload.get("default_pause_seconds"),
+                        update_group_default=payload.get("update_group_default", True),
                     )
                 except AppError as exc:
                     if exc.code not in ("conflict", "selection_catalog_changed"):
@@ -631,6 +638,8 @@ async def api(request: web.Request) -> web.Response:
                         payload["version"],
                         payload["entries"],
                         payload["request_id"],
+                        approved_version=payload.get("approved_version"),
+                        default_pause_seconds=payload.get("default_pause_seconds"),
                     )
                 except AppError as exc:
                     if exc.code not in ("conflict", "selection_catalog_changed"):

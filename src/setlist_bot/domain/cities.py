@@ -1,5 +1,6 @@
 """RU: Локальные названия, не сетевой геокодер. EN: No runtime network calls."""
 
+import gzip
 import json
 import re
 from functools import lru_cache
@@ -30,3 +31,14 @@ def city_name(value: str) -> str | None:
     name = re.sub(r"^(?:г\.|город\b)\s*", "", value.strip(), flags=re.I)
     key = normalize(name)
     return ALIASES.get(key) or city_names().get(key)
+
+
+@lru_cache(maxsize=1)
+def city_zones() -> dict[str, str]:
+    source = Path(__file__).with_name("data") / "city-zones.json.gz"
+    return dict(json.loads(gzip.decompress(source.read_bytes())))
+
+
+def city_timezone(value: str) -> str | None:
+    name = city_name(value)
+    return city_zones().get(normalize(name)) if name else None

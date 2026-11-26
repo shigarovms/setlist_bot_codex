@@ -16,15 +16,19 @@ async def publish(
     expected: int,
     values: list[dict[str, Any]],
     request_id: str,
+    *,
+    approved_version: int | None = None,
+    default_pause_seconds: int | None = None,
 ) -> dict[str, Any]:
     row, data, concert = await service.load(identifier)
     require(
         type(expected) is int and isinstance(values, list) and isinstance(request_id, str), "input"
     )
     require(str(UUID(request_id)) == request_id, "input")
-    digest = hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
+    selection = values if default_pause_seconds is None else [values, default_pause_seconds]
+    digest = hashlib.sha256(json.dumps(selection, sort_keys=True).encode()).hexdigest()
     fingerprint = hashlib.sha256(
-        json.dumps([expected, values], sort_keys=True).encode()
+        json.dumps([expected, selection], sort_keys=True).encode()
     ).hexdigest()
     if data.get("publication_request") == request_id:
         require(data["publication_fingerprint"] == fingerprint, "input")
@@ -34,7 +38,19 @@ async def publish(
         if previous["status"] != "failed":
             return previous
     require(data.get("origin_chat_id") is not None, "miniapp_expired")
-    saved = await service.save(identifier, expected, values, request_id)
+    setlist = await service.lists.load(concert.group_id, concert.id)
+    if setlist.approved and (
+        type(approved_version) is not int or approved_version != setlist.version
+    ):
+        return {"status": "confirm_approved", "approved_version": setlist.version}
+    saved = await service.save(
+        identifier,
+        expected,
+        values,
+        request_id,
+        default_pause_seconds=default_pause_seconds,
+        update_group_default=False,
+    )
     event = await queue_publication(
         service.store,
         service.user,

@@ -30,6 +30,8 @@ async def queue_publication(
     require(origin_chat_id is None or bindings[0].chat_id == origin_chat_id, "miniapp_expired")
     require(any(block["items"] for block in snapshot["blocks"]), "empty_setlist")
     submission = await lists.publish(group_id, concert_id)
+    submission.pending_delivery = True
+    submission.published_at = None
     prefix = tr(group.language, "submission", name=await groups.name(group_id)) + "\n\n"
     body = (
         group.name

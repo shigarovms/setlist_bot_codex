@@ -51,6 +51,7 @@ async def test_band_settings_reuse_telegram_rules_and_leave_existing_setlists_in
             "default_pause_seconds": 14,
             "language": "en",
             "reminders_enabled": False,
+            "timing_coordinator_id": str(world.member.id),
         }
         payload = request(session, initial["settings"], changes)
         queued = await post(client, 1, OP, payload)

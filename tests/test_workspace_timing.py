@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot
 from aiohttp.test_utils import TestClient, TestServer
 from conftest import invite_fixture_member
+from test_catalog_articles import ArticleTelegram
 from test_miniapp import settings
 from test_repertoire_workspace_actions import get, post
 from test_repertoire_workspace_music import deliver_request
@@ -14,7 +15,7 @@ from test_workspace_shared_setlist import setup_workspace
 
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.application.staffing import Staffing
-from setlist_bot.application.workspace_timing import TIMING_KIND, schedule_timing
+from setlist_bot.application.workspace_timing import TIMING_KIND, schedule_timing, timing_rows
 from setlist_bot.domain.concerts import today
 from setlist_bot.domain.entities import Concert, DeploymentIdentity, GigInvitation, GigSlot, Outbox
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
@@ -23,8 +24,8 @@ from setlist_bot.miniapp.app import create_app
 from setlist_bot.transport.controller import Controller
 
 ROWS = [
-    {"start": "17:00", "end": "17:45", "label": "Саундчек", "next_day": False},
-    {"start": "00:15", "end": "", "label": "Окончание", "next_day": True},
+    {"start": "17:00", "end": "17:45", "label": "Саундчек", "day": 0},
+    {"start": "00:15", "end": "", "label": "Окончание", "day": 1},
 ]
 
 
@@ -68,6 +69,17 @@ async def test_timing_permissions_manual_notification_and_scheduled_deduplicatio
         await get(client, 2, "timing", 403, **scope)
         await get(client, 1, "timing", 403, **{**scope, "band": str(world.other.id)})
         admin = await post(client, 1, "open_repertoire", {"band": str(group)})
+        settings_payload = {
+            **admin,
+            "request_id": str(uuid4()),
+            "expected": {"timing_coordinator_id": ""},
+            "changes": {"timing_coordinator_id": str(world.member.id)},
+        }
+        queued = await post(client, 1, "band_settings_save", settings_payload)
+        assert await deliver_request(engine, queued["request"])
+        assert (
+            await get(client, 2, "timing", band=str(group), performance=str(world.concert2.id))
+        )["editor"]
         await act(
             client,
             engine,
@@ -76,16 +88,15 @@ async def test_timing_permissions_manual_notification_and_scheduled_deduplicatio
             "save",
             empty,
             concert.id,
-            rows=list(reversed(ROWS)),
+            rows=[{key: row[key] for key in ("start", "end", "label")} for row in ROWS],
             zone="Europe/Berlin",
             preliminary=True,
-            responsible=str(world.member.id),
         )
         state = await get(client, 2, "timing", **scope)
         assert state["editor"] and not state["admin"]
         assert state["rows"] == ROWS and state["preliminary"]
         guest = await get(client, 3, "timing", **scope)
-        assert guest["rows"] == ROWS and not guest["members"]
+        assert guest["rows"] == ROWS and "members" not in guest
         member = await post(client, 2, "open_repertoire", {"band": str(group)})
         saved = await act(client, engine, 2, member, "notify", state, concert.id)
         assert saved["queued"] == 1
@@ -225,3 +236,70 @@ async def test_timing_warning_buttons_and_delivery_recheck(engine, world, monkey
             invite.status = "replaced"
         assert not await deliver_one_outbox(bot, engine)
         assert len(telegram.sent) == 1
+
+
+async def test_timing_uses_city_until_overridden_and_sends_article_with_day_sections(engine, world):
+    await setup_workspace(engine, world)
+    group, event_id = world.group.id, world.concert.id
+    scope = {"band": str(group), "performance": str(event_id)}
+    async with PostgresUnitOfWork(engine) as uow:
+        event = await uow.store.get(Concert, event_id)
+        event.city = "Екатеринбург"
+        await invite_fixture_member(uow.store, event, world.stranger)
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        state = await get(client, 1, "timing", **scope)
+        assert state["zone"] == "Asia/Yekaterinburg" and state["manual_zone"] == ""
+        assert any(choice["label"] == "Екатеринбург" for choice in state["zones"])
+        admin = await post(client, 1, "open_repertoire", {"band": str(group)})
+        await act(
+            client, engine, 1, admin, "save", state, event_id, rows=ROWS, zone="", preliminary=False
+        )
+        async with PostgresUnitOfWork(engine) as uow:
+            (await uow.store.get(Concert, event_id)).city = "Владивосток"
+        state = await get(client, 1, "timing", **scope)
+        assert state["zone"] == "Asia/Vladivostok"
+        await act(
+            client,
+            engine,
+            1,
+            admin,
+            "save",
+            state,
+            event_id,
+            rows=ROWS,
+            zone="Europe/Berlin",
+            preliminary=False,
+        )
+        async with PostgresUnitOfWork(engine) as uow:
+            (await uow.store.get(Concert, event_id)).city = "Самара"
+        state = await get(client, 1, "timing", **scope)
+        assert state["zone"] == "Europe/Berlin"
+        assert len(state["zones"]) < 15
+        assert (await act(client, engine, 1, admin, "notify", state, event_id))["queued"] == 2
+    telegram = ArticleTelegram()
+    async with Bot("123456:TEST", session=telegram) as bot:
+        assert await deliver_one_outbox(bot, engine)
+    (sent,) = telegram.rich_sent
+    article = sent.rich_message.model_dump(exclude_none=True)
+    cells = article["blocks"][1]["cells"]
+    assert [[cell["text"] for cell in row] for row in cells] == [
+        ["", "", "31 декабря 2026"],
+        ["17:00", "17:45", "Саундчек"],
+        ["", "", "01 января 2027"],
+        ["00:15", "", "Окончание"],
+    ]
+
+
+def test_timing_keeps_entered_order_and_accepts_existing_precise_times():
+    rows = timing_rows(
+        [
+            {"start": "23:47", "end": "00:12", "label": "Выступление"},
+            {"start": "00:15", "label": "Выезд"},
+            {"start": "00:15", "label": "Закрытие"},
+        ]
+    )
+    assert [(row["start"], row["end"], row["day"]) for row in rows] == [
+        ("23:47", "00:12", 0),
+        ("00:15", "", 1),
+        ("00:15", "", 1),
+    ]

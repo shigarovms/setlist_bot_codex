@@ -32,6 +32,7 @@ class Group(Entity):
     admins_only_suggestions: bool = False
     owner_id: UUID | None = None
     reminders_enabled: bool = True
+    timing_coordinator_id: UUID | None = None
     name: str
     language: str = "ru"
     default_pause_seconds: int = 5
@@ -191,6 +192,8 @@ class Submission(Entity):
     snapshot: dict[str, Any]
     applied: bool = False
     declined: bool = False
+    published_at: datetime | None = field(default_factory=now)
+    pending_delivery: bool = False
 
 
 @dataclass(kw_only=True)

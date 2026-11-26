@@ -115,10 +115,10 @@ export function mountSharedSetlist({ root, data, language, editorButton, decisio
         const title = row.kind === "submission" ? t.submitted : `${t.version} ${row.number}`;
         item.append(el("p", `${title} · ${row.author} · ${clock(row.seconds)}`),
           button(t.preview, () => openVariant(row, page, history)));
-        if (history && row.created_at) {
+        if (row.created_at && (history || row.kind === "submission")) {
           const time = new Date(row.created_at).toLocaleString(language);
           const label = t.revisionActions[row.action] ?? t.edited;
-          item.append(el("p", `${label} · ${time}`));
+          item.append(el("p", history ? `${label} · ${time}` : time));
         }
         if (row.applied || row.declined || row.stale)
           item.append(el("p", row.applied ? t.applied : row.declined ? t.declined : t.stale));

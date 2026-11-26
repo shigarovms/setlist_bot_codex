@@ -42,10 +42,13 @@ const copy = withBotLabels("workspace", {
     pending: "Запрос обрабатывается.", check: "Проверить результат",
     importSongs: "Импорт таблицы", adminOnly: "Импорт доступен администратору коллектива.",
     performance: "Выступление", shared: "Общий сет-лист", approvedVersion: "Утверждён", workingVersion: "В работе",
+    approvedSetlist: "Сет-лист утверждён",
+    published: "Ваш вариант отправлен в чат коллектива. Администратор увидит его во «Входящих запросах».",
     version: "Версия", total: "Итого", planned: "План", noEntries: "В общем сет-листе пока нет песен.", pause: "Пауза",
   },
   en: {
-    upcoming: "Upcoming",
+    upcoming: "Upcoming", approvedSetlist: "Setlist approved",
+    published: "Your version was sent to the band chat. An admin will see it in Incoming Requests.",
     noBands: "You have no bands yet.",
     noPerformances: "There are no available performances here yet.",
     restricted: "Drafts are available to band admins.",
@@ -384,7 +387,7 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
           element("a", bandTrashTitle(language), { href: bandTrashUrl() }));
         content.append(nav);
         if (data.bands.length === 0) status.textContent = t("noBands");
-        const list = element("ul", "", { class: "workspace-list" });
+        const list = element("ul", "", { class: "workspace-list band-list" });
         for (const row of data.bands) {
           const item = element("li", "");
           item.append(element("a", row.name, { href: bandUrl(row.id) }));
@@ -397,6 +400,15 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
         content.append(telegramLink(t("connectBand"), data.connect_url), join);
       }
       if (focusId) document.getElementById(focusId)?.scrollIntoView({ block: "center" });
+      if (performance && location.hash === "#shared-list")
+        document.getElementById("shared-list")?.scrollIntoView({ block: "start" });
+      if (performance && workspaceParams.get("published") === "1") {
+        status.textContent = t("published");
+        workspaceParams.delete("published");
+        const clean = new URL(location.href);
+        clean.searchParams.delete("published");
+        history.replaceState(history.state, "", clean);
+      }
       if (login?.enabled) content.append(signOutButton());
       if (profile) {
         const nav = element("nav", "", { class: "workspace-nav profile-nav" });
@@ -588,7 +600,13 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
       name.append(element("a", row.title || dateLabel, { href: performanceUrl(band, row.id, past, page) }));
       item.append(name);
       item.append(element("p", [row.title ? dateLabel : "", row.city].filter(Boolean).join(" · ")));
-      if (data.can_edit_draft) {
+      if (row.approved) {
+        const link = element("a", "", {
+          href: `${performanceUrl(band, row.id, past, page)}#shared-list`, class: "approved-setlist status-ready",
+        });
+        link.append(element("span", "✓", { "aria-hidden": "true" }), t("approvedSetlist"));
+        item.append(link);
+      } else if (data.can_edit_draft) {
         const button = element("button", t("draft"), { type: "button" });
         button.addEventListener("click", () => openDraft(row.id, button));
         item.append(button);
@@ -935,7 +953,7 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
     status.textContent = t("loading");
     try {
       const { session } = await api("open_draft", { band, performance: performanceId }, "POST");
-      const parent = performance ? `&performance=${encodeURIComponent(performance)}` : "";
+      const parent = `&performance=${encodeURIComponent(performanceId)}${performance ? "" : "&draft_from=list"}`;
       const destination = withManagedOrigin(`${bandUrl(band, past, page)}&view=draft${parent}`);
       location.assign(`${destination}#session=${encodeURIComponent(session)}`);
     } catch (error) {

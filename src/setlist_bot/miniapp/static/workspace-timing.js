@@ -6,11 +6,11 @@ const words = withBotLabels("workspace-timing", {
     history: "История", template: "Взять за шаблон", frequent: "Часто выбираемые",
     past: "Прошедшие выступления", noHistory: "Подходящих выступлений пока нет.",
     previous: "Назад", next: "Дальше", close: "Закрыть", loading: "Загрузка…",
-    start: "Начало", end: "Окончание", event: "Событие", nextDay: "На следующий день",
+    start: "Начало", end: "Окончание", event: "Событие",
     typical: ["Сбор", "Саундчек", "Открытие дверей", "Выступление", "Окончание"],
     add: "Добавить строку", remove: "Удалить строку", save: "Сохранить",
-    zone: "Часовой пояс площадки", responsible: "Ответственный за тайминг",
-    defaultResponsible: "По умолчанию · владелец коллектива",
+    zone: "Часовой пояс", automatic: "Автоматически", hour: "Часы", minute: "Минуты",
+    setTime: "Готово", clearTime: "Убрать время окончания",
     saved: "Тайминг сохранён.", wait: "Выполняем запрос…", check: "Проверить результат",
     notifyConfirm: "Отправить сохранённый тайминг всем подтвердившим участие?",
     queued: count => `Уведомления в очереди: ${count}.`,
@@ -21,11 +21,11 @@ const words = withBotLabels("workspace-timing", {
     history: "History", template: "Use as template", frequent: "Frequently used",
     past: "Past performances", noHistory: "No matching past performances yet.",
     previous: "Previous", next: "Next", close: "Close", loading: "Loading…",
-    start: "Start", end: "End", event: "Event", nextDay: "Next day",
+    start: "Start", end: "End", event: "Event",
     typical: ["Call time", "Soundcheck", "Doors open", "Performance", "End"],
     add: "Add row", remove: "Remove row", save: "Save",
-    zone: "Venue time zone", responsible: "Schedule coordinator",
-    defaultResponsible: "Default · band owner",
+    zone: "Time zone", automatic: "Automatic", hour: "Hours", minute: "Minutes",
+    setTime: "Done", clearTime: "Remove end time",
     saved: "Schedule saved.", wait: "Processing…", check: "Check result",
     notifyConfirm: "Send the saved schedule to all confirmed performers?",
     queued: count => `Notifications queued: ${count}.`,
@@ -66,7 +66,7 @@ export function historyButton({ language, read, select, timing = false }) {
       for (const row of rows) {
         const item = element("li");
         item.append(element("p", row.label));
-        if (timing) item.append(summary(row.rows));
+        if (timing) item.append(summary(row.rows, row.date, language));
         item.append(button(t.template, () => {
           if (select(row) !== false) dialog.close();
         }));
@@ -91,15 +91,78 @@ export function historyButton({ language, read, select, timing = false }) {
     void load(0);
   });
 }
-function summary(rows) {
+function dateAt(date, offset, language) {
+  const current = new Date(`${date}T00:00:00Z`);
+  current.setUTCDate(current.getUTCDate() + offset);
+  return new Intl.DateTimeFormat(language, { dateStyle: "long", timeZone: "UTC" }).format(current);
+}
+
+function summary(rows, date, language) {
   const table = element("table", "", { class: "timing-table" });
   const body = table.createTBody();
+  const multiDay = rows.some(row => row.day || row.next_day);
+  let lastDay;
   for (const row of rows) {
+    const day = row.day ?? Number(!!row.next_day);
+    if (date && multiDay && day !== lastDay) {
+      const divider = body.insertRow();
+      divider.className = "timing-date";
+      divider.insertCell();
+      divider.insertCell().textContent = dateAt(date, day, language);
+    }
+    lastDay = day;
     const tr = body.insertRow();
-    tr.insertCell().textContent = row.start + (row.end ? `–${row.end}` : "") + (row.next_day ? " (+1)" : "");
+    tr.insertCell().textContent = row.start + (row.end ? `–${row.end}` : "");
     tr.insertCell().textContent = row.label;
   }
   return table;
+}
+
+function timeWheel(title, value, optional, t, apply) {
+  const dialog = element("dialog", "", { class: "shared-tools timing-wheel-dialog", "aria-label": title });
+  const wheels = element("div", "", { class: "timing-wheels" });
+  const format = number => String(number).padStart(2, "0");
+  const [hours, minutes] = (value || "12:00").split(":").map(Number);
+  const hour = wheel(t.hour, Array.from({ length: 24 }, (_, index) => index), hours);
+  const steps = Array.from({ length: 12 }, (_, index) => index * 5);
+  if (!steps.includes(minutes)) steps.push(minutes);
+  steps.sort((a, b) => a - b);
+  const minute = wheel(t.minute, steps, minutes);
+  const actions = element("div", "", { class: "toolbar" });
+  actions.append(button(t.close, () => dialog.close()), button(t.setTime, () => {
+    apply(`${format(hour.value())}:${format(minute.value())}`);
+    dialog.close();
+  }, true));
+  if (optional && value) actions.append(button(t.clearTime, () => { apply(""); dialog.close(); }));
+  dialog.append(element("h2", title), wheels, actions);
+  document.body.append(dialog);
+  dialog.addEventListener("close", () => dialog.remove(), { once: true });
+  dialog.showModal();
+  hour.setInitial();
+  minute.setInitial();
+
+  function wheel(label, values, initial) {
+    const column = element("div");
+    const options = element("div", "", { class: "timing-wheel", role: "group", "aria-label": label });
+    const choices = values.map((number, index) => button(format(number), () => {
+      options.scrollTop = offset(index);
+    }));
+    const offset = index => choices[index].offsetTop - (options.clientHeight - choices[index].offsetHeight) / 2;
+    const index = () => Math.max(0, Math.min(values.length - 1,
+      Math.round((options.scrollTop - offset(0)) / choices[0].offsetHeight)));
+    const selected = () => {
+      for (const [position, choice] of choices.entries())
+        choice.setAttribute("aria-pressed", String(position === index()));
+    };
+    options.addEventListener("scroll", selected, { passive: true });
+    options.append(...choices);
+    column.append(element("p", label), options);
+    wheels.append(column);
+    return {
+      value: () => values[index()],
+      setInitial: () => { options.scrollTop = offset(values.indexOf(initial)); selected(); },
+    };
+  }
 }
 
 export function showTiming({ root, data, performance, back, request, readHistory, refresh }) {
@@ -111,7 +174,7 @@ export function showTiming({ root, data, performance, back, request, readHistory
   if (data.preliminary) root.append(element("strong", t.preliminary));
   if (!data.rows.length) root.append(element("p", t.empty));
   if (!data.editor) {
-    root.append(element("p", data.zone), summary(data.rows));
+    root.append(element("p", data.zone_label), summary(data.rows, data.date, data.language));
     return;
   }
   const status = element("p", "", { role: "status" });
@@ -122,22 +185,15 @@ export function showTiming({ root, data, performance, back, request, readHistory
   headings.append(element("th", t.start, { scope: "col" }), element("th", t.event, { scope: "col" }));
   const body = table.createTBody();
   const zone = element("select", "", { id: "timing-zone" });
-  for (const name of data.zones) zone.append(element("option", name, { value: name }));
-  zone.value = data.zone;
-  let owner;
+  zone.append(element("option", `${t.automatic} · ${data.auto_zone}`, { value: "" }));
+  for (const choice of data.zones) zone.append(element("option", choice.label, { value: choice.id }));
+  zone.value = data.manual_zone;
   const preliminary = element("input", "", { type: "checkbox" });
   preliminary.checked = data.preliminary;
   const flag = element("label"); flag.append(preliminary, t.preliminary);
   fields.append(flag, element("label", t.zone, { for: zone.id }), zone);
-  if (data.admin) {
-    owner = element("select", "", { id: "timing-owner" });
-    owner.append(element("option", t.defaultResponsible, { value: "" }));
-    for (const member of data.members) owner.append(element("option", member.name || member.id, { value: member.id }));
-    owner.value = data.responsible;
-    fields.append(element("label", t.responsible, { for: owner.id }), owner);
-  }
-  const add = button(t.add, () => addRow({}).focus());
-  const save = element("button", t.save, { type: "submit", class: "primary" });
+  const add = button(t.add, addNext);
+  const save = button(t.save, saveRows, true);
   const notify = button(t.notify, () => {
     if (confirm(t.notifyConfirm)) void start({ action: "notify" });
   });
@@ -150,6 +206,7 @@ export function showTiming({ root, data, performance, back, request, readHistory
       if (body.rows.length && !confirm(t.replace)) return false;
       body.replaceChildren();
       for (const item of source.rows) addRow(item);
+      updateDates();
     },
   });
   const controls = element("div", "", { class: "toolbar" });
@@ -161,35 +218,77 @@ export function showTiming({ root, data, performance, back, request, readHistory
   root.append(form);
   let attempt, working = false;
   for (const row of data.rows) addRow(row);
+  updateDates();
+
+  function addNext() {
+    if (add.disabled) return;
+    addRow({}).focus();
+  }
+
+  function updateDates() {
+    let previous = "", day = 0;
+    const starts = Array.from(body.rows, row => row.querySelector('[name="start"]').value);
+    const offsets = starts.map(start => {
+      const changed = !!start && !!previous && start < previous;
+      if (start) previous = start;
+      if (changed) day += 1;
+      return [day, changed];
+    });
+    for (const [index, row] of Array.from(body.rows).entries()) {
+      const [offset, changed] = offsets[index];
+      row.querySelector(".timing-row-date").textContent = day && (!index || changed)
+        ? dateAt(data.date, offset, data.language) : "";
+    }
+  }
 
   function addRow(initial) {
     const row = body.insertRow();
-    const start = element("input", "", { type: "time", name: "start", required: "", "aria-label": t.start });
-    const end = element("input", "", { type: "time", name: "end", "aria-label": t.end });
     const title = element("input", "", { type: "text", name: "label", maxlength: "200", required: "", list: "timing-events", "aria-label": t.event });
-    const nextDay = element("input", "", { name: "next_day", type: "checkbox" });
-    const day = element("label"); day.append(nextDay, t.nextDay);
-    start.value = initial.start || "";
-    end.value = initial.end || "";
     title.value = initial.label || "";
-    nextDay.checked = !!initial.next_day;
-    row.insertCell().append(start, element("span", t.end, { class: "timing-end-label" }), end);
-    const remove = button("×", () => { row.remove(); add.disabled = false; });
+    const start = timeControl("start", false), end = timeControl("end", true);
+    row.insertCell().append(element("span", "", { class: "timing-row-date" }), start.input,
+      start.trigger, element("span", t.end, { class: "timing-end-label" }), end.input, end.trigger);
+    const remove = button("×", () => { row.remove(); add.disabled = false; updateDates(); });
     remove.setAttribute("aria-label", t.remove);
-    row.insertCell().append(title, day, remove);
+    row.insertCell().append(title, remove);
     add.disabled = body.rows.length >= 60;
-    return start;
+    return start.trigger;
+
+    function timeControl(name, optional) {
+      const input = element("input", "", { type: "hidden", name });
+      const trigger = button("", () => timeWheel(t[name], input.value, optional, t, show));
+      trigger.className = "timing-time";
+      trigger.setAttribute("aria-haspopup", "dialog");
+      function show(value) {
+        input.value = value;
+        trigger.textContent = value || "–:–";
+        trigger.setAttribute("aria-label", [t[name], value].filter(Boolean).join(" · "));
+        if (row.cells.length) updateDates();
+      }
+      show(initial[name] || "");
+      return { input, trigger };
+    }
   }
+  body.addEventListener("keydown", event => {
+    if (event.key !== "Enter" || event.isComposing || event.target?.name !== "label") return;
+    event.preventDefault();
+    addNext();
+  });
   form.addEventListener("submit", event => {
     event.preventDefault();
+    addNext();
+  });
+  function saveRows() {
+    const missing = Array.from(body.rows).find(row => !row.querySelector('[name="start"]').value);
+    if (missing) { missing.querySelector(".timing-time").click(); return; }
+    if (!form.reportValidity()) return;
     const rows = Array.from(body.rows, row => {
       const values = Object.fromEntries(Array.from(row.querySelectorAll("input"), field =>
         [field.name, field.type === "checkbox" ? field.checked : field.value]));
       return values;
     });
-    void start({ action: "save", rows, zone: zone.value, preliminary: preliminary.checked,
-      ...(owner ? { responsible: owner.value } : {}) });
-  });
+    void start({ action: "save", rows, zone: zone.value, preliminary: preliminary.checked });
+  }
   async function start(payload) {
     if (attempt) return;
     attempt = { api: request, payload: { ...payload, performance, version: data.version,

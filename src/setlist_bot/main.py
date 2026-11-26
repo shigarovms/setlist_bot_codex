@@ -357,6 +357,8 @@ async def deliver_one_outbox(
                     if button[1].startswith("apply_submission ") and sent_messages:
                         submission_id = UUID(button[1].split()[1])
                         submission = await uow.store.get(Submission, submission_id)
+                        submission.pending_delivery = False
+                        submission.published_at = event.delivered_at
                         uow.store.add(
                             Confirmation(
                                 user_id=submission.author_id,

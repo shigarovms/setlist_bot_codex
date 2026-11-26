@@ -192,6 +192,7 @@ class MiniDrafts:
         result = {
             "language": self.user.language,
             "group": group.name,
+            "group_id": str(group_id),
             "title": concert.title,
             "date": button_date(concert.date),
             "concert_id": str(concert.id),
@@ -220,6 +221,12 @@ class MiniDrafts:
         }
         if not catalog:
             result.pop("catalog")
+        else:
+            shared, _, _ = await self.lists.read(group_id, concert.id)
+            result["shared"] = {
+                "entries": entries(shared),
+                "default_pause_seconds": shared["default_pause_seconds"],
+            }
         return result
 
     async def _history(self, identifier: UUID) -> tuple[UUID, list[dict[str, str]]]:
@@ -354,11 +361,14 @@ class MiniDrafts:
         values: list[dict[str, Any]],
         request_id: str,
         default_pause_seconds: int | None = None,
+        *,
+        update_group_default: bool = True,
     ) -> dict[str, Any]:
         row, data, concert = await self.load(identifier)
         require(type(expected) is int and isinstance(values, list) and len(values) <= 200, "input")
         require(all(isinstance(item, dict) for item in values), "input")
         require(isinstance(request_id, str), "input")
+        require(type(update_group_default) is bool, "input")
         require(str(UUID(request_id)) == request_id, "input")
         require(
             default_pause_seconds is None
@@ -379,6 +389,8 @@ class MiniDrafts:
         fingerprint_values = [expected, values]
         if default_pause_seconds is not None:
             fingerprint_values.append(default_pause_seconds)
+            if not update_group_default:
+                fingerprint_values.append(False)
         fingerprint = hashlib.sha256(
             json.dumps(fingerprint_values, sort_keys=True).encode()
         ).hexdigest()
@@ -429,7 +441,8 @@ class MiniDrafts:
             default_pause_seconds=default_pause_seconds,
         )
         if (
-            default_pause_seconds is not None
+            update_group_default
+            and default_pause_seconds is not None
             and default_pause_seconds != previous["default_pause_seconds"]
         ):
             membership = (

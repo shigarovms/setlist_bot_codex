@@ -16,6 +16,7 @@ export class DraftPersistence {
     this.timer = null;
     this.blocked = false;
     this.paused = false;
+    this.updateGroupDefault = false;
   }
   dirty() {
     return (
@@ -29,9 +30,10 @@ export class DraftPersistence {
     this.current = wire(entries);
     this.schedule();
   }
-  setDraft(entries, defaultPause) {
+  setDraft(entries, defaultPause, updateGroupDefault = false) {
     this.current = wire(entries);
     this.defaultPause = defaultPause;
+    this.updateGroupDefault ||= updateGroupDefault;
     this.schedule();
   }
   pause() {
@@ -67,6 +69,7 @@ export class DraftPersistence {
       version: this.version,
       entries: clone(this.current),
       default_pause_seconds: this.defaultPause,
+      ...(this.updateGroupDefault ? { update_group_default: true } : {}),
       request_id: crypto.randomUUID(),
     };
     const sent = this.pending;
@@ -82,6 +85,7 @@ export class DraftPersistence {
           this.defaultPause = gap;
         }
         this.pending = null;
+        if (sent.default_pause_seconds === this.defaultPause) this.updateGroupDefault = false;
         this.lastError = null;
         this.onSaved(saved, unchanged);
       })

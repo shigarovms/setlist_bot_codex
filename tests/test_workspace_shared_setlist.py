@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from aiogram import Bot
@@ -10,7 +11,13 @@ from test_telegram import FakeTelegram
 
 from setlist_bot.application.catalog import Catalog
 from setlist_bot.application.setlists import Setlists
-from setlist_bot.domain.entities import DeploymentIdentity, Membership, Outbox, PersonalDraft
+from setlist_bot.domain.entities import (
+    DeploymentIdentity,
+    Membership,
+    Outbox,
+    PersonalDraft,
+    Submission,
+)
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.main import deliver_one_outbox
 from setlist_bot.miniapp.app import create_app
@@ -108,6 +115,8 @@ async def test_variants_apply_and_requests_for_approval_and_reopening(engine, wo
         lists = Setlists(uow.store, world.member)
         await lists.edit_songs(group_id, concert_id, 0, ["Комета", "Комета"], private=True)
         await queue_publication(uow.store, world.member, group_id, concert_id, 1)
+    async with Bot("123456:TEST", session=FakeTelegram()) as bot:
+        assert await deliver_one_outbox(bot, engine)
     query = scope(world)
     async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
         member = await post(client, 2, "open_shared", query)
@@ -215,6 +224,8 @@ async def test_declining_proposal_closes_telegram_action_and_survives_retry(engi
             group, concert, 0, ["Комета"], private=True
         )
         await queue_publication(uow.store, world.member, group, concert, 1)
+    async with Bot("123456:TEST", session=FakeTelegram()) as bot:
+        assert await deliver_one_outbox(bot, engine)
     query = scope(world)
     async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
         admin = await post(client, 1, "open_shared", query)
@@ -231,6 +242,78 @@ async def test_declining_proposal_closes_telegram_action_and_survives_retry(engi
             client, engine, 1, admin, "apply", base, variant=proposal["id"], success=False
         )
         assert failed["error"] == "already_done"
+
+
+async def test_confirmed_publication_from_admin_is_visible_after_delivery_and_can_be_applied(
+    engine, world
+):
+    await setup_workspace(engine, world)
+    group, concert = world.group.id, world.concert.id
+    async with PostgresUnitOfWork(engine) as uow:
+        lists = Setlists(uow.store, world.admin)
+        await lists.edit_songs(group, concert, 0, ["Комета"])
+        await lists.approve(group, concert, 1)
+        await lists.edit_songs(group, concert, 0, ["Комета", "Комета"], private=True, replace=True)
+    query = scope(world)
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        band = await get(client, 2, "performances", band=str(group))
+        assert band["performances"][0]["approved"]
+        editor = await post(client, 1, "open_draft", query)
+        state = await get(client, 1, "state", **editor)
+        assert len(state["entries"]) == 2 and len(state["shared"]["entries"]) == 1
+        payload = {
+            **editor,
+            "entries": state["entries"],
+            "version": state["version"],
+            "request_id": str(uuid4()),
+        }
+        confirmation = await post(client, 1, "publish", payload)
+        assert confirmation == {"status": "confirm_approved", "approved_version": 2}
+        async with PostgresUnitOfWork(engine) as uow:
+            assert not await uow.store.find(Submission, concert_id=concert)
+        payload["approved_version"] = confirmation["approved_version"]
+        queued = await post(client, 1, "publish", payload)
+        assert queued["status"] == "pending"
+        assert await post(client, 1, "publish", payload) == queued
+        assert not (await get(client, 1, "inbox"))["admin"]
+        relay = FakeTelegram()
+        async with Bot("123456:TEST", session=relay) as bot:
+            assert await deliver_one_outbox(bot, engine)
+        assert len(relay.sent) == 1
+        assert (await get(client, 1, "publication", **editor))["status"] == "delivered"
+        (global_item,) = (await get(client, 1, "inbox"))["admin"]
+        (local_item,) = (await get(client, 1, "shared_requests", **query))["proposals"]
+        assert global_item["id"] == local_item["id"] and global_item["kind"] == "setlist"
+        async with PostgresUnitOfWork(engine) as uow:
+            await Setlists(uow.store, world.admin).reopen(group, concert, 2)
+        (local_item,) = (await get(client, 1, "shared_requests", **query))["proposals"]
+        assert not local_item["stale"]
+        admin = await post(client, 1, "open_shared", query)
+        base = (await get(client, 1, "performance", **query))["setlist"]
+        assert (await action(client, engine, 1, admin, "apply", base, variant=local_item["id"]))[
+            "proposal_decision"
+        ] == "applied"
+        assert not (await get(client, 1, "inbox"))["admin"]
+
+
+async def test_variants_are_sorted_by_publication_time_before_paging(engine, world):
+    await setup_workspace(engine, world)
+    group, concert = world.group.id, world.concert.id
+    authored = datetime(2026, 11, 26, tzinfo=UTC)
+    async with PostgresUnitOfWork(engine) as uow:
+        lists = Setlists(uow.store, world.admin)
+        await lists.edit_songs(group, concert, 0, ["Комета"], private=True)
+        proposals = []
+        for index in range(21):
+            row = await lists.publish(group, concert)
+            row.published_at = authored + timedelta(minutes=index)
+            row.applied = index % 2 == 0
+            proposals.append(str(row.id))
+    async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        recent = await get(client, 1, "shared_variants", **scope(world))
+        older = await get(client, 1, "shared_variants", **scope(world), page=1)
+    assert [row["id"] for row in recent["variants"]] == list(reversed(proposals[1:]))
+    assert recent["has_next"] and [row["id"] for row in older["variants"]] == proposals[:1]
 
 
 async def test_shared_save_rechecks_administrator_after_queueing(engine, world):

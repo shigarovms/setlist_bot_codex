@@ -68,14 +68,16 @@ export function showReadiness({ root, readiness, approved, language, roster, tim
   const slot = readiness.missing_slot ? `&focus=role-${readiness.missing_slot}` : "";
   const swap = readiness.replacement ? `&focus=replacement-${readiness.replacement}` : "";
   const labels = [
-    [readiness.optional ? t.optionalTeam : readiness.slots ? t.slots(readiness.confirmed, readiness.slots) : readiness.configured ? t.noRoles : t.noTeam, roster + slot],
-    [t.replacements(readiness.replacements), roster + swap],
-    [t[approved ? "setlistReady" : "setlistDraft"], "#shared-list"],
-    [t[readiness.timing === "ready" ? "timingReady" : readiness.timing === "preliminary" ? "timingDraft" : "timingEmpty"], timing],
+    [readiness.optional ? t.optionalTeam : readiness.slots ? t.slots(readiness.confirmed, readiness.slots) : readiness.configured ? t.noRoles : t.noTeam,
+      roster + slot, readiness.optional || (readiness.configured && readiness.confirmed === readiness.slots)],
+    [t.replacements(readiness.replacements), roster + swap, !readiness.replacements],
+    [t[approved ? "setlistReady" : "setlistDraft"], "#shared-list", approved],
+    [t[readiness.timing === "ready" ? "timingReady" : readiness.timing === "preliminary" ? "timingDraft" : "timingEmpty"],
+      timing, readiness.timing === "ready"],
   ];
-  for (const [label, href] of labels) {
+  for (const [label, href, ready] of labels) {
     const item = element("li", "");
-    item.append(element("a", label, { href }));
+    item.append(element("a", label, { href, class: ready ? "status-ready" : "status-pending" }));
     list.append(item);
   }
   section.append(heading, list);

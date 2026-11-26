@@ -161,6 +161,7 @@ table(
     col("admins_only_suggestions", Boolean, server_default="false"),
     col("owner_id", Uuid, ForeignKey("users.id"), nullable=True),
     col("reminders_enabled", Boolean, server_default="true"),
+    col("timing_coordinator_id", Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
     col("name", String(200)),
     col("language", String(2)),
     col("default_pause_seconds", Integer),
@@ -384,6 +385,8 @@ table(
     col("snapshot", JSONB),
     col("applied", Boolean),
     col("declined", Boolean, server_default="false"),
+    col("published_at", DateTime(timezone=True), nullable=True),
+    col("pending_delivery", Boolean, server_default="false"),
     CheckConstraint("NOT (applied AND declined)", name="single_decision"),
     ForeignKeyConstraint(["group_id", "concert_id"], ["concerts.group_id", "concerts.id"]),
 )

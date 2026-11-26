@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 from setlist_bot.application.ports import Store
 from setlist_bot.application.staffing import Staffing
+from setlist_bot.domain.cities import city_timezone
 from setlist_bot.domain.concerts import concert_label
 from setlist_bot.domain.entities import Concert, Group, Membership, Outbox, User
 from setlist_bot.domain.rules import AppError, require
@@ -16,10 +17,32 @@ DEFAULT_ZONE = "Europe/Moscow"
 TIMING_KIND = "timing"
 CLOCK = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
 ZONES = sorted(available_timezones() - {"localtime", "posixrules"})
+ZONE_CITIES = {
+    "Europe/Kaliningrad": ("Калининград", "Kaliningrad"),
+    "Europe/Moscow": ("Москва", "Moscow"),
+    "Europe/Samara": ("Самара", "Samara"),
+    "Asia/Yekaterinburg": ("Екатеринбург", "Yekaterinburg"),
+    "Asia/Omsk": ("Омск", "Omsk"),
+    "Asia/Novosibirsk": ("Новосибирск", "Novosibirsk"),
+    "Asia/Irkutsk": ("Иркутск", "Irkutsk"),
+    "Asia/Yakutsk": ("Якутск", "Yakutsk"),
+    "Asia/Vladivostok": ("Владивосток", "Vladivostok"),
+    "Asia/Magadan": ("Магадан", "Magadan"),
+    "Asia/Kamchatka": ("Петропавловск-Камчатский", "Petropavlovsk-Kamchatsky"),
+}
+
+
+def automatic_zone(event: Concert) -> str:
+    return city_timezone(event.city) or DEFAULT_ZONE
 
 
 def zone(event: Concert) -> str:
-    return cast(str, event.timing.get("zone", DEFAULT_ZONE))
+    return cast(str, event.timing.get("zone")) or automatic_zone(event)
+
+
+def zone_label(identifier: str, language: str, city: str = "") -> str:
+    labels = ZONE_CITIES.get(identifier)
+    return labels[language == "en"] if labels else city or identifier
 
 
 def version(event: Concert) -> int:
@@ -29,10 +52,10 @@ def version(event: Concert) -> int:
 def timing_rows(value: Any) -> list[dict[str, Any]]:
     require(isinstance(value, list) and len(value) <= 60, "timing_input")
     rows = []
+    previous, day = "", 0
     for row in value:
         require(isinstance(row, dict), "timing_input")
         start, end, label = row.get("start"), row.get("end", ""), row.get("label")
-        next_day = row.get("next_day", False)
         require(
             isinstance(start, str)
             and CLOCK.fullmatch(start) is not None
@@ -40,12 +63,17 @@ def timing_rows(value: Any) -> list[dict[str, Any]]:
             and (not end or CLOCK.fullmatch(end) is not None and end != start)
             and isinstance(label, str)
             and 0 < len(label.strip()) <= 200
-            and all(ord(char) >= 32 for char in label)
-            and type(next_day) is bool,
+            and all(ord(char) >= 32 for char in label),
             "timing_input",
         )
-        rows.append({"start": start, "end": end, "label": label.strip(), "next_day": next_day})
-    return sorted(rows, key=lambda row: (row["next_day"], row["start"]))
+        day += start < previous
+        rows.append({"start": start, "end": end, "label": label.strip(), "day": day})
+        previous = start
+    return rows
+
+
+def timing_day(row: dict[str, Any]) -> int:
+    return int(row.get("day", row.get("next_day", False)))
 
 
 async def admins(store: Store, group_id: UUID) -> list[Membership]:
@@ -60,12 +88,12 @@ async def participants(store: Store, group: Group, event: Concert) -> set[UUID]:
     }
 
 
-async def responsible(store: Store, group: Group, event: Concert) -> UUID | None:
-    identifier = event.timing.get("responsible")
+async def responsible(store: Store, group: Group) -> UUID | None:
+    identifier = group.timing_coordinator_id
     if identifier and await store.find(
-        Membership, group_id=group.id, user_id=UUID(identifier), status="active"
+        Membership, group_id=group.id, user_id=identifier, status="active"
     ):
-        return UUID(identifier)
+        return identifier
     administrators = await admins(store, group.id)
     eligible = {row.user_id for row in administrators}
     return group.owner_id if group.owner_id in eligible else min(eligible, default=None)
@@ -84,52 +112,50 @@ class WorkspaceTiming:
             Membership, group_id=group.id, user_id=self.user.id, status="active"
         )
         admin = bool(memberships and memberships[0].role == "admin")
-        editor = admin or bool(memberships and event.timing.get("responsible") == str(self.user.id))
+        editor = admin or bool(memberships and group.timing_coordinator_id == self.user.id)
         if not editor:
             require(self.user.id in await participants(self.store, group, event), "forbidden")
         return group, event, admin, editor
 
     async def view(self, event_id: UUID, group_id: UUID) -> dict[str, Any]:
         group, event, admin, editor = await self.scope(event_id, group_id)
+        auto = automatic_zone(event)
+        manual = event.timing.get("zone", "")
+        effective = zone(event)
+        choices = dict.fromkeys([*ZONE_CITIES, auto, effective])
         return {
             "language": self.user.language,
             "band": group.name,
             "event": concert_label(event, self.user.language),
+            "date": event.date.isoformat(),
             "rows": event.timing.get("rows", []),
             "version": version(event),
             "epoch": event.lifecycle_version,
-            "zone": zone(event),
-            "zones": ZONES if editor else [],
+            "zone": effective,
+            "zone_label": zone_label(
+                effective, self.user.language, event.city if effective == auto else ""
+            ),
+            "manual_zone": manual,
+            "auto_zone": zone_label(auto, self.user.language, event.city),
+            "zones": [
+                {
+                    "id": identifier,
+                    "label": zone_label(
+                        identifier, self.user.language, event.city if identifier == auto else ""
+                    ),
+                }
+                for identifier in choices
+            ]
+            if editor
+            else [],
             "preliminary": event.timing.get("preliminary", not event.timing.get("rows")),
-            "responsible": event.timing.get("responsible", "") if admin else "",
-            "members": await self.members(group) if admin else [],
             "admin": admin,
             "editor": editor,
         }
 
-    async def members(self, group: Group) -> list[dict[str, str]]:
-        people = await self.store.get_many(
-            User,
-            {
-                row.user_id
-                for row in await self.store.find(Membership, group_id=group.id, status="active")
-            },
-        )
-        return [
-            {
-                "id": str(person.id),
-                "name": person.profile.get("name")
-                or person.display_name
-                or (f"@{person.username}" if person.username else ""),
-            }
-            for person in sorted(
-                people, key=lambda person: (person.display_name.casefold(), person.id)
-            )
-        ]
-
     async def command(self, group_id: UUID, body: dict[str, Any]) -> dict[str, Any]:
         event_id = UUID(body["performance"])
-        _, event, admin, editor = await self.scope(event_id, group_id)
+        _, event, _, editor = await self.scope(event_id, group_id)
         require(editor, "admin_only")
         require(
             type(body.get("version")) is int
@@ -147,30 +173,20 @@ class WorkspaceTiming:
         }
         if action == "notify":
             return command
-        name = body.get("zone", zone(event))
+        name = body.get("zone", event.timing.get("zone", ""))
         try:
-            require(isinstance(name, str) and name in ZONES, "timing_input")
-            ZoneInfo(name)
+            require(isinstance(name, str) and (not name or name in ZONES), "timing_input")
+            if name:
+                ZoneInfo(name)
         except (ValueError, ZoneInfoNotFoundError) as exc:
             raise AppError("timing_input") from exc
         preliminary = body.get("preliminary")
         require(type(preliminary) is bool, "timing_input")
-        command.update(rows=timing_rows(body.get("rows")), zone=name, preliminary=preliminary)
-        if "responsible" in body:
-            require(admin, "admin_only")
-            identifier = body["responsible"]
-            if identifier:
-                person = UUID(identifier)
-                require(
-                    bool(
-                        await self.store.find(
-                            Membership, group_id=group_id, user_id=person, status="active"
-                        )
-                    ),
-                    "timing_input",
-                )
-                identifier = str(person)
-            command["responsible"] = identifier or ""
+        rows = timing_rows(body.get("rows"))
+        saved = event.timing.get("rows", [])
+        if timing_rows(saved) == rows:
+            rows = saved
+        command.update(rows=rows, zone=name, preliminary=preliminary)
         return command
 
     async def apply(self, group_id: UUID, body: dict[str, Any]) -> dict[str, Any]:
@@ -182,8 +198,6 @@ class WorkspaceTiming:
             queued = await queue_timing(self.store, group, event)
             return {"queued": queued}
         updates = {key: command[key] for key in ("rows", "zone", "preliminary")}
-        if "responsible" in command:
-            updates["responsible"] = command["responsible"]
         if any(event.timing.get(key) != value for key, value in updates.items()):
             event.timing = {**event.timing, **updates, "version": version(event) + 1}
         return {"version": version(event)}
@@ -192,7 +206,7 @@ class WorkspaceTiming:
 async def queue_timing(store: Store, group: Group, event: Concert, *, kind: str = "manual") -> int:
     recipients: set[UUID]
     if kind == "warning":
-        owner = await responsible(store, group, event)
+        owner = await responsible(store, group)
         recipients = {owner} if owner else set()
     else:
         recipients = await participants(store, group, event)

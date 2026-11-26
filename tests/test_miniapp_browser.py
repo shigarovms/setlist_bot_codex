@@ -304,6 +304,14 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
         await lists.edit_songs(world.group.id, past.id, version, ["Комета"])
         _, version, _ = await lists.read(world.group.id, past.id)
         await lists.approve(world.group.id, past.id, version)
+    if launch_mode == "workspace":
+        from aiogram import Bot
+        from test_telegram import FakeTelegram
+
+        from setlist_bot.main import deliver_one_outbox
+
+        async with Bot("123456:TEST", session=FakeTelegram()) as bot:
+            assert await deliver_one_outbox(bot, engine)
     identifier, _ = await session(engine, world)
     from test_miniapp_group import template
 
@@ -378,6 +386,20 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             )
             if launch_mode == "workspace":
                 await browser.wait("document.querySelectorAll('.workspace-list a').length === 2")
+                assert await browser.js("""
+                    (async () => {
+                        const link = document.querySelector('.band-list a');
+                        const original = link.textContent;
+                        link.textContent = 'Очень длинное название коллектива Midnight Avenue';
+                        await document.fonts.ready;
+                        const style = getComputedStyle(link);
+                        const fits = style.fontFamily.includes('Unbounded')
+                          && style.textDecorationLine === 'none'
+                          && link.clientHeight > 68 && link.scrollWidth <= link.clientWidth;
+                        link.textContent = original;
+                        return fits;
+                    })()
+                """)
                 await browser.wait(
                     "document.querySelector('a[href*=\"view=inbox\"]')"
                     "?.textContent.includes(' · 1')"
@@ -398,6 +420,39 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.wait(
                     "document.querySelector('.shared-setlist')?.innerText.includes('Комета')"
                 )
+                await browser.wait("!!document.getElementById('readiness-title')")
+                assert await browser.js("""
+                    !!document.querySelector('.performance-readiness .status-ready')
+                    && !!document.querySelector('.performance-readiness .status-pending')
+                """)
+                await browser.click_named(".performance-details-nav a", "Тайминг выступления")
+                await browser.wait("!!document.querySelector('.timing-edit-table')")
+                await browser.click_named(".timing-fields button", "Добавить строку")
+                await browser.js("document.activeElement.click()")
+                await browser.wait("!!document.querySelector('.timing-wheel-dialog[open]')")
+                assert await browser.js("""
+                    [...document.querySelectorAll('.timing-wheels > :last-child button')]
+                      .map(button => button.textContent).join(',')
+                      === '00,05,10,15,20,25,30,35,40,45,50,55'
+                """)
+                await browser.click_named(".timing-wheel-dialog button", "55")
+                await browser.click_named(".timing-wheel-dialog button", "Готово")
+                assert await browser.js("document.querySelector('[name=start]').value === '12:55'")
+                await browser.js("""
+                    const field = document.querySelector('.timing-form [name=label]');
+                    field.value = 'Сбор'; field.focus();
+                    const enter = new KeyboardEvent('keydown', {key: 'Enter', bubbles: true});
+                    field.dispatchEvent(enter);
+                """)
+                assert await browser.js(
+                    "document.querySelectorAll('.timing-edit-table tbody tr').length === 2"
+                )
+                await browser.click_named("#workspace-content nav a", "Назад")
+                await browser.wait("!!document.getElementById('readiness-title')")
+                await browser.click_named(".performance-details-nav a", "Тайминг выступления")
+                await browser.wait("!!document.querySelector('.timing-edit-table')")
+                assert await browser.js("!document.querySelector('.timing-edit-table tbody tr')")
+                await browser.click_named("#workspace-content nav a", "Назад")
                 await browser.wait("!!document.getElementById('readiness-title')")
                 await browser.assert_button_rows(".performance-details-nav")
                 await browser.assert_button_rows("#workspace-content > .toolbar")
@@ -473,6 +528,12 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.wait(
                     "document.querySelector('#workspace-content').innerText.includes('Утверждён')"
                 )
+                await browser.call(
+                    "Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&band={world.group.id}"}
+                )
+                await browser.wait("!!document.querySelector('a.approved-setlist.status-ready')")
+                await browser.click_named("a.approved-setlist", "✓Сет-лист утверждён")
+                await browser.wait("!!document.querySelector('#shared-list')")
                 await browser.click_named("#workspace-content button", "📄 Скачать PDF")
                 downloads = tmp_path / "downloads"
                 await browser.call(
@@ -1037,7 +1098,11 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
             assert not await browser.js("window.testClosed === true")
             bot = Bot("123456:TEST", session=FakeTelegram())
             assert await deliver_one_outbox(bot, engine)
-            await browser.wait("window.testClosed === true")
+            await browser.wait("location.search.includes('view=performance')")
+            await browser.wait(
+                "document.getElementById('workspace-status')?.textContent"
+                ".includes('Ваш вариант отправлен')"
+            )
             await bot.session.close()
     finally:
         if browser:
@@ -1143,8 +1208,8 @@ async def browser_manage_performance(browser, engine, group_id, origin):
         document.querySelector('.timing-form [name=start]').value = '17:00';
         document.querySelector('.timing-form [name=end]').value = '17:45';
         document.querySelector('.timing-form [name=label]').value = 'Саундчек';
-        document.querySelector('.timing-form').requestSubmit();
     """)
+    await browser.click_named(".timing-form button", "Сохранить")
     await process_catalog_request(engine)
     await browser.wait(
         "document.getElementById('workspace-status').textContent === 'Тайминг сохранён.'"

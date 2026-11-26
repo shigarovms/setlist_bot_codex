@@ -24,7 +24,7 @@ async def deliver_timing(
     person_id = UUID(payload["user"])
     warning = payload["kind"] == "warning"
     eligible = (
-        await responsible(uow.store, group, event) == person_id
+        await responsible(uow.store, group) == person_id
         if warning
         else person_id in await participants(uow.store, group, event)
     )

@@ -139,7 +139,7 @@ class WorkspaceInbox:
                 if item.expires_at > now():
                     by_event[item.concert_id].append(item)
             proposals = await self.store.find(
-                Submission, group_id=group.id, applied=False, declined=False
+                Submission, group_id=group.id, applied=False, declined=False, pending_delivery=False
             )
             event_ids = (
                 confirmations[group.id] | by_event.keys() | {row.concert_id for row in proposals}

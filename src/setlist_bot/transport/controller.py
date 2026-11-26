@@ -1736,16 +1736,10 @@ class Controller:
             require(not self.private, "group_only")
             await self.groups.access(group_id, admin=True)
             submitted = await self.store.get(Submission, UUID(args))
-            require(submitted.group_id == group_id, "not_found")
-            require(not (submitted.applied or submitted.declined), "already_done")
+            await self.setlists.pending_proposal(group_id, submitted.concert_id, submitted.id)
             context.concert_id = submitted.concert_id
-            _, context.observed_version, approved = await self.setlists.read(
+            _, context.observed_version, _ = await self.setlists.read(
                 group_id, submitted.concert_id
-            )
-            require(not approved, "approved")
-            expected_shared = submitted.snapshot.get("shared_version")
-            require(
-                expected_shared is None or expected_shared == context.observed_version, "conflict"
             )
             response = await self.execute(f"apply {submitted.id}")
             if self.source_message_id is not None:
@@ -1768,7 +1762,9 @@ class Controller:
             return response
         if command == "view_submission":
             submission = await self.store.get(Submission, UUID(args))
-            require(submission.group_id == group_id, "not_found")
+            require(
+                submission.group_id == group_id and not submission.pending_delivery, "not_found"
+            )
             context.concert_id = submission.concert_id
             await self._show(context)
             can_apply = (

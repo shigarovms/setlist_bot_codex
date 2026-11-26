@@ -9,6 +9,7 @@ const words = withBotLabels("workspace-band-settings", {
     everyone: "Участники коллектива", admins: "Только администраторы",
     pause: "Пауза по умолчанию, сек.", pauseHint: "Применяется к новым выступлениям.",
     language: "Язык сообщений в чате", reminders: "Напоминания о неутверждённых сет-листах",
+    timing: "Тайминг", coordinator: "Ответственный за тайминг", defaultCoordinator: "Владелец коллектива",
     reminderTime: "Бот напоминает накануне выступления с 14:00 до 15:00 по Москве.",
     enabled: "Включены", disabled: "Отключены", save: "Сохранить настройки",
     close: "Закрыть", check: "Проверить результат", busy: "Сохраняем настройки…",
@@ -21,6 +22,7 @@ const words = withBotLabels("workspace-band-settings", {
     suggestions: "Who can suggest edits and variants", everyone: "Band members",
     admins: "Admins only", pause: "Default pause in seconds", pauseHint: "Applies to new performances.",
     language: "Chat message language", reminders: "Reminders about unapproved setlists",
+    timing: "Schedule", coordinator: "Schedule coordinator", defaultCoordinator: "Band owner",
     reminderTime: "The bot sends a reminder the day before the performance, from 14:00 to 15:00 Moscow time.",
     enabled: "Enabled", disabled: "Disabled", save: "Save settings", close: "Close",
     check: "Check result", busy: "Saving settings…", done: "Band settings saved.",
@@ -40,6 +42,10 @@ function el(tag, text = "", attributes = {}) {
 export function showBandSettings({ root, data, language, request, refresh, status }) {
   const t = words[language];
   const current = data.settings;
+  const coordinators = { "": t.defaultCoordinator, ...data.timing_coordinators };
+  if (current.timing_coordinator_id && !coordinators[current.timing_coordinator_id])
+    coordinators[current.timing_coordinator_id] = t.defaultCoordinator;
+  const timingFields = [["timing_coordinator_id", t.coordinator, coordinators]];
   const styleChoices = { article: t.article, mono: t.mono };
   const contributorChoices = { false: t.everyone, true: t.admins };
   const languageChoices = { ru: "Русский", en: "English" };
@@ -59,7 +65,10 @@ export function showBandSettings({ root, data, language, request, refresh, statu
     setlistFields.push(["default_pause_seconds", t.pause, null, t.pauseHint]);
   }
   appendSummary(t.setlists, setlistFields);
-  if (data.admin) appendSummary(t.chat, chatFields);
+  if (data.admin) {
+    appendSummary(t.timing, timingFields);
+    appendSummary(t.chat, chatFields);
+  }
 
   function appendSummary(heading, fields) {
     const summary = el("dl", "", { class: "song-details" });
@@ -78,7 +87,7 @@ export function showBandSettings({ root, data, language, request, refresh, statu
     });
     const form = el("form", "", { class: "import-fields" });
     const controls = new Map();
-    for (const [section, fields] of [[t.setlists, setlistFields], [t.chat, chatFields]]) {
+    for (const [section, fields] of [[t.setlists, setlistFields], [t.timing, timingFields], [t.chat, chatFields]]) {
       const fieldset = el("fieldset", "", { class: "import-fields" });
       fieldset.append(el("legend", section));
       for (const [key, label, choices, hint] of fields) {

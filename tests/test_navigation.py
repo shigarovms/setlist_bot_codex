@@ -1,10 +1,13 @@
 import re
 
 import pytest
+from aiogram import Bot
+from test_telegram import FakeTelegram
 
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.domain.entities import Outbox
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
+from setlist_bot.main import deliver_one_outbox
 from setlist_bot.transport.telegram import Processor
 
 UUID_PATTERN = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
@@ -61,6 +64,8 @@ async def test_published_draft_uses_buttons_and_applies_without_visible_ids(engi
         event = (await uow.store.find(Outbox))[0]
     assert not UUID_PATTERN.search(published.text + event.text)
     assert event.buttons and event.buttons[0][1].startswith("apply_submission ")
+    async with Bot("123456:TEST", session=FakeTelegram()) as bot:
+        assert await deliver_one_outbox(bot, engine)
     result = await processor.process(6, 1, -100, event.buttons[0][1], private=False)
     assert "Комета" in result.text and not UUID_PATTERN.search(result.text)
     async with PostgresUnitOfWork(engine) as uow:

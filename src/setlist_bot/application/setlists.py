@@ -514,7 +514,6 @@ class Setlists:
         setlist = await self.load(group_id, concert_id)
         draft = await self._draft(setlist)
         snapshot = await self._snapshot(group_id, draft.content)
-        member = (await self.store.find(Membership, group_id=group_id, user_id=self.user.id))[0]
         submission = Submission(
             group_id=group_id,
             concert_id=concert_id,
@@ -522,7 +521,6 @@ class Setlists:
             snapshot={
                 **snapshot,
                 "shared_version": setlist.version,
-                "review_required": member.role != "admin",
             },
         )
         self.store.add(submission)
@@ -530,6 +528,15 @@ class Setlists:
 
         milestone("variant_published", concert_id, {"group_id": str(group_id)})
         return submission
+
+    async def proposal_base_version(self, setlist: Setlist) -> int:
+        revisions = await self.store.find(
+            Revision, group_id=setlist.group_id, setlist_id=setlist.id
+        )
+        return max(
+            (row.number for row in revisions if row.action not in ("approved", "reopened")),
+            default=setlist.version,
+        )
 
     async def apply(
         self, group_id: UUID, concert_id: UUID, submission_id: UUID, expected: int
@@ -539,7 +546,8 @@ class Setlists:
         require(not setlist.approved, "approved")
         require(setlist.version == expected, "conflict")
         submission = await self.pending_proposal(group_id, concert_id, submission_id)
-        require(submission.snapshot.get("shared_version") in (None, expected), "conflict")
+        base = submission.snapshot.get("shared_version")
+        require(base is None or base >= await self.proposal_base_version(setlist), "conflict")
         for block in submission.snapshot["blocks"]:
             for item in block["items"]:
                 if is_pause(item):
@@ -564,6 +572,7 @@ class Setlists:
         require(
             submission.group_id == group_id and submission.concert_id == concert_id, "not_found"
         )
+        require(not submission.pending_delivery, "not_found")
         require(not (submission.applied or submission.declined), "already_done")
         return submission
 

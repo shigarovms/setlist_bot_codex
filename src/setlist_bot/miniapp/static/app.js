@@ -22,6 +22,10 @@ const words = withBotLabels("app", {
     plannedConflict: "Данные выступления изменились. Проверьте текущую длительность и повторите правку.",
     unknown: "Не задано",
     current: "Текущий черновик",
+    currentShared: "Общий сет-лист", personalDraft: "Мой черновик",
+    replacePersonal: "Заменить сохранённый личный черновик новым вариантом?",
+    approvedProposal: "Общий сет-лист уже утверждён. Всё равно предложить свой вариант?",
+    confirmProposal: "Да, предложить",
     search: "Поиск песни",
     private:
       "Черновик сохраняется автоматически. Отправка группе — только по кнопке.",
@@ -107,6 +111,10 @@ const words = withBotLabels("app", {
     plannedConflict: "The performance changed. Review the current duration and retry.",
     unknown: "Not set",
     current: "Current draft",
+    currentShared: "Shared setlist", personalDraft: "My draft",
+    replacePersonal: "Replace your saved personal draft with this version?",
+    approvedProposal: "The shared setlist is already approved. Submit your version anyway?",
+    confirmProposal: "Yes, submit",
     search: "Find a song",
     private:
       "Draft saved automatically. Only the publish button sends it to the group.",
@@ -190,12 +198,13 @@ let lang = "ru",
 const t = (key) => words[lang][key] ?? key;
 let session = new URLSearchParams(location.hash.slice(1)).get("session");
 const workspaceBand = workspaceParams.get("band");
-let sharedBase = null, sharedAttempt = null;
+let sharedBase = null, sharedAttempt = null, showingShared = false;
 const workspaceDraft = session && workspaceBand && workspaceParams.get("view") === "draft";
 const parentPerformance = workspaceParams.get("performance");
 function draftParentUrl() {
   const past = workspaceParams.get("past"), page = workspaceParams.get("page");
-  if (!parentPerformance) return bandUrl(workspaceBand, past, page);
+  if (!parentPerformance || workspaceParams.get("draft_from") === "list")
+    return bandUrl(workspaceBand, past, page);
   const url = performanceUrl(workspaceBand, parentPerformance, past, page);
   if (workspaceParams.get("from") !== "managed") return url;
   const managed = encodeURIComponent(workspaceParams.get("managed_page") || "0");
@@ -283,18 +292,26 @@ function remember() {
   if (undos.length > 50) undos.shift();
   publishAttempt = null;
 }
-function change(next, gap = defaultPause) {
+function change(next, gap = defaultPause, updateGroupDefault = false) {
   if (busy) return;
   if (next.length > 200) {
     status(t("limit"), true);
     return;
   }
+  if (!mayReplacePersonalDraft()) return;
+  showingShared = false;
   remember();
   current = next;
   defaultPause = gap;
-  saver?.setDraft(current, defaultPause);
+  saver?.setDraft(current, defaultPause, updateGroupDefault);
   render();
   status(t("dirty"));
+}
+function mayReplacePersonalDraft() {
+  if (showingShared && state.entries.length
+    && JSON.stringify([wire(state.entries), state.default_pause_seconds]) !== JSON.stringify([wire(current), defaultPause])
+    && !confirm(t("replacePersonal"))) return false;
+  return true;
 }
 function songEntry(song) {
   return {
@@ -430,7 +447,7 @@ function render() {
   $("empty").textContent = t("empty");
   $("history-label").textContent = preview
     ? `${preview.label} · ${clock(preview.seconds)}`
-    : t("current");
+    : t(showingShared ? "currentShared" : "current");
   $("newer").hidden = !preview;
   $("newer").disabled = busy;
   $("use-history").hidden = !preview;
@@ -445,8 +462,11 @@ function render() {
     !!preview || !current.length || busy || !!saver?.blocked;
   $("load-shared").hidden = !state.can_set_group_default || !!preview;
   $("load-shared").disabled = busy || !!sharedAttempt || !!saver?.blocked;
+  $("load-personal").hidden = !showingShared || !!preview;
+  $("load-personal").disabled = busy;
+  $("load-personal").textContent = t("personalDraft");
   $("save-shared").hidden = !!preview || ((!sharedBase || sharedBase.approved) && !sharedAttempt);
-  $("shared-editor-actions").hidden = $("load-shared").hidden && $("save-shared").hidden;
+  $("shared-editor-actions").hidden = ["load-shared", "save-shared", "load-personal"].every(id => $(id).hidden);
   $("save-shared").disabled = busy || !!saver?.blocked;
   $("save-shared").textContent = t(sharedAttempt ? "sharedCheck" : "saveShared");
   dirty()
@@ -852,7 +872,10 @@ async function refreshRepertoire() {
   // EN: Refresh all occurrences, including Undo, without replacing the user's draft.
   current = refresh(current);
   undos = undos.map(item => ({ ...item, entries: refresh(item.entries) }));
-  saver.setDraft(current, defaultPause);
+  if (showingShared) {
+    state = updated;
+    persistence();
+  } else saver.setDraft(current, defaultPause);
   render();
 }
 $("song-delete").addEventListener("click", () => {
@@ -977,7 +1000,7 @@ $("average-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const gap = Number($("average-value").value);
   if (!Number.isInteger(gap) || gap < 0 || gap > 86400) return;
-  if (gap !== defaultPause) change(clone(current), gap);
+  if (gap !== defaultPause) change(clone(current), gap, state.can_set_group_default);
   $("average-dialog").close();
 });
 $("pause-form").addEventListener("submit", async (event) => {
@@ -1102,7 +1125,9 @@ function persistence() {
   saver = new DraftPersistence(
     state.version,
     current,
-    (payload) => api("save", payload, "POST"),
+    (payload) => api("save", workspaceDraft
+      ? { ...payload, update_group_default: payload.update_group_default === true }
+      : payload, "POST"),
     (saved, unchanged) => {
       if (saved.metadata_version < state.metadata_version) {
         saved.metadata_version = state.metadata_version;
@@ -1138,6 +1163,7 @@ $("save").addEventListener("click", async () => {
 });
 $("publish").addEventListener("click", async () => {
   if (busy || preview || !saver || saver.blocked) return;
+  if (!publishAttempt && !mayReplacePersonalDraft()) return;
   busy = true;
   saver.pause();
   render();
@@ -1146,13 +1172,22 @@ $("publish").addEventListener("click", async () => {
     publishAttempt ??= {
       version: state.version,
       entries: wire(current),
+      default_pause_seconds: defaultPause,
       request_id: crypto.randomUUID(),
     };
     status(t("publishing"));
     let result = await api("publish", publishAttempt, "POST");
+    while (result.status === "confirm_approved") {
+      if (!await confirmProposal()) { publishAttempt = null; status(""); return; }
+      publishAttempt.approved_version = result.approved_version;
+      result = await api("publish", publishAttempt, "POST");
+    }
     if (result.version !== undefined) {
       state.version = result.version;
       saver.version = result.version;
+      state.entries = clone(current);
+      state.default_pause_seconds = defaultPause;
+      showingShared = false;
     }
     // RU: Закрываем только после подтверждения доставки outbox, не после постановки в очередь.
     // EN: No Bot API token in the web process; the existing worker confirms actual delivery.
@@ -1166,12 +1201,12 @@ $("publish").addEventListener("click", async () => {
     }
     if (result.status === "delivered") {
       tg?.disableClosingConfirmation?.();
-      status(
-        lang === "ru"
-          ? "Предложение отправлено в группу."
-          : "Proposal sent to the group.",
-      );
-      if (!workspaceDraft) tg?.close?.();
+      const target = performanceUrl(state.group_id, state.concert_id, workspaceParams.get("past"), workspaceParams.get("page"));
+      const managed = workspaceParams.get("from") === "managed" ? new URLSearchParams({
+        from: "managed", managed_page: workspaceParams.get("managed_page") || "0",
+        schedule_from: workspaceParams.get("schedule_from") || "",
+      }) : "";
+      location.assign(`${target}${managed ? `&${managed}` : ""}&published=1`);
     } else if (result.status === "failed") {
       publishAttempt = null;
       status(t("failed"), true);
@@ -1183,6 +1218,29 @@ $("publish").addEventListener("click", async () => {
     saver.resume();
     render();
   }
+});
+function confirmProposal() {
+  return new Promise(resolve => {
+    const dialog = node("dialog", undefined, "shared-tools");
+    const heading = node("h2", t("approvedProposal"));
+    heading.id = "confirm-proposal-title";
+    dialog.setAttribute("aria-labelledby", heading.id);
+    const actions = node("div", undefined, "toolbar");
+    actions.append(button(t("cancel"), t("cancel"), () => dialog.close()),
+      button(t("confirmProposal"), t("confirmProposal"), () => dialog.close("submit"), "primary"));
+    dialog.append(heading, actions);
+    document.body.append(dialog);
+    dialog.addEventListener("close", () => { resolve(dialog.returnValue === "submit"); dialog.remove(); }, { once: true });
+    dialog.showModal();
+  });
+}
+$("load-personal").addEventListener("click", () => {
+  if (!showingShared || busy) return;
+  showingShared = false;
+  current = withKeys(state.entries);
+  defaultPause = state.default_pause_seconds;
+  persistence();
+  render();
 });
 $("load-shared").addEventListener("click", async () => {
   if (busy || sharedAttempt || preview || !confirm(t("loadSharedConfirm"))) return;
@@ -1375,8 +1433,10 @@ async function boot() {
     $("event").textContent = [state.group, state.date, state.title]
       .filter(Boolean)
       .join(" · ");
-    current = withKeys(state.entries);
-    defaultPause = state.default_pause_seconds;
+    showingShared = !!(workspaceDraft && state.shared);
+    const initial = showingShared ? state.shared : state;
+    current = withKeys(initial.entries);
+    defaultPause = initial.default_pause_seconds;
     persistence();
     if (state.can_set_group_default) {
       try { sharedBase = await api("draft_shared"); }

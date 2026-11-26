@@ -5,7 +5,9 @@ from itertools import count
 from pathlib import Path
 
 import pytest
+from aiogram import Bot
 from menu_helpers import options, variants
+from test_telegram import FakeTelegram
 
 from setlist_bot.application.catalog import Catalog
 from setlist_bot.application.setlists import Setlists
@@ -13,6 +15,7 @@ from setlist_bot.domain.entities import Outbox, Revision
 from setlist_bot.domain.importing import parse_import
 from setlist_bot.domain.rules import AppError, totals
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
+from setlist_bot.main import deliver_one_outbox
 from setlist_bot.transport.telegram import Processor
 
 TITLES = ["Славик", "Сердце лёд", "Меланхолия", "Подожгу", "Атомы", "VIBY"]
@@ -130,6 +133,8 @@ async def test_private_suggestion_stays_private_until_explicit_publish_and_apply
     await send("/publish", actor=2, private=True)
     async with PostgresUnitOfWork(engine) as uow:
         event = (await uow.store.find(Outbox))[0]
+    async with Bot("123456:TEST", session=FakeTelegram()) as bot:
+        assert await deliver_one_outbox(bot, engine)
     result = await send(event.buttons[0][1])
     assert "гитарист · вариант 1" in dict((await variants(send, result)).buttons)
     async with PostgresUnitOfWork(engine) as uow:

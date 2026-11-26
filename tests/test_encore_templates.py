@@ -2,10 +2,13 @@ from datetime import timedelta
 from itertools import count
 
 import pytest
+from aiogram import Bot
+from test_telegram import FakeTelegram
 
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.domain.entities import Outbox, SongListTemplate, now
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
+from setlist_bot.main import deliver_one_outbox
 from setlist_bot.transport.telegram import Processor
 
 
@@ -89,6 +92,8 @@ async def test_published_proposals_and_previews_have_no_suggestion_button(engine
         event = (await uow.store.find(Outbox))[0]
         assert event.monospace
     assert not any(data.startswith("copy_list ") for _, data in event.buttons)
+    async with Bot("123456:TEST", session=FakeTelegram()) as bot:
+        assert await deliver_one_outbox(bot, engine)
     shown = await send(event.buttons[0][1])
     assert "Комета" in shown.text
 
