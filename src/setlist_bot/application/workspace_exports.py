@@ -9,7 +9,13 @@ from setlist_bot.application.ports import Store
 from setlist_bot.application.setlists import Setlists
 from setlist_bot.application.workspace_gigs import WorkspaceGigs
 from setlist_bot.domain.entities import ExportFile, Revision, User
-from setlist_bot.domain.export_settings import FONTS, MAX_TARGET_PAGES, settings, validated_settings
+from setlist_bot.domain.export_settings import (
+    FONTS,
+    MAX_TARGET_PAGES,
+    settings,
+    validated_settings,
+    workspace_settings,
+)
 from setlist_bot.domain.rules import require
 
 
@@ -62,7 +68,7 @@ class WorkspaceExports:
     async def options(self, group_id: UUID, concert_id: UUID) -> dict[str, Any]:
         group, _ = await self.exports.event(group_id, concert_id)
         return {
-            "settings": settings(self.user.export_settings),
+            "settings": workspace_settings(self.user.export_settings),
             "fonts": FONTS,
             "language": group.language,
             "max_pages": MAX_TARGET_PAGES,
@@ -108,7 +114,7 @@ class WorkspaceExports:
         audiences = export_audiences(data["audience"])
         payload = {
             "snapshot": snapshot,
-            "settings": data.get("settings", self.user.export_settings),
+            "settings": data.get("settings", workspace_settings(self.user.export_settings)),
         }
         if "lights" in audiences:
             payload["lighting_snapshot"] = await self.exports.lighting_snapshot(group_id, snapshot)
@@ -131,7 +137,7 @@ class WorkspaceExports:
             private=True,
             back="workspace",
             reuse=True,
-            appearance=data.get("settings"),
+            appearance=data.get("settings", workspace_settings(self.user.export_settings)),
         )
         await self.store.flush()
         assert renderer is not None

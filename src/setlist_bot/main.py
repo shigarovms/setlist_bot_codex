@@ -344,6 +344,35 @@ async def deliver_one_outbox(
                             proposal=True,
                             prefix=event.text[: event.monospace_offset],
                         )
+                base_url = os.environ.get("MINIAPP_PUBLIC_BASE_URL", "")
+                if group is not None and event.concert_id and base_url:
+                    from setlist_bot.transport.miniapp_links import workspace_button
+
+                    section = None
+                    target = None
+                    language = group.language
+                    if request is not None:
+                        section, target = "request", request.id
+                        language = (await uow.store.get(User, request.user_id)).language
+                    elif event.payload.get("setlist_snapshot"):
+                        for _, callback in event.buttons:
+                            if callback.startswith("apply_submission "):
+                                section, target = "variant", UUID(callback.split()[1])
+                                break
+                    if section and target:
+                        runtime = await uow.store.find(RuntimeStatus, component="bot")
+                        username = runtime[0].details.get("bot_username", "") if runtime else ""
+                        response.buttons.extend(
+                            workspace_button(
+                                base_url,
+                                username,
+                                language,
+                                section,
+                                group.id,
+                                event.concert_id,
+                                target,
+                            )
+                        )
                 sent_messages = await send_response(bot, event.chat_id, response)
                 event.delivered_at = now()
                 event.last_error = ""

@@ -15,6 +15,7 @@ const labels = withBotLabels("workspace-profile", {
     visibility: "Анкета доступна администраторам коллективов, где вы в команде или в списке знакомых исполнителей.",
     language: "Язык интерфейса",
     pdfHint: "Эти настройки применяются к PDF для музыкантов в боте и приложении.",
+    pdfAuto: "Автоподбор страниц", pdfPages: count => `${count} стр.`,
     confirm: "Сохранить", check: "Проверить результат", close: "Закрыть",
     busy: "Сохраняем…", done: "Изменения сохранены.",
   },
@@ -30,6 +31,7 @@ const labels = withBotLabels("workspace-profile", {
     visibility: "Your profile is available to admins of bands where you are on the team or listed as a contact.",
     language: "Interface language",
     pdfHint: "These settings apply to musician PDFs in the bot and the app.",
+    pdfAuto: "Automatic page count", pdfPages: count => `${count} pages`,
     confirm: "Save", check: "Check result", close: "Close", busy: "Saving…", done: "Changes saved.",
   },
 });
@@ -68,8 +70,10 @@ export function showProfile({ root, data, language, request, preview, refresh, s
     const value = key === "roles" ? current.roles?.join(", ") : current[key];
     details.append(el("dt", t[key]), el("dd", valueLabel(value)));
   }
+  const { font, pages, size } = data.pdf.settings;
+  const pdfSize = pages === "auto" ? t.pdfAuto : pages ? t.pdfPages(pages) : `${size} pt`;
   details.append(el("dt", t.language), el("dd", locales.find(([key]) => key === language)[1]),
-    el("dt", t.pdf), el("dd", `${data.pdf.fonts[data.pdf.settings.font]} · ${data.pdf.settings.size} pt`));
+    el("dt", t.pdf), el("dd", `${data.pdf.fonts[font]} · ${pdfSize}`));
   const actions = el("div", "", { class: "toolbar" });
   actions.append(button(t.edit, edit), button(t.language, changeLanguage), button(t.pdf, changePdf));
   root.append(details, actions, el("p", t.visibility));
@@ -96,7 +100,7 @@ export function showProfile({ root, data, language, request, preview, refresh, s
   function changePdf() {
     const window = open(t.pdf);
     const form = el("div", "", { class: "import-fields" });
-    const readAppearance = pdfAppearanceFields(form, data.pdf, language, "profile-pdf");
+    const { read: readAppearance } = pdfAppearanceFields(form, data.pdf, language, "profile-pdf");
     const save = button(t.confirm, () => {
       const appearance = readAppearance();
       if (appearance) window.send(save, {

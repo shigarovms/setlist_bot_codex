@@ -241,11 +241,17 @@ class Workspace:
             ],
         }
 
-    async def proposals(self, group_id: UUID, page: int) -> dict[str, Any]:
+    async def proposals(
+        self, group_id: UUID, page: int, *, proposal_id: UUID | None = None
+    ) -> dict[str, Any]:
         groups = Groups(self.store, self.user)
         group = await groups.access(group_id, admin=True)
         pending = await self.store.find(CatalogProposal, group_id=group_id, status="pending")
         pending.sort(key=lambda proposal: proposal.id)
+        if proposal_id is not None:
+            page = next(
+                (i // PAGE_SIZE for i, row in enumerate(pending) if row.id == proposal_id), page
+            )
         start = page * PAGE_SIZE
         rows = pending[start : start + PAGE_SIZE]
         songs = await self.store.get_many(Song, {row.song_id for row in rows if row.song_id})
@@ -256,6 +262,7 @@ class Workspace:
         return {
             "language": self.user.language,
             "band": group.name,
+            "page": page,
             "has_next": start + PAGE_SIZE < len(pending),
             "proposals": [
                 {

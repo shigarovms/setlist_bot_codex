@@ -7,7 +7,7 @@ from setlist_bot.application.ports import Store
 from setlist_bot.application.profiles import Profiles
 from setlist_bot.application.role_dictionary import RoleDictionary
 from setlist_bot.domain.entities import User
-from setlist_bot.domain.export_settings import FONTS, settings, validated_settings
+from setlist_bot.domain.export_settings import FONTS, validated_settings, workspace_settings
 from setlist_bot.domain.rules import require
 from setlist_bot.domain.staff_roles import GENERAL_SOUND
 
@@ -32,7 +32,7 @@ class WorkspaceProfile:
             "language": self.user.language,
             "version": self.user.profile_version,
             "profile": {key: value for key, value in self.user.profile.items() if key in FIELDS},
-            "pdf": {"settings": settings(self.user.export_settings), "fonts": FONTS},
+            "pdf": {"settings": workspace_settings(self.user.export_settings), "fonts": FONTS},
         }
 
     async def roles(self, source: str, language: str) -> list[dict[str, Any]]:
@@ -124,7 +124,7 @@ class WorkspaceProfile:
             record_activity(self.store, user, "language", user.id)
             return {"language": user.language}
         if action == "pdf_settings":
-            require(settings(user.export_settings) == data["expected"], "conflict")
+            require(workspace_settings(user.export_settings) == data["expected"], "conflict")
             user.export_settings = data["settings"]
             record_activity(self.store, user, "pdf_settings", user.id)
             return {"settings": user.export_settings}

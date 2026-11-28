@@ -15,7 +15,7 @@ from setlist_bot.domain.entities import Confirmation, Song
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.transport.article_import import rich_text
 from setlist_bot.transport.articles import catalog_articles
-from setlist_bot.transport.controller import Response
+from setlist_bot.transport.controller import Controller, Response
 from setlist_bot.transport.telegram import Processor, make_router, send_response
 
 
@@ -91,6 +91,39 @@ def test_long_comments_split_pages_without_losing_or_truncating_cells():
         row[4]["text"] == "А" * 2000 for page in pages for row in page.blocks[1]["cells"][1:]
     )
     assert not catalog_articles("Группа", [], [], "ru")
+
+
+async def test_catalog_shortcut_preserves_tappable_song_titles_in_group_articles(engine, world):
+    async with PostgresUnitOfWork(engine) as uow:
+        group_id = world.group.id
+        controller = Controller(
+            uow.store,
+            world.admin,
+            -100,
+            private=False,
+            bot_username="example_bot",
+            miniapp_public_base_url="https://example.org",
+        )
+        response = await controller.execute("/catalog")
+        shortcut = f"https://t.me/example_bot?startapp=ws_catalog_{group_id.hex}"
+        assert response.buttons[-1][1] == shortcut
+    for failure in (None, TelegramBadRequest):
+        fake = ArticleTelegram(failure)
+        async with Bot("123456:TEST", session=fake) as bot:
+            await send_response(bot, -100, response)
+        if failure:
+            assert (
+                fake.sent[0]
+                .reply_markup.inline_keyboard[0][0]
+                .callback_data.startswith("show_song ")
+            )
+            assert fake.sent[0].reply_markup.inline_keyboard[-1][0].url == shortcut
+        else:
+            sent = fake.rich_sent[0]
+            (link,) = sent.reply_markup.inline_keyboard
+            assert link[0].url == shortcut
+            title = sent.rich_message.blocks[1].cells[1][0].text
+            assert title.button.callback_data.startswith("show_song ")
 
 
 @pytest.mark.parametrize("failure", [None, TelegramBadRequest, TelegramNotFound])

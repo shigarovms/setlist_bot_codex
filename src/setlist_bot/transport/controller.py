@@ -80,6 +80,7 @@ from setlist_bot.domain.rules import (
 from setlist_bot.infrastructure.pdf import PdfDocuments
 from setlist_bot.transport.articles import ArticlePage, catalog_articles
 from setlist_bot.transport.i18n import tr
+from setlist_bot.transport.miniapp_links import workspace_button
 from setlist_bot.transport.render import render_setlist, song_card
 
 COMMAND_SEPARATOR = re.compile(r"\t+|" + SPACED_SEPARATOR.pattern)
@@ -1388,6 +1389,17 @@ class Controller:
                         },
                     ]
                     first.buttons.append((label, action))
+            if command == "catalog":
+                link = workspace_button(
+                    self.miniapp_public_base_url,
+                    self.bot_username,
+                    self.language,
+                    "catalog",
+                    group_id,
+                )
+                response.buttons.extend(link)
+                if response.articles:
+                    response.articles[-1].markup_buttons.extend(link)
             response.context_group = group_id
             response.navigation_slot = "catalog"
             return response
@@ -1609,6 +1621,17 @@ class Controller:
                             f"decide {action} {proposal.id}",
                         )
                     )
+            focus = (proposals[0].id,) if len(proposals) == 1 else ()
+            buttons.extend(
+                workspace_button(
+                    self.miniapp_public_base_url,
+                    self.bot_username,
+                    self.language,
+                    "songs",
+                    group_id,
+                    *focus,
+                )
+            )
             return Response(
                 self.t("context_proposals") + "\n\n" + ("\n\n".join(lines) or self.t("empty")),
                 buttons,
@@ -3104,6 +3127,23 @@ class Controller:
                     (self.t("back_concerts"), f"slmenu {key} concerts"),
                 ]
             )
+            if not data["personal"] and self.miniapp_public_base_url and self.bot_username:
+                revision_id = None
+                if data["approved"]:
+                    revision_id = (
+                        await self.setlists.load(group_id, concert_id)
+                    ).approved_revision_id
+                buttons.extend(
+                    workspace_button(
+                        self.miniapp_public_base_url,
+                        self.bot_username,
+                        self.language,
+                        "approved" if revision_id else "event",
+                        group_id,
+                        concert_id,
+                        *((revision_id,) if revision_id else ()),
+                    )
+                )
             return buttons
         variants = [
             revision
@@ -3283,7 +3323,10 @@ class Controller:
                     f"slformat {identifier.hex} fonts",
                 ),
                 (
-                    self.t("export_pages", value=config["pages"])
+                    self.t(
+                        "export_auto_pages" if config["pages"] == "auto" else "export_pages",
+                        value=config["pages"],
+                    )
                     if "pages" in config
                     else self.t("export_size", value=config["size"]),
                     f"slformat {identifier.hex} sizes",

@@ -54,7 +54,7 @@ function button(title, action, attrs = {}) {
   return node;
 }
 
-export function mountSharedSetlist({ root, sharedHeading, data, language, editorButton, decision, read, request, refresh, status }) {
+export function mountSharedSetlist({ root, sharedHeading, data, language, editorButton, decision, linkedVariant, read, request, refresh, status }) {
   const t = copy[language];
   const shared = data.setlist;
   const canDecide = shared.approved || shared.entries.length > 0;
@@ -168,6 +168,7 @@ export function mountSharedSetlist({ root, sharedHeading, data, language, editor
 
   if (data.admin && decision) void openRequests(decision);
   else if (data.admin) void fetchRequests().catch(() => {});
+  if (linkedVariant) void openVariant(linkedVariant, 0, linkedVariant.kind === "revision");
   if (data.admin) menu.addEventListener("toggle", () => {
     if (menu.open) void fetchRequests().catch(() => {});
   });
@@ -209,7 +210,7 @@ export function mountSharedSetlist({ root, sharedHeading, data, language, editor
   }
 
   async function openVariant(row, page, history, inbox = false) {
-    const current = open(row.kind === "submission" ? `${t[inbox ? "setlistProposal" : "submitted"]} · ${row.author}` : `${t.version} ${row.number}`);
+    const current = open(row.kind === "submission" ? t[inbox ? "setlistProposal" : "submitted"] : t.history);
     const back = button("", () => inbox ? openRequests() : openVariants(page, history));
     back.append(el("span", "←", { class: "page-back-arrow", "aria-hidden": "true" }), t.previous);
     returnNav.append(back);
@@ -218,6 +219,9 @@ export function mountSharedSetlist({ root, sharedHeading, data, language, editor
     try {
       const result = await read("shared_variant", { kind: row.kind, variant: row.id });
       if (!current()) return;
+      row = result.variant;
+      heading.textContent = row.kind === "submission"
+        ? `${t[inbox ? "setlistProposal" : "submitted"]} · ${row.author}` : `${t.version} ${row.number}`;
       message.textContent = row.applied ? t.applied : row.declined ? t.declined
         : row.stale ? t.stale : inbox && shared.approved ? t.approvedProposal : "";
       const list = el("ol", "", { class: "workspace-list shared-setlist" });
@@ -230,7 +234,7 @@ export function mountSharedSetlist({ root, sharedHeading, data, language, editor
       }
       content.append(list);
       if (row.action === "approved" && result.entries.length)
-        toolbar.append(button(pdfTitle(language), () => openExport(row.number, row.id)));
+        toolbar.append(button(t.downloadPdf, () => openExport(row.number, row.id)));
       const mayApply = row.kind === "submission" ? data.admin : data.can_edit_draft;
       if (mayApply && !shared.approved && !row.applied && !row.declined && !row.stale && row.number !== shared.version) {
         toolbar.append(button(row.kind === "submission" ? t.apply : t.restore, () => {

@@ -13,7 +13,7 @@ const copy = withBotLabels("workspace-performances", {
     quickHint: "Например: 15.12.2026  Санкт-Петербург  Фест  45 мин",
     lineup: "Состав", source: "Шаблон", copy_timing: "Скопировать тайминг",
     copy_lineup: "Скопировать состав", copy_setlist: "Скопировать общий сет-лист",
-    noLineup: "Без сохранённого состава",
+    noLineup: "Без сохранённого состава", templateLineup: "Состав взят из шаблона",
     dateChanged: "При изменении даты участникам нужно будет подтвердить участие заново.",
     deletePrompt: "Выступление, его сет-листы и черновики будут скрыты. Действующие приглашения отменятся. Восстановление доступно 30 дней.",
   },
@@ -29,7 +29,7 @@ const copy = withBotLabels("workspace-performances", {
     quickHint: "For example: 15.12.2026  London  Festival  45 min",
     lineup: "Lineup", source: "Template", copy_timing: "Copy schedule",
     copy_lineup: "Copy lineup", copy_setlist: "Copy shared setlist",
-    noLineup: "Without a saved lineup",
+    noLineup: "Without a saved lineup", templateLineup: "Lineup copied from template",
     dateChanged: "After changing the date, performers will need to confirm their participation again.",
     deletePrompt: "The performance, its setlists and drafts will be hidden. Active invitations will be cancelled. You can restore the performance for 30 days.",
   },
@@ -53,7 +53,8 @@ function duration(seconds) {
 export function performanceAction({ language, action, request, readOptions, readHistory, performance, onDone, dateText }) {
   const t = copy[language];
   const label = action === "restore" ? fillButtonLabel(t.restore, { name: performance.label }) : t[action];
-  const button = el("button", label, { type: "button", ...(action === "create" ? { class: "primary" } : {}) });
+  const button = el("button", action === "create" ? `+ ${label}` : label,
+    { type: "button", ...(action === "create" ? { class: "primary create-performance" } : {}) });
   button.addEventListener("click", open);
   return button;
 
@@ -195,7 +196,7 @@ export function performanceAction({ language, action, request, readOptions, read
         fields.insertBefore(quickFields, inputFields);
       }
       let lineup;
-      if (options?.lineups.length) {
+      if (source || options?.lineups.length) {
         lineup = el("select", "", { id: "workspace-performance-lineup" });
         lineup.append(el("option", t.noLineup, { value: "" }));
         for (const row of options.lineups) lineup.append(el("option", row.name, { value: row.id }));
@@ -205,6 +206,7 @@ export function performanceAction({ language, action, request, readOptions, read
       if (source) {
         for (const key of ["copy_lineup", "copy_setlist", "copy_timing"]) {
           if (key === "copy_timing" && !source.has_timing) continue;
+          if (key === "copy_lineup" && !source.has_lineup) continue;
           const checkbox = el("input", "", { type: "checkbox", id: `performance-${key}` });
           checkbox.checked = key !== "copy_timing";
           const label = el("label", "", { for: checkbox.id });
@@ -212,9 +214,16 @@ export function performanceAction({ language, action, request, readOptions, read
           copyOptions[key] = checkbox;
           fields.append(label);
         }
-        lineup?.addEventListener("change", () => {
-          copyOptions.copy_lineup.disabled = !!lineup.value;
-        });
+        const copyLineup = copyOptions.copy_lineup;
+        if (copyLineup) {
+          const updateLineup = () => {
+            copyLineup.disabled = !!lineup.value;
+            lineup.options[0].textContent = copyLineup.checked ? t.templateLineup : t.noLineup;
+          };
+          lineup.addEventListener("change", updateLineup);
+          copyLineup.addEventListener("change", updateLineup);
+          updateLineup();
+        }
       }
       const actions = el("div", "", { class: "performance-actions" });
       actions.append(el("button", action === "create" ? t.reviewCreate : t.preview, { type: "submit", class: "primary" }));

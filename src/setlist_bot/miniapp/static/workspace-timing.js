@@ -50,7 +50,7 @@ function button(label, action, primary = false) {
 
 export function historyButton({ language, read, select, timing = false }) {
   const t = words[language];
-  return button(t.history, () => {
+  const control = button(t.history, () => {
     const dialog = element("dialog", "", { class: "shared-tools", "aria-label": t.history });
     const list = element("div");
     const status = element("p", "", { role: "status" });
@@ -90,6 +90,11 @@ export function historyButton({ language, read, select, timing = false }) {
     }
     void load(0);
   });
+  if (!timing) {
+    const hint = language === "en" ? "(use a past performance as a template)" : "(взять прошлое как шаблон)";
+    control.replaceChildren(element("strong", t.history), " ", element("em", hint));
+  }
+  return control;
 }
 function dateAt(date, offset, language) {
   const current = new Date(`${date}T00:00:00Z`);

@@ -20,7 +20,7 @@ async def invitation(c: Controller, member: Membership) -> Response:
     require(c.private and member.user_id == c.user.id, "forbidden")
     group = await Team(c.store, c.user).validate(member)
     assert member.invitation is not None
-    return Response(
+    response = Response(
         c.t(
             "team_roles_invitation" if member.status == "active" else "team_invitation",
             group=group.name,
@@ -34,6 +34,14 @@ async def invitation(c: Controller, member: Membership) -> Response:
             (c.t("team_decline"), f"tm_no {member.id.hex} {member.version}"),
         ],
     )
+    if c.miniapp_public_base_url:
+        key = "miniapp_team_invitation"
+        response.buttons.append((c.t("miniapp_team_invitation"), key))
+        response.web_apps[key] = (
+            c.miniapp_public_base_url.rstrip("/")
+            + f"/miniapp/?workspace=1&view=team-inbox&focus=team-{member.id}"
+        )
+    return response
 
 
 async def members(c: Controller, group_id: UUID, page: int = 0) -> Response:

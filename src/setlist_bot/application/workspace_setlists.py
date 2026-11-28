@@ -165,7 +165,8 @@ class WorkspaceSetlists:
                 and not submission.pending_delivery,
                 "not_found",
             )
-            snapshot = submission.snapshot
+            row: Submission | Revision = submission
+            base = await self.lists.proposal_base_version(setlist)
         else:
             require(kind == "revision", "input")
             revision = await self.store.get(Revision, identifier)
@@ -173,8 +174,22 @@ class WorkspaceSetlists:
                 revision.group_id == group_id and revision.setlist_id == setlist.id,
                 "not_found",
             )
-            snapshot = revision.snapshot
-        return {"entries": entries(snapshot)}
+            row = revision
+            base = setlist.version
+        return {
+            "entries": entries(row.snapshot),
+            "variant": {
+                "id": str(row.id),
+                "kind": kind,
+                "author": await self.groups.name(group_id, row.author_id),
+                "applied": isinstance(row, Submission) and row.applied,
+                "declined": isinstance(row, Submission) and row.declined,
+                "stale": isinstance(row, Submission)
+                and row.snapshot.get("shared_version", base) < base,
+                "number": row.number if isinstance(row, Revision) else None,
+                "action": row.action if isinstance(row, Revision) else None,
+            },
+        }
 
     async def requests(
         self, group_id: UUID, concert_id: UUID, *, viewed: set[str] | None = None

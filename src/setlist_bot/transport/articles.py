@@ -1,6 +1,6 @@
 """RU: Табличный каталог Telegram. EN: Pure, bounded Article rendering without API calls."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from setlist_bot.domain.display import entry_labels, pause_title
@@ -15,6 +15,7 @@ class ArticlePage:
     blocks: list[dict[str, Any]]
     text: str
     buttons: list[tuple[str, str]]
+    markup_buttons: list[tuple[str, str]] = field(default_factory=list)
 
 
 def setlist_articles(heading: str, snapshot: dict[str, Any], language: str) -> list[ArticlePage]:

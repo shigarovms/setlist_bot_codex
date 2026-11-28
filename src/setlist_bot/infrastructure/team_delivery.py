@@ -1,5 +1,6 @@
 """Deliver current team invitations with recipient and lifecycle checks."""
 
+import os
 from uuid import UUID
 
 from aiogram import Bot
@@ -27,7 +28,13 @@ async def deliver_team(bot: Bot, uow: PostgresUnitOfWork, event: Outbox) -> bool
             else member.user_id,
         )
         require(person.telegram_id == event.chat_id, "forbidden")
-        c = Controller(uow.store, person, person.telegram_id, private=True)
+        c = Controller(
+            uow.store,
+            person,
+            person.telegram_id,
+            private=True,
+            miniapp_public_base_url=os.environ.get("MINIAPP_PUBLIC_BASE_URL", ""),
+        )
         if event.support_kind == "team":
             require(member.version == event.payload["version"], "input_expired")
             response = await invitation(c, member)

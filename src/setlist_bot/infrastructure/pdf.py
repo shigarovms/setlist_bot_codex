@@ -168,14 +168,14 @@ class PdfDocuments:
             return counts[size]
 
         low, high, best = MIN_FITTED_SIZE, 40, MIN_FITTED_SIZE
-        target = config["pages"]
+        target = pages(STAGE_SIZE) if config["pages"] == "auto" else config["pages"]
         while low <= high:
             middle = (low + high) // 2
             if pages(middle) <= target:
                 best, low = middle, middle + 1
             else:
                 high = middle - 1
-        result: dict[str, Any] = {"font_size": best, "pages": pages(best)}
+        result: dict[str, Any] = {"font_size": best, "pages": pages(best), "target_pages": target}
         if best < STAGE_SIZE:
             result["legibility"] = "very_small" if best < VERY_SMALL_SIZE else "small"
             result["recommended_pages"] = pages(STAGE_SIZE)

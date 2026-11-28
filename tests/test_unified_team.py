@@ -1,7 +1,9 @@
 """Consent, access isolation and replacement completion across the unified team."""
 
 import pytest
+from aiogram import Bot
 from test_staffing import invite, reply, setup_slots
+from test_telegram import FakeTelegram
 
 from setlist_bot.application.groups import Groups
 from setlist_bot.application.staffing import Staffing
@@ -9,6 +11,7 @@ from setlist_bot.application.team import Team
 from setlist_bot.domain.entities import GigInvitation, Membership, StaffContact, StaffReplacement
 from setlist_bot.domain.rules import AppError
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
+from setlist_bot.main import deliver_one_outbox
 from setlist_bot.transport.controller import Controller
 from setlist_bot.transport.staffing_lineups import event_lineup
 
@@ -44,7 +47,7 @@ async def test_register_existing_members_see_roles_without_starting_an_applicati
 
 
 async def test_accept_team_invitation_grants_membership_and_all_roles_without_register(
-    engine, world
+    engine, world, monkeypatch
 ):
     async with PostgresUnitOfWork(engine) as uow:
         row = await Team(uow.store, world.admin).invite(
@@ -58,6 +61,15 @@ async def test_accept_team_invitation_grants_membership_and_all_roles_without_re
     async with PostgresUnitOfWork(engine) as uow:
         with pytest.raises(AppError, match="forbidden"):
             await Groups(uow.store, world.stranger).access(world.group.id)
+    monkeypatch.setenv("MINIAPP_PUBLIC_BASE_URL", "https://example.org")
+    fake = FakeTelegram()
+    async with Bot("123456:TEST", session=fake) as bot:
+        assert await deliver_one_outbox(bot, engine)
+    (notice,) = fake.sent
+    assert notice.chat_id == world.stranger.telegram_id
+    accept, decline, shortcut = [row[0] for row in notice.reply_markup.inline_keyboard]
+    assert accept.callback_data.startswith("tm_yes ") and decline.callback_data.startswith("tm_no ")
+    assert shortcut.web_app.url.endswith(f"view=team-inbox&focus=team-{identifier}")
     async with PostgresUnitOfWork(engine) as uow:
         row = await Team(uow.store, world.stranger).respond(identifier, version, True)
         assert row.status == "active" and row.role == "member"

@@ -908,6 +908,12 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
                 response.edit_message_ids[index] if index < len(response.edit_message_ids) else None
             )
             markup = batches[0] if batches else None
+            if page.markup_buttons:
+                page_markup = await anext(keyboards(page.markup_buttons))
+                markup = InlineKeyboardMarkup(
+                    inline_keyboard=(markup.inline_keyboard if markup else [])
+                    + page_markup.inline_keyboard
+                )
             article = InputRichMessage.model_validate(
                 {"blocks": page.blocks, "skip_entity_detection": True}
             )
@@ -954,7 +960,10 @@ async def send_response(bot: Bot, chat_id: int, response: Response) -> list[Mess
                         chat_id,
                         Response(
                             page.text,
-                            page.buttons + (response.buttons if response.articles_keyboard else []),
+                            page.buttons
+                            + (response.buttons if response.articles_keyboard else [])
+                            + page.markup_buttons,
+                            web_apps=response.web_apps,
                             edit_message_ids=[identifier] if identifier is not None else [],
                         ),
                     )

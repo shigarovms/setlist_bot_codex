@@ -229,7 +229,7 @@ async def test_timing_warning_buttons_and_delivery_recheck(engine, world, monkey
         assert await deliver_one_outbox(bot, engine)
         (warning,) = telegram.sent
         assert warning.chat_id == world.admin.telegram_id and "19:00" in warning.text
-        open_link, send, mark = [row[0] for row in warning.reply_markup.inline_keyboard]
+        send, mark, open_link = [row[0] for row in warning.reply_markup.inline_keyboard]
         assert open_link.web_app and "view=timing" in open_link.web_app.url
         assert send.callback_data.startswith("pt_send ")
         async with PostgresUnitOfWork(engine) as uow:

@@ -67,17 +67,17 @@ def timing_response(
     if not warning:
         response.articles = pages
         response.articles_keyboard = True
+    if warning and rows:
+        response.buttons.append((tr(language, "timing_notify"), f"pt_send {message.id.hex}"))
+        if not data["preliminary"]:
+            response.buttons.append((tr(language, "timing_mark"), f"pt_pre {message.id.hex}"))
     if base_url:
         key = "timing_open"
         response.web_apps[key] = (
             base_url.rstrip("/") + f"/miniapp/?workspace=1&view=timing&band={group.id}"
             f"&performance={event.id}&from=notification"
         )
-        response.buttons.append((tr(language, "timing_edit" if warning else "timing_title"), key))
-    if warning and rows:
-        response.buttons.append((tr(language, "timing_notify"), f"pt_send {message.id.hex}"))
-        if not data["preliminary"]:
-            response.buttons.append((tr(language, "timing_mark"), f"pt_pre {message.id.hex}"))
+        response.buttons.append((tr(language, "miniapp_timing"), key))
     return response
 
 

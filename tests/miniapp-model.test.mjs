@@ -8,6 +8,27 @@ import {
   clock,
   asText,
 } from "../src/setlist_bot/miniapp/static/model.js";
+import { workspaceLaunch } from "../src/setlist_bot/miniapp/static/workspace-launch.js";
+
+test("Telegram shortcuts select only supported Mini App screens and exact records", () => {
+  const band = "10".repeat(16);
+  const performance = "20".repeat(16);
+  const target = "30".repeat(16);
+  const uuid = "30303030-3030-3030-3030-303030303030";
+  assert.deepEqual(workspaceLaunch(`team_${band}`), { band, view: "team", roles: "1" });
+  assert.deepEqual(workspaceLaunch(`ws_catalog_${band}`), { band, view: "repertoire" });
+  assert.deepEqual(workspaceLaunch(`ws_songs_${band}_${target}`),
+    { band, view: "repertoire", proposals: "1", proposal: uuid, focus: `catalog-${uuid}` });
+  assert.deepEqual(workspaceLaunch(`ws_event_${band}_${performance}`),
+    { band, performance, view: "performance" });
+  for (const [section, key] of [["approved", "revision"], ["request", "decision"], ["variant", "variant"]]) {
+    assert.deepEqual(workspaceLaunch(`ws_${section}_${band}_${performance}_${target}`),
+      { band, performance, view: "performance", [key]: uuid });
+  }
+  for (const invalid of [`ws_approved_${band}_${performance}`, `ws_catalog_${band}_${performance}`, `ws_else_${band}`, ""]) {
+    assert.deepEqual(workspaceLaunch(invalid), {});
+  }
+});
 
 test("timing preserves explicit pauses, first lead-in and zero overrides", () => {
   const song = {

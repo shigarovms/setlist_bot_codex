@@ -6,8 +6,9 @@ import pytest
 from pypdf import PdfReader
 from reportlab.lib.pagesizes import A4
 
+from setlist_bot.domain.export_settings import workspace_settings
 from setlist_bot.domain.importing import parse_import
-from setlist_bot.infrastructure.pdf import PdfDocuments
+from setlist_bot.infrastructure.pdf import STAGE_SIZE, PdfDocuments
 
 
 def sample_payload():
@@ -126,6 +127,22 @@ def test_fit_chooses_the_largest_size_that_matches_target_and_manual_preview_agr
     assert max(sizes) == fitted["font_size"] < 40
     payload["settings"] = {"font": "open", "size": fitted["font_size"] + 1, "align": "left"}
     assert documents.preview(payload, ("musicians",), "en")["page_counts"]["musicians"] > 2
+
+
+def test_automatic_page_count_keeps_stage_size_and_matches_the_export():
+    payload = sample_payload()
+    payload["snapshot"]["blocks"][0]["items"] *= 5
+    documents = PdfDocuments()
+    manual = {"font": "open", "size": STAGE_SIZE, "align": "left"}
+    payload["settings"] = workspace_settings(manual)
+    assert payload["settings"] == manual
+    stage = documents.preview(payload, ("musicians",), "en")
+    payload["settings"] = {**workspace_settings({}), **manual}
+    auto = documents.preview(payload, ("musicians",), "en")
+    assert auto["font_size"] >= STAGE_SIZE and "legibility" not in auto
+    assert auto["target_pages"] == stage["page_counts"]["musicians"] > 1
+    pdf = reader(documents.render(payload, "musicians", "en", True))
+    assert len(pdf.pages) == auto["page_counts"]["musicians"] == auto["target_pages"]
 
 
 def test_lights_include_fields_timing_blocks_encore_and_positive_lead_ins():

@@ -180,12 +180,10 @@ async def test_invitation_button_and_browser_login_open_same_guest_invitation(
             if fake.sent:
                 break
     assert fake.sent and fake.sent[-1].chat_id == 3
-    webapp = next(
-        button.web_app
-        for row in fake.sent[-1].reply_markup.inline_keyboard
-        for button in row
-        if button.web_app
-    )
+    buttons = [button for row in fake.sent[-1].reply_markup.inline_keyboard for button in row]
+    assert buttons[0].callback_data
+    webapp = buttons[-1].web_app
+    assert webapp
     assert parse_qs(urlsplit(webapp.url).query)["invitation"] == [str(invite_id)]
     config = settings(engine).model_copy(update={"browser_login_secret": SecretStr("test-only")})
 

@@ -15,10 +15,10 @@ import { gigLabel, showGigs } from "./workspace-gigs.js";
 import { scheduleLabel, showScheduleSettings } from "./workspace-schedule.js";
 import { profileLabel, showProfile } from "./workspace-profile.js";
 import { helpTitle, showHelp } from "./workspace-help.js";
+import { workspaceLaunch } from "./workspace-launch.js";
 
 const copy = withBotLabels("workspace", {
   ru: {
-    upcoming: "Предстоящие",
     menu: "Меню", performanceActions: "Действия", scheduleOptions: "Настройки", addInBulk: "Добавить списком", close: "Закрыть",
     participants: "Состав участников",
     noBands: "У вас пока нет коллективов.",
@@ -45,14 +45,14 @@ const copy = withBotLabels("workspace", {
     importSongs: "Импорт таблицы", adminOnly: "Импорт доступен администратору коллектива.",
     performance: "Выступление", shared: "Общий сет-лист", approvedVersion: "Утверждён", workingVersion: "В работе",
     approvedSetlist: "Сет-лист утверждён",
-    published: "Ваш вариант отправлен в чат коллектива. Администратор увидит его во «Входящих запросах».",
+    published: "Ваш вариант отправлен в чат коллектива. Администратор увидит его в разделе «Запросы участников».",
     version: "Версия", total: "Итого", planned: "План", noEntries: "В общем сет-листе пока нет песен.", pause: "Пауза",
   },
   en: {
-    upcoming: "Upcoming", approvedSetlist: "Setlist approved",
+    approvedSetlist: "Setlist approved",
     menu: "Menu", performanceActions: "Actions", scheduleOptions: "Settings", addInBulk: "Add in bulk", close: "Close",
     participants: "Participants",
-    published: "Your version was sent to the band chat. An admin will see it in Incoming Requests.",
+    published: "Your version was sent to the band chat. An admin will see it in Participant Requests.",
     noBands: "You have no bands yet.",
     noPerformances: "There are no available performances here yet.",
     restricted: "Drafts are available to band admins.",
@@ -81,14 +81,10 @@ const copy = withBotLabels("workspace", {
 });
 
 export const workspaceParams = new URLSearchParams(location.search);
+
 if (!["band", "view", "home"].some(key => workspaceParams.has(key))) {
   const start = new URLSearchParams(window.Telegram?.WebApp?.initData ?? "").get("start_param");
-  const band = /^team_([0-9a-f]{32})$/.exec(start ?? "")?.[1];
-  if (band) {
-    workspaceParams.set("band", band);
-    workspaceParams.set("view", "team");
-    workspaceParams.set("roles", "1");
-  }
+  for (const [key, value] of Object.entries(workspaceLaunch(start ?? ""))) workspaceParams.set(key, value);
 }
 
 export function bandUrl(band, past = "0", page = 0) {
@@ -201,6 +197,8 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
   const fromInbox = workspaceParams.has("from_inbox");
   const focusId = workspaceParams.get("focus");
   let initialDecision = workspaceParams.get("decision");
+  let linkedVariant = workspaceParams.has("revision") ? { id: workspaceParams.get("revision"), kind: "revision" }
+    : workspaceParams.has("variant") ? { id: workspaceParams.get("variant"), kind: "submission" } : null;
   const staffing = band && (view === "staff-contacts" ? "contacts" : view === "staff-lineups" ? "lineups" : "");
   const staffRecord = staffing && workspaceParams.get("record");
   const song = workspaceParams.get("song") || "";
@@ -255,6 +253,7 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
       staffRecord ? staffingUrl(staffing, page, query) : teamUrl()];
     if (repertoire) return song || proposals || importing || music
       ? [t("toSongs"), repertoireList()] : [t("performances"), bandUrl(band)];
+    if (band && past === "1") return [t("performances"), bandUrl(band)];
     if (band || inbox || allInbox || help || bandTrash) return [t("bands"), homeUrl()];
     return profile ? [t("back"), homeUrl()] : null;
   }
@@ -353,7 +352,9 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
       else if (allInbox) data = await api("inbox");
       else if (inbox) data = await api("team_inbox");
       else if (music) data = await api("music_search", { band });
-      else if (proposals) data = await api("repertoire_proposals", { band, page });
+      else if (proposals) data = await api("repertoire_proposals", {
+        band, page, ...(workspaceParams.has("proposal") ? { proposal: workspaceParams.get("proposal") } : {}),
+      });
       else if (repertoire) data = await api("repertoire", { band, archived, page, query, song });
       else if (band) data = await api("performances", { band, past, page });
       else {
@@ -426,7 +427,11 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
       else if (repertoire) showRepertoire(data);
       else if (band) showPerformances(data);
       else showHome(data);
-      if (focusId) document.getElementById(focusId)?.scrollIntoView({ block: "center" });
+      if (focusId) {
+        const slot = roster && workspaceParams.get("focus_slot");
+        const target = document.getElementById(focusId) || (slot ? document.getElementById(`role-${slot}`) : null);
+        target?.scrollIntoView({ block: "center" });
+      }
       if (performance && location.hash === "#shared-list")
         document.getElementById("shared-list")?.scrollIntoView({ block: "start" });
       if (performance && workspaceParams.get("published") === "1") {
@@ -625,25 +630,18 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
     return button;
   }
   function showPerformances(data) {
+    const pastPage = past === "1";
     header.append(actionsMenu(t("menu"),
       element("a", t("repertoire"), { href: repertoireUrl(band) }),
       element("a", teamLabel(language, "title"), { href: teamUrl() }),
       element("a", bandSettingsTitle(language), { href: `${bandUrl(band, past, page)}&view=band-settings` }),
+      element("a", t("past"), { href: bandUrl(band, "1"), ...(pastPage ? { "aria-current": "page" } : {}) }),
+      ...(data.admin ? [element("a", performanceLabel(language, "trash"),
+        { href: `${bandUrl(band, past)}&view=performance-trash` })] : []),
     ));
-    const tabs = element("nav", "", { class: "workspace-nav section-tabs", "aria-label": t("events") });
-    for (const [tab, key] of [["0", "upcoming"], ["1", "past"]]) {
-      tabs.append(element("a", t(key), {
-        href: bandUrl(band, tab), ...(past === tab ? { "aria-current": "page" } : {}),
-      }));
-    }
-    content.append(element("h2", t("events")), tabs);
-    if (data.admin) {
-      const actions = element("div", "", { class: "toolbar" });
-      actions.append(managePerformance("create"), element("a", performanceLabel(language, "trash"),
-        { href: `${bandUrl(band, past)}&view=performance-trash` }));
-      content.append(actions);
-    }
-    if (data.timing_assignments?.length) {
+    content.append(element("h2", t(pastPage ? "past" : "events")));
+    if (!pastPage && data.admin) content.append(managePerformance("create"));
+    if (!pastPage && data.timing_assignments?.length) {
       content.append(element("h3", timingLabel(language)));
       const assigned = element("nav", "", { class: "workspace-nav" });
       for (const event of data.timing_assignments)
@@ -814,11 +812,12 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
       editorButton.addEventListener("click", () => openDraft(info.id, editorButton));
     }
     mountSharedSetlist({
-      root: content, sharedHeading, data, language, editorButton, decision: initialDecision,
+      root: content, sharedHeading, data, language, editorButton, decision: initialDecision, linkedVariant,
       read: (operation, params = {}, method) => api(operation, { band, performance, ...params }, method),
       request: sharedApi, refresh: load, status: message => { status.textContent = message; },
     });
     initialDecision = null;
+    linkedVariant = null;
     if (list.entries.length) {
       const rows = element("ol", "", { class: "workspace-list shared-setlist", "aria-label": t("shared") });
       const numbers = numbered(list.entries);
@@ -962,7 +961,7 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
       list.append(item);
     }
     content.append(list);
-    showPages(data.has_next, index => repertoireUrl(band, { proposals: true, page: index }));
+    showPages(data.has_next, index => repertoireUrl(band, { proposals: true, page: index }), data.page);
   }
   function decisionButtons(proposalId, container) {
     const existing = decisions.get(proposalId);
@@ -1000,10 +999,10 @@ export async function showWorkspace({ api, openSong, authenticated, onBack }) {
       decisionButtons(proposalId, container);
     }
   }
-  function showPages(hasNext, href) {
+  function showPages(hasNext, href, currentPage = page) {
     const pages = element("nav", "", { class: "workspace-nav" });
-    if (page > 0) pages.append(element("a", t("previous"), { href: href(page - 1) }));
-    if (hasNext) pages.append(element("a", t("next"), { href: href(page + 1) }));
+    if (currentPage > 0) pages.append(element("a", t("previous"), { href: href(currentPage - 1) }));
+    if (hasNext) pages.append(element("a", t("next"), { href: href(currentPage + 1) }));
     if (pages.childElementCount) content.append(pages);
   }
   let opening = false;

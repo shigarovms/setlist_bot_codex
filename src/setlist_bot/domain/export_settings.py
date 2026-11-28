@@ -22,8 +22,13 @@ def settings(value: dict[str, Any]) -> dict[str, Any]:
         "input",
     )
     if "pages" in result:
-        require(type(result["pages"]) is int and 1 <= result["pages"] <= MAX_TARGET_PAGES, "input")
+        pages = result["pages"]
+        require(pages == "auto" or type(pages) is int and 1 <= pages <= MAX_TARGET_PAGES, "input")
     return result
+
+
+def workspace_settings(value: dict[str, Any]) -> dict[str, Any]:
+    return settings(value or {"pages": "auto"})
 
 
 def validated_settings(value: Any) -> dict[str, Any]:

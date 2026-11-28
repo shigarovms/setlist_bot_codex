@@ -17,6 +17,8 @@ from setlist_bot.domain.entities import GigInvitation, Outbox, StaffReplacement
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.main import deliver_one_outbox
 from setlist_bot.miniapp.app import create_app
+from setlist_bot.transport.controller import Controller
+from setlist_bot.transport.staffing import invitation_view
 
 
 async def replacement(client, engine, actor, session, *, ok=True, **command):
@@ -50,6 +52,18 @@ async def test_guest_requests_replacement_and_admin_self_assignment_updates_rost
         await post(client, 2, "open_gig", source_query, 403)
         request = await replacement(client, engine, 3, guest, action="request", version=version)
         assert request["replacement_status"] == "pending"
+        async with PostgresUnitOfWork(engine) as uow:
+            controller = Controller(
+                uow.store,
+                world.admin,
+                world.admin.telegram_id,
+                private=True,
+                miniapp_public_base_url="https://example.org",
+            )
+            notice = await invitation_view(controller, source, admin_notice=True)
+            assert notice.buttons[0][1].startswith("sf_go ")
+            shortcut = notice.web_apps[notice.buttons[-1][1]]
+            assert f"focus=replacement-{request['replacement']['id']}" in shortcut
         assert (await get(client, 3, "gig_card", **source_query))["invitation"][
             "replacement"
         ] == request["replacement"]

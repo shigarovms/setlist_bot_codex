@@ -891,6 +891,29 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.wait(
                     "document.querySelector('#workspace-content').innerText.includes('Утверждён')"
                 )
+                from setlist_bot.domain.entities import Setlist
+
+                async with PostgresUnitOfWork(engine) as uow:
+                    (approved,) = await uow.store.find(Setlist, concert_id=world.concert.id)
+                start = (
+                    f"ws_approved_{world.group.id.hex}_{world.concert.id.hex}_"
+                    f"{approved.approved_revision_id.hex}"
+                )
+                shortcut_script = await browser.call(
+                    "Page.addScriptToEvaluateOnNewDocument",
+                    {
+                        "source": "window.Telegram.WebApp.initData = "
+                        + json.dumps(signed(start_param=start)),
+                    },
+                )
+                await browser.call("Page.navigate", {"url": f"{origin}/miniapp/"})
+                await browser.wait(
+                    "document.querySelector('dialog[open] .shared-setlist')?.innerText"
+                    ".includes('Пауза для настройки')"
+                )
+                await browser.click_named("dialog[open] button", "📄 Скачать PDF")
+                await browser.wait("!!document.querySelector('#workspace-pdf-mode')")
+                await browser.call("Page.removeScriptToEvaluateOnNewDocument", shortcut_script)
                 await browser.call(
                     "Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&band={world.group.id}"}
                 )
@@ -909,14 +932,17 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
                 await browser.wait(
                     "document.querySelector('.pdf-page-preview')?.textContent.includes('Страниц:')"
                 )
-                await browser.js("""
-                    const mode = document.getElementById('workspace-pdf-mode');
-                    mode.value = 'pages';
-                    mode.dispatchEvent(new Event('change', { bubbles: true }));
-                """)
-                await browser.wait(
-                    "document.querySelector('.pdf-page-preview')?.innerText"
-                    ".includes('Размер шрифта:')"
+                assert (
+                    await browser.js("document.getElementById('workspace-pdf-mode').value")
+                    == "pages"
+                )
+                assert await browser.js(
+                    "document.querySelector('.pdf-page-preview').innerText"
+                    ".includes('Подходит для чтения со сцены')"
+                )
+                assert (
+                    await browser.js("document.getElementById('workspace-pdf-pages').valueAsNumber")
+                    >= 1
                 )
                 downloads = tmp_path / "downloads"
                 await browser.call(
@@ -1531,9 +1557,15 @@ async def test_phone_editor_drag_history_pause_save_and_live_themes(
 
 async def browser_manage_performance(browser, engine, group_id, origin):
     await browser.call("Page.navigate", {"url": f"{origin}/miniapp/?workspace=1&band={group_id}"})
-    await browser.click_named("#workspace-content button", "Новое выступление")
+    assert not await browser.js("!!document.querySelector('.section-tabs')")
+    await browser.click_menu("Прошедшие")
+    await browser.wait(
+        "document.querySelector('#workspace-content h2')?.textContent === 'Прошедшие'"
+    )
+    await browser.click_back("К выступлениям")
+    await browser.click_named("#workspace-content button", "+ Новое выступление")
     await browser.wait("!!document.getElementById('workspace-performance-performance_type')")
-    await browser.click_named("dialog[open] button", "История")
+    await browser.click_named("dialog[open] button", "История (взять прошлое как шаблон)")
     await browser.click_named("dialog[open] button", "Взять за шаблон")
     await browser.wait("!document.querySelector('dialog[aria-label=История]')")
     assert await browser.js("document.getElementById('workspace-performance-date').value") == ""
@@ -1544,6 +1576,20 @@ async def browser_manage_performance(browser, engine, group_id, origin):
         document.querySelector('#performance-copy_lineup').checked &&
         document.querySelector('#performance-copy_setlist').checked
     """)
+    assert (
+        await browser.js(
+            "document.querySelector('#workspace-performance-lineup').selectedOptions[0].textContent"
+        )
+        == "Состав взят из шаблона"
+    )
+    await browser.js("document.querySelector('#performance-copy_lineup').click()")
+    assert (
+        await browser.js(
+            "document.querySelector('#workspace-performance-lineup').selectedOptions[0].textContent"
+        )
+        == "Без сохранённого состава"
+    )
+    await browser.js("document.querySelector('#performance-copy_lineup').click()")
     await browser.js("""
         document.getElementById('workspace-performance-date').value = '2099-06-04';
         document.getElementById('workspace-performance-title').value = 'Из истории';
@@ -1567,7 +1613,7 @@ async def browser_manage_performance(browser, engine, group_id, origin):
     )
     await browser.click_back("К выступлению")
     await browser.click_back("К выступлениям")
-    await browser.click_named("#workspace-content button", "Новое выступление")
+    await browser.click_named("#workspace-content button", "+ Новое выступление")
     await browser.wait("!!document.getElementById('workspace-quick-performance')")
     await browser.call(
         "Emulation.setDeviceMetricsOverride",
@@ -1692,7 +1738,7 @@ async def browser_manage_performance(browser, engine, group_id, origin):
     await process_catalog_request(engine)
     await browser.click_named("dialog[open] button", "Подтвердить")
     await process_catalog_request(engine)
-    await browser.click_named("#workspace-content a", "Корзина выступлений")
+    await browser.click_menu("Корзина выступлений")
     await browser.wait(
         "document.querySelector('.workspace-list h3')?.textContent === 'Летний концерт'"
     )
@@ -2014,7 +2060,13 @@ async def browser_profile(browser, engine, origin):
         "'Бас-гитара, Звукорежиссёр FOH')"
     )
     await browser.click_named("#workspace-content button", "Оформление PDF")
-    await browser.js("document.getElementById('profile-pdf-size').value = '30'")
+    assert await browser.js("document.getElementById('profile-pdf-mode').value") == "pages"
+    await browser.js("""
+        const mode = document.getElementById('profile-pdf-mode');
+        mode.value = 'size';
+        mode.dispatchEvent(new Event('change', { bubbles: true }));
+        document.getElementById('profile-pdf-size').value = '30';
+    """)
     await browser.click_named("dialog[open] button", "Сохранить")
     await process_catalog_request(engine)
     await browser.wait(

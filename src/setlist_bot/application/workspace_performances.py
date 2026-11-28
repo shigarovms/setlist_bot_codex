@@ -171,6 +171,16 @@ class WorkspacePerformances:
         recommended = [row for row in past if counts[row.id]]
         recommended.sort(key=lambda row: counts[row.id], reverse=True)
         start = page * 10
+        with_lineup = (
+            {
+                slot.concert_id
+                for slot in await self.store.find(
+                    GigSlot, group_id=group_id, removed=False, required=True
+                )
+            }
+            if timing_for is None
+            else set()
+        )
 
         def item(row: Concert) -> dict[str, Any]:
             result = {
@@ -182,6 +192,8 @@ class WorkspacePerformances:
             }
             if timing_for is not None:
                 result["rows"] = row.timing["rows"]
+            else:
+                result["has_lineup"] = row.id in with_lineup
             return result
 
         return {

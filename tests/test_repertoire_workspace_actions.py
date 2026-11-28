@@ -1,4 +1,4 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from aiogram import Bot
@@ -11,6 +11,7 @@ from setlist_bot.domain.entities import DeploymentIdentity, Group, Membership, O
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.main import deliver_one_outbox
 from setlist_bot.miniapp.app import create_app
+from setlist_bot.transport.controller import Controller
 
 
 def headers(actor):
@@ -53,6 +54,24 @@ async def test_repertoire_mutations_and_decisions_share_the_bot_queue(engine, wo
         assert len((await get(client, 2, "repertoire", band=band))["songs"]) == 1
         reviews = (await get(client, 1, "repertoire_proposals", band=band))["proposals"]
         assert len(reviews) == 1 and reviews[0]["fields"]["aliases"] == request["fields"]["aliases"]
+        proposal_id = reviews[0]["id"]
+        async with PostgresUnitOfWork(engine) as uow:
+            controller = Controller(
+                uow.store,
+                world.admin,
+                -100,
+                private=False,
+                bot_username="example_bot",
+                miniapp_public_base_url="https://example.org",
+            )
+            proposals = await controller.execute("/proposals")
+            yes, no, shortcut = [action for _, action in proposals.buttons]
+            assert (yes, no) == (f"decide yes {proposal_id}", f"decide no {proposal_id}")
+            assert shortcut.endswith(f"ws_songs_{world.group.id.hex}_{UUID(proposal_id).hex}")
+        focus = await get(
+            client, 1, "repertoire_proposals", band=band, page=1, proposal=proposal_id
+        )
+        assert focus["page"] == 0 and focus["proposals"] == reviews
         decision = {"proposal_id": reviews[0]["id"], "approve": True, "request_id": str(uuid4())}
         await post(client, 2, "catalog_decide", {**member, **decision}, 403)
         await post(client, 1, "catalog_decide", {**admin, **decision})

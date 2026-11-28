@@ -348,8 +348,6 @@ async def invitation_view(
     if event.extra_info:
         text += "\n\n" + event.extra_info
     buttons = []
-    if profile := fallback_profile(person):
-        buttons.append((str(person.telegram_id), profile))
     if own and not admin_notice:
         if row.status == "accepted":
             buttons.append(
@@ -457,11 +455,13 @@ async def invitation_view(
                 )
             )
         buttons.append((c.t("staff_open_lineup"), f"sf_lineup {event.id.hex}"))
+    replacement_id = row.replacement_id
     if admin_notice:
         # RU: В служебных уведомлениях нет личных кнопок участника и экспорта.
         # EN: Keep notification actions contextual, even when actor and invitee coincide.
         buttons = [(c.t("staff_open_lineup"), f"sf_lineup {event.id.hex}")]
         for request in await c.store.find(StaffReplacement, source_id=row.id, status="pending"):
+            replacement_id = request.id
             if request.candidate_ref:
                 text += "\n" + c.t("staff_proposed_candidate", name=f"@{request.candidate_ref}")
             buttons.insert(
@@ -481,22 +481,28 @@ async def invitation_view(
                     action(c, "swap", invitation_id=str(row.id), version=row.version),
                 ),
             )
+    if not admin_notice and (profile := fallback_profile(person)):
+        buttons.append((str(person.telegram_id), profile))
     response = Response(text, buttons)
-    if admin_notice and c.miniapp_public_base_url:
+    if admin_notice and c.private and c.miniapp_public_base_url:
         key = "miniapp_admin_roster"
-        response.buttons.insert(0, (c.t("staff_open_in_app"), key))
+        focus = f"replacement-{replacement_id}" if replacement_id else f"role-{row.slot_id}"
+        label = "staff_swap_in_app" if replacement_id else "staff_roster_in_app"
+        response.buttons.append((c.t(label), key))
         response.web_apps[key] = (
             c.miniapp_public_base_url.rstrip("/")
             + f"/miniapp/?workspace=1&band={group.id}&view=lineup&performance={event.id}"
+            f"&focus={focus}&focus_slot={row.slot_id}"
         )
     if (
         own
         and not admin_notice
+        and c.private
         and c.miniapp_public_base_url
         and row.status in OPEN | {"confirmed"}
     ):
         key = "miniapp_gig"
-        response.buttons.insert(0, (c.t("staff_open_in_app"), key))
+        response.buttons.append((c.t("staff_open_in_app"), key))
         response.web_apps[key] = (
             c.miniapp_public_base_url.rstrip("/")
             + f"/miniapp/?workspace=1&view=my-gigs&invitation={row.id}"

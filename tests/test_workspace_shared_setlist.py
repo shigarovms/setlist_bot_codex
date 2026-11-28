@@ -17,11 +17,14 @@ from setlist_bot.domain.entities import (
     Membership,
     Outbox,
     PersonalDraft,
+    RuntimeStatus,
     Submission,
+    now,
 )
 from setlist_bot.infrastructure.database import PostgresUnitOfWork
 from setlist_bot.main import deliver_one_outbox
 from setlist_bot.miniapp.app import create_app
+from setlist_bot.transport.controller import Controller
 from setlist_bot.transport.publications import queue_publication
 
 
@@ -139,15 +142,25 @@ async def test_seen_requests_keep_counts_and_are_scoped_to_admin_and_performance
         await post(client, 3, "shared_requests_seen", {**query, "ids": [str(first.id)]}, 403)
 
 
-async def test_variants_apply_and_requests_for_approval_and_reopening(engine, world):
+async def test_variants_apply_and_requests_for_approval_and_reopening(engine, world, monkeypatch):
     await setup_workspace(engine, world)
+    monkeypatch.setenv("MINIAPP_PUBLIC_BASE_URL", "https://example.org")
     telegram = sender(engine)
     group_id, concert_id = world.group.id, world.concert.id
     async with PostgresUnitOfWork(engine) as uow:
+        uow.store.add(
+            RuntimeStatus(
+                component="bot",
+                state="ready",
+                updated_at=now(),
+                details={"bot_username": "example_bot"},
+            )
+        )
         lists = Setlists(uow.store, world.member)
         await lists.edit_songs(group_id, concert_id, 0, ["Комета", "Комета"], private=True)
         await queue_publication(uow.store, world.member, group_id, concert_id, 1)
-    async with Bot("123456:TEST", session=FakeTelegram()) as bot:
+    fake = FakeTelegram()
+    async with Bot("123456:TEST", session=fake) as bot:
         assert await deliver_one_outbox(bot, engine)
     query = scope(world)
     async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
@@ -156,10 +169,16 @@ async def test_variants_apply_and_requests_for_approval_and_reopening(engine, wo
         variants = (await get(client, 2, "shared_variants", **query))["variants"]
         assert len(variants) == 1 and not variants[0]["applied"]
         variant = variants[0]["id"]
+        apply, shortcut = [row[0] for row in fake.sent[-1].reply_markup.inline_keyboard]
+        assert apply.callback_data == f"apply_submission {variant}"
+        suffix = f"{group_id.hex}_{concert_id.hex}_{variant.replace('-', '')}"
+        assert shortcut.url == f"https://t.me/example_bot?startapp=ws_variant_{suffix}"
         preview = await get(
             client, 2, "shared_variant", **query, kind="submission", variant=variant
         )
         assert [entry["title"] for entry in preview["entries"]] == ["Комета", "Комета"]
+        assert preview["variant"]["id"] == variant and preview["variant"]["kind"] == "submission"
+        await get(client, 3, "shared_variant", 403, **query, kind="submission", variant=variant)
         before = (await get(client, 1, "performance", **query))["setlist"]
         inbox = await get(client, 1, "shared_requests", **query)
         assert [row["id"] for row in inbox["proposals"]] == [variant]
@@ -194,9 +213,37 @@ async def test_variants_apply_and_requests_for_approval_and_reopening(engine, wo
             ]
             assert len(notices) == 1
             callback = notices[0].buttons[0][1]
+            notice_id = notices[0].id
+        async with Bot("123456:TEST", session=fake) as bot:
+            for _ in range(10):
+                await deliver_one_outbox(bot, engine)
+                async with PostgresUnitOfWork(engine) as uow:
+                    if (await uow.store.get(Outbox, notice_id)).delivered_at is not None:
+                        break
+            else:
+                raise AssertionError("The approval request was not delivered")
+        accept, reject, shortcut = [row[0] for row in fake.sent[-1].reply_markup.inline_keyboard]
+        assert accept.callback_data == callback and reject.callback_data.endswith(" no")
+        target = callback.split()[1]
+        assert shortcut.url.endswith(f"ws_request_{group_id.hex}_{concert_id.hex}_{target}")
         await telegram(callback, private=True, chat=1)
         approved = (await get(client, 2, "performance", **query))["setlist"]
         assert approved["approved"]
+        async with PostgresUnitOfWork(engine) as uow:
+            controller = Controller(
+                uow.store,
+                world.admin,
+                -100,
+                private=False,
+                bot_username="example_bot",
+                miniapp_public_base_url="https://example.org",
+            )
+            await controller.execute(f"use_concert {concert_id}")
+            card = await controller.execute("shared")
+            export = next(action for _, action in card.buttons if action.startswith("export_menu "))
+            assert export and card.buttons[-1][1].startswith(
+                f"https://t.me/example_bot?startapp=ws_approved_{group_id.hex}_{concert_id.hex}_"
+            )
         await get(client, 2, "shared_editor", 403, **query)
         wanted = await action(client, engine, 2, member, "reopen", approved)
         assert wanted["requested"]
@@ -238,6 +285,14 @@ async def test_variants_apply_and_requests_for_approval_and_reopening(engine, wo
             client, 2, "shared_variant", **query, kind="revision", variant=initial["id"]
         )
         assert snapshot["entries"] == []
+        frozen = next(row for row in history if row["action"] == "approved")
+        exact = await get(
+            client, 2, "shared_variant", **query, kind="revision", variant=frozen["id"]
+        )
+        assert (
+            exact["variant"]["action"] == "approved"
+            and exact["variant"]["number"] == approved["version"]
+        )
         await action(client, engine, 2, member, "restore", reopened, variant=initial["id"])
         restored = (await get(client, 2, "performance", **query))["setlist"]
         assert restored["version"] == reopened["version"] + 1 and restored["entries"] == []

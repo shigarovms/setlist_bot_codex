@@ -161,6 +161,7 @@ async def test_preview_and_delivery_use_open_form_without_saving_preset(engine, 
         target = scope(world)
         session = await post(client, 2, "open_shared", target)
         stored = (await get(client, 2, "export_options", **target))["settings"]
+        assert stored["pages"] == "auto"
         appearance = {"font": "serif", "size": 24, "align": "center", "pages": 1}
         selected = {
             "version": 2,

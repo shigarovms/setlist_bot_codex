@@ -87,7 +87,11 @@ async def test_copy_from_history_preserves_choices_and_creates_no_invitations(en
         staffing = Staffing(uow.store, world.admin)
         role = await staffing.role(world.group.id, "Световик")
         saved = await staffing.template(world.group.id, "Свет", [{"role_id": str(role.id)}])
+        empty = await lists.create(world.group.id, current - timedelta(days=2), "Без состава")
     async with TestClient(TestServer(create_app(settings(engine), engine))) as client:
+        history = (await get(client, 1, "performance_history", **band))["performances"]
+        templates = {row["id"]: row["has_lineup"] for row in history}
+        assert templates[str(source.id)] and not templates[str(empty.id)]
         admin = await post(client, 1, "open_repertoire", band)
         cases = [
             (True, True, "none", ["copy_lineup", "copy_setlist"], origin.role_id),

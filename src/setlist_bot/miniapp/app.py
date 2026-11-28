@@ -138,6 +138,7 @@ async def asset(request: web.Request) -> web.Response:
         "modal-scroll.js": "text/javascript",
         "bot-labels.js": "text/javascript",
         "workspace.js": "text/javascript",
+        "workspace-launch.js": "text/javascript",
         "repertoire-import.js": "text/javascript",
         "repertoire-music.js": "text/javascript",
         "shared-setlist.js": "text/javascript",
@@ -545,7 +546,11 @@ async def api(request: web.Request) -> web.Response:
                 if not 0 <= page <= 10000:
                     raise ValueError("Invalid page")
                 return web.json_response(
-                    await Workspace(uow.store, user).proposals(UUID(payload["band"]), page)
+                    await Workspace(uow.store, user).proposals(
+                        UUID(payload["band"]),
+                        page,
+                        proposal_id=UUID(payload["proposal"]) if payload.get("proposal") else None,
+                    )
                 )
             if operation == "repertoire" and request.method == "GET":
                 archived, page = payload.get("archived", "0"), int(payload.get("page", "0"))

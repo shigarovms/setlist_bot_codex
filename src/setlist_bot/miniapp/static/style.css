@@ -949,6 +949,13 @@ pre {
 }
 .performance-readiness { margin-block: var(--section-gap); }
 .readiness-toggle.status-ready { color: var(--text); background: color-mix(in srgb, #2aa055 15%, var(--panel)); }
+#workspace-home button.create-performance {
+  width: 100%;
+  color: var(--text);
+  background: color-mix(in srgb, #2aa055 24%, var(--panel));
+  border-color: color-mix(in srgb, #2aa055 44%, var(--panel));
+  margin-bottom: 12px;
+}
 .readiness-toggle.status-pending { color: var(--danger); }
 .performance-readiness .workspace-list li { display: grid; padding: 0; border: 0; background: transparent; }
 #workspace-home .performance-readiness .workspace-list a,
